@@ -1,0 +1,17 @@
+[package]
+name = "pdf-folio-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+blake3.workspace = true
+image.workspace = true
+lru.workspace = true
+pdfium-render.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+tracing.workspace = true

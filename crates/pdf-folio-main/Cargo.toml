@@ -1,0 +1,17 @@
+[package]
+name = "pdf-folio-main"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pdf-folio"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+pdf-folio-ui = { path = "../pdf-folio-ui" }
+tracing.workspace = true
+tracing-subscriber.workspace = true

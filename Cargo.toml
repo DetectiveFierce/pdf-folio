@@ -1,0 +1,38 @@
+[workspace]
+members = [
+    "crates/pdf-folio-core",
+    "crates/pdf-folio-library",
+    "crates/pdf-folio-main",
+    "crates/pdf-folio-ui",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pdf-folio/pdf-folio"
+
+[workspace.dependencies]
+anyhow = "1.0.103"
+blake3 = "1.8.5"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.1", features = ["derive"] }
+directories = "6.0.0"
+iced = { version = "0.14.0", features = ["canvas", "tokio", "image", "svg"] }
+image = "0.25.10"
+lru = "0.18.0"
+notify = "9.0.0-rc.4"
+pdf-writer = "0.15.0"
+pdfium-render = { version = "0.9.2", features = ["thread_safe"] }
+rayon = "1.12.0"
+rfd = "0.17.2"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tantivy = "0.26.1"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+wasmtime = "46.0.1"

@@ -1,0 +1,15 @@
+[package]
+name = "pdf-folio-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+iced.workspace = true
+pdf-folio-core = { path = "../pdf-folio-core" }
+pdf-folio-library = { path = "../pdf-folio-library" }
+rfd.workspace = true
+tokio.workspace = true
+tracing.workspace = true
