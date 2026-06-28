@@ -473,8 +473,11 @@ Index one document per PDF page. Search returns `(entry_id, page)` hits so the U
    - `TileCache` is now used in the UI path. It is cleared when a new document opens to avoid
      cross-document key collisions, and cached bytes are promoted back into image handles on cache
      hits.
-   - Added `tests/fixtures/phase1-multipage.pdf`, a 24-page manual-test fixture with a core test
-     asserting the expected page count.
+   - Updated 2026-06-28: `tests/fixtures/phase1-multipage.pdf` now copies
+     `/home/shared-psychosis/Landing Zone/Graybill-Deal Estimators/textbook/main.pdf` as an
+     84-page default development PDF with bookmarks, so the Phase 2 TOC sidebar can be tested on
+     startup. The core fixture test now asserts both the page count and that at least one outline
+     node resolves to a page target.
 
 7. **Zoom**
    - [x] `ZoomIn` / `ZoomOut` messages change `zoom_width`
@@ -529,44 +532,80 @@ Index one document per PDF page. Search returns `(entry_id, page)` hits so the U
 ### Tasks in order
 
 1. **App shell layout**
-   - Top toolbar: open button, zoom controls, page indicator ("12 / 248"), view toggle
-   - Left sidebar (collapsible): TOC panel placeholder
-   - Main area: scrollable PDF canvas
-   - Use iced's `pane_grid` or manual `row![ sidebar, canvas ]` layout
+   - [x] Top toolbar: open button, zoom controls, page indicator ("12 / 248"), view toggle
+   - [x] Left sidebar (collapsible): TOC panel placeholder
+   - [x] Main area: scrollable PDF canvas
+   - [x] Use iced's `pane_grid` or manual `row![ sidebar, canvas ]` layout
+
+   Implementation notes:
+   - Completed 2026-06-28 with a manual `column![toolbar, row![sidebar, canvas]]` shell so the
+     existing custom canvas scroll/zoom ownership from Phase 1 stays intact.
+   - The toolbar includes native open, TOC show/hide, zoom controls, current page / page count,
+     a placeholder grid/list view toggle, and a theme toggle.
 
 2. **Theme system** (`pdf-folio-ui/src/theme.rs`)
-   - Define `AppTheme` enum: `Light`, `Dark`
-   - Implement `iced::application::StyleSheet` for both
-   - Color tokens: background, surface, text-primary, text-secondary, accent, border
-   - Toggle with keyboard shortcut `Ctrl+Shift+T`
+   - [x] Define `AppTheme` enum: `Light`, `Dark`
+   - [x] Implement iced theme selection for both
+   - [x] Color tokens: background, surface, text-primary, text-secondary, accent, border
+   - [x] Toggle with keyboard shortcut `Ctrl+Shift+T`
+
+   Implementation notes:
+   - Completed 2026-06-28. Iced 0.14's application builder uses a `.theme(...)` callback rather
+     than the older `iced::application::StyleSheet` shape, so the app maps `AppTheme` to
+     `iced::Theme` there and exposes `ThemeTokens` for app-specific surfaces.
+   - Updated 2026-06-28: the custom tokens now style the app background, toolbar, sidebar, jump
+     overlay, shell buttons, TOC text, and viewer canvas so the theme toggle covers all Phase 2
+     surfaces.
 
 3. **Table of contents panel**
-   - Implement `PdfDoc::outline()` returning `Vec<OutlineNode>` where `OutlineNode { title, page, children }`
-   - Render as a nested list in the sidebar
-   - Clicking a node sends `Message::JumpToPage(n)`
-   - `JumpToPage` sets `scroll_offset` to the y-position of that page
+   - [x] Implement `PdfDoc::outline()` returning `Vec<OutlineNode>` where `OutlineNode { title, page, children }`
+   - [x] Render as a nested list in the sidebar
+   - [x] Clicking a node sends `Message::JumpToPage(n)`
+   - [x] `JumpToPage` sets `scroll_offset` to the y-position of that page
+
+   Implementation notes:
+   - Completed 2026-06-28. The outline is loaded when a document opens and kept in app state.
+   - PDFs without bookmarks show a simple "No table of contents" sidebar state.
+   - Updated 2026-06-28: nested TOC entries are collapsed by default. Parent rows render a
+     disclosure marker and toggle their child entries open/closed; leaf rows jump directly to their
+     target page.
 
 4. **File open dialog**
-   - `Message::OpenFileDialog` → use `rfd::AsyncFileDialog` to show native file picker
-   - Filter to `*.pdf`
-   - On selection, send `Message::FileSelected(path)`
+   - [x] `Message::OpenFileDialog` → use `rfd::AsyncFileDialog` to show native file picker
+   - [x] Filter to `*.pdf`
+   - [x] On selection, send `Message::FileSelected(path)`
+
+   Implementation notes:
+   - Completed 2026-06-28. Canceling the dialog sends `Message::FileDialogCanceled` and leaves the
+     current document unchanged.
 
 5. **Keyboard navigation**
-   - `Space` / `Shift+Space`: page down / up
-   - `Arrow keys`: fine scroll
-   - `Ctrl+G`: jump-to-page dialog (simple text input overlay)
-   - `Escape`: close any open panel or dialog
+   - [x] `Space` / `Shift+Space`: page down / up
+   - [x] `Arrow keys`: fine scroll
+   - [x] `Ctrl+G`: jump-to-page dialog (simple text input overlay)
+   - [x] `Escape`: close any open panel or dialog
+
+   Implementation notes:
+   - Completed 2026-06-28. The jump-to-page UI is an inline overlay row above the canvas rather
+     than a modal window, which keeps it compatible with the current single-window iced shell.
+   - Updated 2026-06-28: arrow-up/down fine-scroll vertically, while arrow-left/right pan
+     horizontally for wide or zoomed pages.
 
 6. **Window title**
-   - Set to `"<filename> — PDF-Folio"` when a document is open
-   - Set to `"PDF-Folio"` otherwise
+   - [x] Set to `"<filename> - PDF-Folio"` when a document is open
+   - [x] Set to `"PDF-Folio"` otherwise
+
+   Implementation notes:
+   - Completed 2026-06-28. The app uses an ASCII hyphen in the window title to stay consistent
+     with the repository's current ASCII-only editing convention.
 
 ### Phase 2 done when
 
-- [ ] Application looks and feels like a real native app
-- [ ] TOC panel works and navigates correctly
-- [ ] Dark/light theme toggle works across all surfaces
-- [ ] File open dialog works
+- [x] Application looks and feels like a real native app at the shell level
+- [x] TOC panel works and navigates correctly for PDFs that expose bookmark destinations
+- [x] Dark/light theme toggle works across the iced theme, toolbar, sidebar, jump overlay, and
+  viewer canvas
+- [x] File open dialog works
 
 ---
 

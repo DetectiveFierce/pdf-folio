@@ -15,6 +15,8 @@ use crate::Settings;
 pub enum Message {
     /// Open the native file picker.
     OpenFileDialog,
+    /// The native file picker was dismissed without choosing a file.
+    FileDialogCanceled,
     /// A file was selected.
     FileSelected(PathBuf),
     /// A document was opened successfully.
@@ -58,10 +60,22 @@ pub enum Message {
     ZoomRenderSettled(u64),
     /// Jump to a zero-based page.
     JumpToPage(u16),
+    /// Expand or collapse a table-of-contents node.
+    ToggleOutlineNode(Vec<usize>),
+    /// Open the jump-to-page overlay.
+    OpenJumpDialog,
+    /// Close the active overlay or panel.
+    CloseOverlay,
+    /// The jump-to-page input changed.
+    JumpInputChanged(String),
+    /// Submit the jump-to-page overlay.
+    SubmitJump,
     /// Toggle the table-of-contents panel.
     ToggleTocPanel,
     /// Toggle the sidebar.
     ToggleSidebar,
+    /// Toggle the placeholder view mode control.
+    ToggleViewMode,
     /// Add an annotation.
     AnnotationAdded(Annotation),
     /// Delete an annotation.
@@ -95,4 +109,18 @@ pub enum Shortcut {
     Out,
     /// Reset zoom to the configured default.
     Reset,
+    /// Toggle dark/light theme.
+    ToggleTheme,
+    /// Scroll down by one viewport.
+    PageDown,
+    /// Scroll up by one viewport.
+    PageUp,
+    /// Scroll by a small number of logical pixels.
+    FineScroll(i16),
+    /// Pan horizontally by a small number of logical pixels.
+    HorizontalPan(i16),
+    /// Open the jump-to-page overlay.
+    Jump,
+    /// Close overlays or panels.
+    Escape,
 }

@@ -7,14 +7,17 @@ use std::time::Duration;
 
 use anyhow::Result;
 use iced::mouse;
-use iced::widget::{button, canvas, column, container, image, row, text};
-use iced::{event, keyboard, Color, Element, Event, Length, Point, Rectangle, Renderer, Size};
+use iced::widget::{button, canvas, column, container, image, row, scrollable, text, text_input};
+use iced::{
+    event, keyboard, Background, Border, Color, Element, Event, Length, Point, Rectangle, Renderer,
+    Size,
+};
 use iced::{Subscription, Task, Theme};
-use pdf_folio_core::{Annotation, PdfDoc, RenderedPage, TileCache, TileKey};
+use pdf_folio_core::{Annotation, OutlineNode, PdfDoc, RenderedPage, TileCache, TileKey};
 use pdf_folio_library::{Db, LibraryEntry};
 
 use crate::messages::{Message, Shortcut};
-use crate::theme::AppTheme;
+use crate::theme::{AppTheme, ThemeTokens};
 
 /// Primary app mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +111,16 @@ pub struct PDFolioApp {
     pub pending_renders: HashSet<TileKey>,
     /// Whether the table-of-contents panel is open.
     pub toc_open: bool,
+    /// Loaded table-of-contents outline for the open document.
+    pub outline: Vec<OutlineNode>,
+    /// Expanded table-of-contents node paths.
+    pub expanded_outline_paths: HashSet<Vec<usize>>,
+    /// Whether the placeholder view-mode toggle is in list mode.
+    pub compact_view_mode: bool,
+    /// Whether the jump-to-page overlay is open.
+    pub jump_dialog_open: bool,
+    /// Current jump-to-page input text.
+    pub jump_input: String,
     /// In-memory annotations for the open document.
     pub annotations: Vec<Annotation>,
     /// Loaded library entries.
@@ -150,6 +163,11 @@ impl PDFolioApp {
             modifiers: keyboard::Modifiers::default(),
             pending_renders: HashSet::new(),
             toc_open: true,
+            outline: Vec::new(),
+            expanded_outline_paths: HashSet::new(),
+            compact_view_mode: false,
+            jump_dialog_open: false,
+            jump_input: String::new(),
             annotations: Vec::new(),
             library_entries: Vec::new(),
             search_query: String::new(),
@@ -181,12 +199,16 @@ impl PDFolioApp {
         self.page_aspect_ratios = (0..doc.page_count())
             .map(|page| doc.page_aspect_ratio(page).unwrap_or(11.0 / 8.5))
             .collect();
+        self.outline = doc.outline().unwrap_or_default();
+        self.expanded_outline_paths.clear();
         self.pending_renders.clear();
         self.scroll_offset = 0.0;
         self.horizontal_offset = 0.0;
         self.zoom_preview_width_px = None;
         self.zoom_generation = self.zoom_generation.wrapping_add(1);
         self.document_error = None;
+        self.jump_dialog_open = false;
+        self.jump_input.clear();
 
         self.request_visible_pages()
     }
@@ -312,6 +334,31 @@ impl PDFolioApp {
         f32::from(self.zoom_width) + PAGE_PADDING * 2.0
     }
 
+    fn current_page(&self) -> u16 {
+        self.visible_page_range().start
+    }
+
+    fn page_top(&self, target_page: u16) -> f32 {
+        let mut y = PAGE_PADDING;
+        for page in 0..target_page {
+            y += self.page_height(page) + PAGE_GAP;
+        }
+        y
+    }
+
+    fn jump_to_page(&mut self, page: u16) -> Task<Message> {
+        let Some(doc) = &self.doc else {
+            return Task::none();
+        };
+
+        let page = page.min(doc.page_count().saturating_sub(1));
+        self.scroll_offset = self.page_top(page);
+        self.clamp_scroll_offset();
+        self.jump_dialog_open = false;
+        self.jump_input.clear();
+        self.request_visible_pages()
+    }
+
     fn max_horizontal_offset(&self) -> f32 {
         (self.content_width() - self.viewport_width.max(1.0)).max(0.0)
     }
@@ -328,6 +375,16 @@ impl PDFolioApp {
 
     fn clamp_scroll_offset(&mut self) {
         self.scroll_offset = self.scroll_offset.clamp(0.0, self.max_scroll_offset());
+    }
+
+    fn scroll_by(&mut self, delta: f32) -> Task<Message> {
+        self.scroll_offset = (self.scroll_offset + delta).clamp(0.0, self.max_scroll_offset());
+        self.request_visible_pages()
+    }
+
+    fn pan_horizontally_by(&mut self, delta: f32) {
+        self.horizontal_offset =
+            (self.horizontal_offset + delta).clamp(0.0, self.max_horizontal_offset());
     }
 
     fn zoom_to_width(
@@ -452,6 +509,8 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
 
 fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
     match message {
+        Message::OpenFileDialog => return open_file_dialog_task(),
+        Message::FileDialogCanceled => {}
         Message::FileSelected(path) => return open_document_task(path),
         Message::DocumentOpened(doc) => return app.open_document(doc),
         Message::DocumentError(error) => {
@@ -484,6 +543,42 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ThemeToggled => {
             app.theme = app.theme.toggled();
+        }
+        Message::ToggleSidebar | Message::ToggleTocPanel => {
+            app.toc_open = !app.toc_open;
+        }
+        Message::ToggleViewMode => {
+            app.compact_view_mode = !app.compact_view_mode;
+        }
+        Message::OpenJumpDialog => {
+            app.jump_dialog_open = true;
+            app.jump_input = app
+                .doc
+                .as_ref()
+                .map(|_| (u32::from(app.current_page()) + 1).to_string())
+                .unwrap_or_default();
+        }
+        Message::CloseOverlay => {
+            if app.jump_dialog_open {
+                app.jump_dialog_open = false;
+                app.jump_input.clear();
+            } else {
+                app.toc_open = false;
+            }
+        }
+        Message::JumpInputChanged(value) => {
+            app.jump_input = value.chars().filter(char::is_ascii_digit).take(5).collect();
+        }
+        Message::SubmitJump => {
+            if let Ok(page) = app.jump_input.parse::<u16>() {
+                return app.jump_to_page(page.saturating_sub(1));
+            }
+        }
+        Message::JumpToPage(page) => return app.jump_to_page(page),
+        Message::ToggleOutlineNode(path) => {
+            if !app.expanded_outline_paths.insert(path.clone()) {
+                app.expanded_outline_paths.remove(&path);
+            }
         }
         Message::ScrollChanged(offset) => {
             app.scroll_offset = offset;
@@ -578,6 +673,33 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 ZoomRenderPolicy::Immediate,
             );
         }
+        Message::ShortcutPressed(Shortcut::ToggleTheme) => {
+            app.theme = app.theme.toggled();
+        }
+        Message::ShortcutPressed(Shortcut::PageDown) => {
+            return app.scroll_by(app.viewport_height * 0.86);
+        }
+        Message::ShortcutPressed(Shortcut::PageUp) => {
+            return app.scroll_by(-(app.viewport_height * 0.86));
+        }
+        Message::ShortcutPressed(Shortcut::FineScroll(delta)) => {
+            return app.scroll_by(f32::from(delta));
+        }
+        Message::ShortcutPressed(Shortcut::HorizontalPan(delta)) => {
+            app.pan_horizontally_by(f32::from(delta));
+        }
+        Message::ShortcutPressed(Shortcut::Jump) => {
+            app.jump_dialog_open = true;
+            app.jump_input = (u32::from(app.current_page()) + 1).to_string();
+        }
+        Message::ShortcutPressed(Shortcut::Escape) => {
+            if app.jump_dialog_open {
+                app.jump_dialog_open = false;
+                app.jump_input.clear();
+            } else {
+                app.toc_open = false;
+            }
+        }
         Message::ZoomSet(width) => {
             return app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
         }
@@ -588,35 +710,302 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
 }
 
 fn view(app: &PDFolioApp) -> Element<'_, Message> {
-    let content: Element<'_, Message> = match &app.doc {
-        Some(doc) => {
-            let toolbar = row![
-                button(text("-")).on_press(Message::ZoomOut),
-                text(format!("{} px", app.zoom_width)).size(16),
-                button(text("+")).on_press(Message::ZoomIn),
-                text(doc.path().display().to_string()).size(16),
-            ]
-            .spacing(12)
-            .padding(12)
-            .align_y(iced::Alignment::Center);
+    let tokens = app.theme.tokens();
+    let content: Element<'_, Message> = if app.doc.is_some() {
+        let sidebar: Element<'_, Message> = if app.toc_open {
+            view_sidebar(app).into()
+        } else {
+            container("").width(Length::Shrink).into()
+        };
 
-            let viewer = canvas(ViewerCanvas { app })
-                .width(Length::Fill)
-                .height(Length::Fill);
+        let viewer = canvas(ViewerCanvas { app })
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let main = if app.jump_dialog_open {
+            column![view_jump_dialog(app), viewer].spacing(0)
+        } else {
+            column![viewer]
+        };
 
-            column![toolbar, viewer].into()
-        }
-        _ => container(
-            text("Open a PDF from the command line to view it. Also: hello, empty state.").size(18),
-        )
-        .center(Length::Fill)
-        .into(),
+        column![
+            view_toolbar(app),
+            row![sidebar, main.width(Length::Fill)].height(Length::Fill)
+        ]
+        .into()
+    } else {
+        column![
+            view_toolbar(app),
+            container(text("Open a PDF to start reading.").size(18))
+                .center(Length::Fill)
+                .height(Length::Fill)
+        ]
+        .into()
     };
 
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
+        .style(move |_| container_style(tokens.background, tokens.text_primary, tokens.border, 0.0))
         .into()
+}
+
+fn view_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.theme.tokens();
+    let page_label = app.doc.as_ref().map_or_else(
+        || String::from("- / -"),
+        |doc| {
+            format!(
+                "{} / {}",
+                u32::from(app.current_page()) + 1,
+                doc.page_count()
+            )
+        },
+    );
+    let view_label = if app.compact_view_mode {
+        "List"
+    } else {
+        "Grid"
+    };
+    let title = app
+        .doc
+        .as_ref()
+        .and_then(|doc| doc.path().file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("PDF-Folio");
+
+    let toolbar = row![
+        shell_button("Open", tokens).on_press(Message::OpenFileDialog),
+        shell_button(if app.toc_open { "Hide TOC" } else { "Show TOC" }, tokens)
+            .on_press(Message::ToggleSidebar),
+        shell_button("-", tokens).on_press(Message::ZoomOut),
+        text(format!("{} px", app.zoom_width))
+            .size(15)
+            .color(tokens.text_secondary),
+        shell_button("+", tokens).on_press(Message::ZoomIn),
+        shell_button(page_label, tokens).on_press(Message::OpenJumpDialog),
+        shell_button(view_label, tokens).on_press(Message::ToggleViewMode),
+        shell_button(
+            match app.theme {
+                AppTheme::Light => "Dark",
+                AppTheme::Dark => "Light",
+            },
+            tokens
+        )
+        .on_press(Message::ThemeToggled),
+        text(title)
+            .size(16)
+            .color(tokens.text_primary)
+            .width(Length::Fill),
+    ]
+    .spacing(10)
+    .padding(10)
+    .align_y(iced::Alignment::Center);
+
+    container(toolbar)
+        .width(Length::Fill)
+        .style(move |_| container_style(tokens.surface, tokens.text_primary, tokens.border, 0.0))
+        .into()
+}
+
+fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.theme.tokens();
+    let body: Element<'_, Message> = if app.outline.is_empty() {
+        container(
+            text("No table of contents")
+                .size(14)
+                .color(tokens.text_secondary),
+        )
+        .padding(12)
+        .width(Length::Fill)
+        .into()
+    } else {
+        scrollable(outline_list(
+            &app.outline,
+            0,
+            Vec::new(),
+            &app.expanded_outline_paths,
+            tokens,
+        ))
+        .height(Length::Fill)
+        .into()
+    };
+
+    container(
+        column![text("Contents").size(16).color(tokens.text_primary), body]
+            .spacing(8)
+            .padding(10),
+    )
+    .width(240)
+    .height(Length::Fill)
+    .style(move |_| container_style(tokens.surface, tokens.text_primary, tokens.border, 0.0))
+    .into()
+}
+
+fn outline_list<'a>(
+    nodes: &'a [OutlineNode],
+    depth: u16,
+    parent_path: Vec<usize>,
+    expanded_paths: &'a HashSet<Vec<usize>>,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let mut list = column![].spacing(4);
+
+    for (index, node) in nodes.iter().enumerate() {
+        let mut path = parent_path.clone();
+        path.push(index);
+        let has_children = !node.children.is_empty();
+        let is_expanded = expanded_paths.contains(&path);
+        let label = if node.title.trim().is_empty() {
+            String::from("Untitled")
+        } else {
+            node.title.clone()
+        };
+        let mut row = row![
+            text(" ".repeat(usize::from(depth) * 2)),
+            text(if has_children {
+                if is_expanded {
+                    "v"
+                } else {
+                    ">"
+                }
+            } else {
+                " "
+            })
+            .size(13)
+            .color(tokens.text_secondary),
+            text(label).size(14).color(tokens.text_primary)
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
+        if let Some(page) = node.page {
+            row = row.push(
+                text(format!("{}", u32::from(page) + 1))
+                    .size(12)
+                    .color(tokens.text_secondary),
+            );
+            let message = if has_children {
+                Message::ToggleOutlineNode(path.clone())
+            } else {
+                Message::JumpToPage(page)
+            };
+            list = list.push(outline_button(row, message, tokens));
+        } else {
+            list = list.push(outline_button(
+                row,
+                Message::ToggleOutlineNode(path.clone()),
+                tokens,
+            ));
+        }
+
+        if has_children && is_expanded {
+            list = list.push(outline_list(
+                &node.children,
+                depth.saturating_add(1),
+                path,
+                expanded_paths,
+                tokens,
+            ));
+        }
+    }
+
+    list.into()
+}
+
+fn outline_button<'a>(
+    content: impl Into<Element<'a, Message>>,
+    message: Message,
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
+    button(content)
+        .on_press(message)
+        .style(move |_, status| button_style(tokens, status))
+        .width(Length::Fill)
+}
+
+fn view_jump_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.theme.tokens();
+    let max_page = app.doc.as_ref().map_or(0, |doc| doc.page_count());
+    let dialog = row![
+        text("Go to page").size(15).color(tokens.text_primary),
+        text_input("Page", &app.jump_input)
+            .on_input(Message::JumpInputChanged)
+            .on_submit(Message::SubmitJump)
+            .width(90),
+        text(format!("of {max_page}"))
+            .size(14)
+            .color(tokens.text_secondary),
+        shell_button("Go", tokens).on_press(Message::SubmitJump),
+        shell_button("Cancel", tokens).on_press(Message::CloseOverlay),
+    ]
+    .spacing(10)
+    .padding(10)
+    .align_y(iced::Alignment::Center);
+
+    container(dialog)
+        .width(Length::Fill)
+        .style(move |_| container_style(tokens.surface, tokens.text_primary, tokens.border, 0.0))
+        .into()
+}
+
+fn shell_button<'a>(
+    label: impl Into<String>,
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
+    button(text(label.into()).color(tokens.text_primary))
+        .style(move |_, status| button_style(tokens, status))
+}
+
+fn container_style(
+    background: Color,
+    text_color: Color,
+    border_color: Color,
+    border_width: f32,
+) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(background)),
+        text_color: Some(text_color),
+        border: Border {
+            width: border_width,
+            color: border_color,
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+fn button_style(tokens: ThemeTokens, status: button::Status) -> button::Style {
+    let background = match status {
+        button::Status::Active => tokens.surface,
+        button::Status::Hovered => mix_color(tokens.surface, tokens.accent, 0.16),
+        button::Status::Pressed => mix_color(tokens.surface, tokens.accent, 0.28),
+        button::Status::Disabled => tokens.background,
+    };
+    let text_color = if matches!(status, button::Status::Disabled) {
+        tokens.text_secondary
+    } else {
+        tokens.text_primary
+    };
+
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color,
+        border: Border {
+            width: 1.0,
+            color: tokens.border,
+            radius: 4.0.into(),
+        },
+        ..button::Style::default()
+    }
+}
+
+fn mix_color(base: Color, overlay: Color, amount: f32) -> Color {
+    let amount = amount.clamp(0.0, 1.0);
+    Color {
+        r: base.r + (overlay.r - base.r) * amount,
+        g: base.g + (overlay.g - base.g) * amount,
+        b: base.b + (overlay.b - base.b) * amount,
+        a: base.a + (overlay.a - base.a) * amount,
+    }
 }
 
 async fn render_page(doc: Arc<PdfDoc>, key: TileKey) -> anyhow::Result<(TileKey, RenderedPage)> {
@@ -632,6 +1021,19 @@ fn open_document_task(path: PathBuf) -> Task<Message> {
             Ok(doc) => Message::DocumentOpened(Arc::new(doc)),
             Err(error) => Message::DocumentError(error.to_string()),
         },
+    )
+}
+
+fn open_file_dialog_task() -> Task<Message> {
+    Task::perform(
+        async {
+            rfd::AsyncFileDialog::new()
+                .add_filter("PDF documents", &["pdf"])
+                .pick_file()
+                .await
+                .map(|file| file.path().to_path_buf())
+        },
+        |path| path.map_or(Message::FileDialogCanceled, Message::FileSelected),
     )
 }
 
@@ -698,7 +1100,8 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let background = canvas::Path::rectangle(Point::ORIGIN, bounds.size());
-        frame.fill(&background, Color::from_rgb8(34, 38, 46));
+        let tokens = self.app.theme.tokens();
+        frame.fill(&background, tokens.canvas);
 
         let Some(doc) = &self.app.doc else {
             return vec![frame.into_geometry()];
@@ -725,7 +1128,7 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
                 );
                 frame.fill(&shadow, Color::from_rgba8(0, 0, 0, 0.20));
                 let placeholder = canvas::Path::rectangle(rect.position(), rect.size());
-                frame.fill(&placeholder, Color::from_rgb8(207, 212, 220));
+                frame.fill(&placeholder, tokens.placeholder);
             }
 
             y += height + PAGE_GAP;
@@ -759,16 +1162,46 @@ fn subscription(_app: &PDFolioApp) -> Subscription<Message> {
         }
 
         match event {
-            Event::Keyboard(keyboard::Event::KeyPressed { key, text, .. }) => {
-                match (key, text.as_deref()) {
-                    (_, Some("+") | Some("=")) => Some(Message::ShortcutPressed(Shortcut::In)),
-                    (_, Some("-")) => Some(Message::ShortcutPressed(Shortcut::Out)),
-                    (keyboard::Key::Character(value), _) if value.as_str() == "0" => {
-                        Some(Message::ShortcutPressed(Shortcut::Reset))
-                    }
-                    _ => None,
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                text,
+                modifiers,
+                ..
+            }) => match (key, text.as_deref()) {
+                (_, Some("t") | Some("T")) if modifiers.control() && modifiers.shift() => {
+                    Some(Message::ShortcutPressed(Shortcut::ToggleTheme))
                 }
-            }
+                (_, Some("g") | Some("G")) if modifiers.control() => {
+                    Some(Message::ShortcutPressed(Shortcut::Jump))
+                }
+                (_, Some("+") | Some("=")) => Some(Message::ShortcutPressed(Shortcut::In)),
+                (_, Some("-")) => Some(Message::ShortcutPressed(Shortcut::Out)),
+                (keyboard::Key::Character(value), _) if value.as_str() == "0" => {
+                    Some(Message::ShortcutPressed(Shortcut::Reset))
+                }
+                (keyboard::Key::Named(keyboard::key::Named::Space), _) if modifiers.shift() => {
+                    Some(Message::ShortcutPressed(Shortcut::PageUp))
+                }
+                (keyboard::Key::Named(keyboard::key::Named::Space), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::PageDown))
+                }
+                (keyboard::Key::Named(keyboard::key::Named::ArrowDown), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::FineScroll(64)))
+                }
+                (keyboard::Key::Named(keyboard::key::Named::ArrowUp), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::FineScroll(-64)))
+                }
+                (keyboard::Key::Named(keyboard::key::Named::ArrowRight), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::HorizontalPan(96)))
+                }
+                (keyboard::Key::Named(keyboard::key::Named::ArrowLeft), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::HorizontalPan(-96)))
+                }
+                (keyboard::Key::Named(keyboard::key::Named::Escape), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::Escape))
+                }
+                _ => None,
+            },
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))
             }

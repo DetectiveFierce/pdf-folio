@@ -249,8 +249,11 @@ mod tests {
     fn opens_multipage_fixture_pdf() -> Result<()> {
         let doc = PdfDoc::open(&multipage_fixture_pdf())?;
 
-        assert_eq!(doc.page_count(), 24);
+        assert_eq!(doc.page_count(), 84);
         assert!(doc.path().ends_with("phase1-multipage.pdf"));
+        let outline = doc.outline()?;
+        assert!(!outline.is_empty());
+        assert!(outline_has_page_target(&outline));
 
         Ok(())
     }
@@ -297,5 +300,11 @@ mod tests {
         assert!(doc.outline()?.is_empty());
 
         Ok(())
+    }
+
+    fn outline_has_page_target(nodes: &[OutlineNode]) -> bool {
+        nodes
+            .iter()
+            .any(|node| node.page.is_some() || outline_has_page_target(&node.children))
     }
 }
