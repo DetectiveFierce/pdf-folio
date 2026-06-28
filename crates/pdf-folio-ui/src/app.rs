@@ -1,12 +1,14 @@
 //! Top-level application state and launch entrypoint.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use iced::futures::SinkExt;
 use iced::mouse;
+use iced::stream;
 use iced::widget::{button, canvas, column, container, image, row, scrollable, text, text_input};
 use iced::{
     event, keyboard, Background, Border, Color, Element, Event, Length, Point, Rectangle, Renderer,
@@ -14,7 +16,10 @@ use iced::{
 };
 use iced::{Subscription, Task, Theme};
 use pdf_folio_core::{Annotation, OutlineNode, PdfDoc, RenderedPage, TileCache, TileKey};
-use pdf_folio_library::{Db, LibraryEntry};
+use pdf_folio_library::{
+    hash_file, scan_pdf_files, thumbnail_path, Db, EntryId, ImportSummary, ImportedEntry,
+    IndexDocument, LibraryEntry, LibraryWatchEvent, LibraryWatcher, NewLibraryEntry, SearchIndex,
+};
 
 use crate::messages::{Message, Shortcut};
 use crate::theme::{AppTheme, ThemeTokens};
@@ -81,8 +86,10 @@ pub struct PDFolioApp {
     pub mode: AppMode,
     /// Open document.
     pub doc: Option<Arc<PdfDoc>>,
+    /// Current library entry opened in the viewer.
+    pub current_entry_id: Option<EntryId>,
     /// Rendered page images keyed by page and zoom width.
-    pub rendered_pages: std::collections::HashMap<TileKey, RenderedPageView>,
+    pub rendered_pages: HashMap<TileKey, RenderedPageView>,
     /// Pre-computed page aspect ratios, indexed by zero-based page.
     pub page_aspect_ratios: Vec<f32>,
     /// Last known viewer viewport height.
@@ -129,12 +136,45 @@ pub struct PDFolioApp {
     pub search_query: String,
     /// Search results, if search mode is active.
     pub search_results: Option<Vec<LibraryEntry>>,
+    /// Matching page for full-text search results.
+    pub search_hit_pages: HashMap<EntryId, u16>,
+    /// Monotonic token used to debounce library search.
+    pub search_generation: u64,
+    /// Current library scroll offset in logical pixels.
+    pub library_scroll_offset: f32,
+    /// Last known library viewport height.
+    pub library_viewport_height: f32,
+    /// Lazily loaded cover thumbnails keyed by entry id.
+    pub thumbnails: HashMap<EntryId, ThumbnailView>,
+    /// Thumbnail loads/renders currently in flight.
+    pub pending_thumbnails: HashSet<EntryId>,
+    /// Active tag filter.
+    pub active_tag_filter: Option<String>,
+    /// Entry currently showing inline tag input.
+    pub tag_entry_id: Option<EntryId>,
+    /// Current inline tag text.
+    pub tag_input: String,
+    /// Latest library/import status.
+    pub library_status: Option<String>,
+    /// Last library entry click used to detect double-click opens.
+    pub last_library_click: Option<(EntryId, Instant)>,
     /// Current visual theme.
     pub theme: AppTheme,
     /// User settings.
     pub settings: Settings,
     /// Library database handle.
     pub db: Arc<Db>,
+}
+
+/// A rendered cover thumbnail prepared for display by iced.
+#[derive(Debug, Clone)]
+pub struct ThumbnailView {
+    /// Thumbnail width in pixels.
+    pub width: u16,
+    /// Thumbnail height in pixels.
+    pub height: u16,
+    /// Iced image handle backed by RGBA pixels.
+    pub handle: image::Handle,
 }
 
 impl PDFolioApp {
@@ -148,6 +188,7 @@ impl PDFolioApp {
         Ok(Self {
             mode: AppMode::Library,
             doc: None,
+            current_entry_id: None,
             rendered_pages: std::collections::HashMap::new(),
             page_aspect_ratios: Vec::new(),
             viewport_height: 900.0,
@@ -172,6 +213,17 @@ impl PDFolioApp {
             library_entries: Vec::new(),
             search_query: String::new(),
             search_results: None,
+            search_hit_pages: HashMap::new(),
+            search_generation: 0,
+            library_scroll_offset: 0.0,
+            library_viewport_height: 720.0,
+            thumbnails: HashMap::new(),
+            pending_thumbnails: HashSet::new(),
+            active_tag_filter: None,
+            tag_entry_id: None,
+            tag_input: String::new(),
+            library_status: None,
+            last_library_click: None,
             theme: AppTheme::Dark,
             settings,
             db: Arc::new(Db::open_default()?),
@@ -181,7 +233,7 @@ impl PDFolioApp {
     /// Creates application state and records the startup PDF path when available.
     pub fn with_initial_file(initial_file: Option<PathBuf>) -> Result<Self> {
         let mut app = Self::new()?;
-        let Some(path) = initial_file.or_else(default_fixture_path) else {
+        let Some(path) = initial_file else {
             return Ok(app);
         };
 
@@ -211,6 +263,37 @@ impl PDFolioApp {
         self.jump_input.clear();
 
         self.request_visible_pages()
+    }
+
+    fn return_to_library(&mut self) -> Task<Message> {
+        self.mode = AppMode::Library;
+        self.doc = None;
+        self.current_entry_id = None;
+        self.rendered_pages.clear();
+        self.pending_renders.clear();
+        self.page_aspect_ratios.clear();
+        self.outline.clear();
+        self.expanded_outline_paths.clear();
+        self.document_error = None;
+        self.jump_dialog_open = false;
+        self.jump_input.clear();
+        self.zoom_preview_width_px = None;
+        self.scroll_offset = 0.0;
+        self.horizontal_offset = 0.0;
+        Task::batch([self.refresh_library(), self.request_visible_thumbnails()])
+    }
+
+    fn open_library_document(&mut self, entry_id: EntryId, doc: Arc<PdfDoc>) -> Task<Message> {
+        self.current_entry_id = Some(entry_id.clone());
+        let last_page = self
+            .library_entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+            .map_or(0, |entry| entry.last_page);
+        let task = self.open_document(doc);
+        self.scroll_offset = self.page_top(last_page);
+        self.clamp_scroll_offset();
+        Task::batch([task, self.request_visible_pages()])
     }
 
     fn request_visible_pages(&mut self) -> Task<Message> {
@@ -336,6 +419,108 @@ impl PDFolioApp {
 
     fn current_page(&self) -> u16 {
         self.visible_page_range().start
+    }
+
+    fn visible_library_entries(&self) -> Vec<LibraryEntry> {
+        let source = self
+            .search_results
+            .as_ref()
+            .unwrap_or(&self.library_entries);
+        source
+            .iter()
+            .filter(|entry| {
+                self.active_tag_filter
+                    .as_ref()
+                    .is_none_or(|tag| entry.tags.iter().any(|entry_tag| entry_tag == tag))
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn visible_library_entry_window(&self, entries_len: usize) -> std::ops::Range<usize> {
+        if entries_len == 0 {
+            return 0..0;
+        }
+
+        let per_row = self.library_entries_per_row();
+        let row_height = self.library_row_height();
+        let first_row = (self.library_scroll_offset / row_height).floor().max(0.0) as usize;
+        let visible_rows = (self.library_viewport_height / row_height).ceil().max(1.0) as usize;
+        let start_row = first_row.saturating_sub(LIBRARY_OVERSCAN_ROWS);
+        let end_row = first_row
+            .saturating_add(visible_rows)
+            .saturating_add(LIBRARY_OVERSCAN_ROWS)
+            .saturating_add(1);
+
+        let start = (start_row * per_row).min(entries_len);
+        let end = (end_row * per_row).min(entries_len);
+        start..end
+    }
+
+    fn library_entries_per_row(&self) -> usize {
+        if self.compact_view_mode {
+            1
+        } else {
+            3
+        }
+    }
+
+    fn library_row_height(&self) -> f32 {
+        if self.compact_view_mode {
+            LIBRARY_LIST_ROW_HEIGHT
+        } else {
+            LIBRARY_GRID_ROW_HEIGHT
+        }
+    }
+
+    fn all_tags(&self) -> Vec<String> {
+        let mut tags: Vec<String> = self
+            .library_entries
+            .iter()
+            .flat_map(|entry| entry.tags.iter().cloned())
+            .collect();
+        tags.sort();
+        tags.dedup();
+        tags
+    }
+
+    fn request_visible_thumbnails(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        let entries = self.visible_library_entries();
+        let window = self.visible_library_entry_window(entries.len());
+        for entry in entries[window].iter().cloned() {
+            if self.thumbnails.contains_key(&entry.id)
+                || self.pending_thumbnails.contains(&entry.id)
+            {
+                continue;
+            }
+            self.pending_thumbnails.insert(entry.id.clone());
+            tasks.push(Task::perform(
+                load_or_render_thumbnail(entry),
+                |result| match result {
+                    Ok((entry_id, page)) => Message::ThumbnailReady {
+                        entry_id,
+                        data: page.rgba,
+                        width: page.width,
+                        height: page.height,
+                    },
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            ));
+        }
+
+        Task::batch(tasks)
+    }
+
+    fn refresh_library(&mut self) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move { tokio::task::spawn_blocking(move || db.get_all_entries()).await? },
+            |result| match result {
+                Ok(entries) => Message::LibraryLoaded(entries),
+                Err(error) => Message::LibraryError(error.to_string()),
+            },
+        )
     }
 
     fn page_top(&self, target_page: u16) -> f32 {
@@ -473,7 +658,7 @@ impl PDFolioApp {
 ///
 /// Returns an error when startup state cannot be created.
 pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
-    let startup_file = initial_file.clone().or_else(default_fixture_path);
+    let startup_file = initial_file.clone();
     let app = PDFolioApp::with_initial_file(initial_file)?;
 
     tracing::info!(
@@ -484,11 +669,12 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
 
     iced::application(
         move || {
-            let task = startup_file
+            let open_task = startup_file
                 .clone()
                 .map(open_document_task)
                 .unwrap_or_else(Task::none);
-            (app.clone(), task)
+            let load_task = app.clone().refresh_library();
+            (app.clone(), Task::batch([open_task, load_task]))
         },
         update,
         view,
@@ -513,6 +699,10 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::FileDialogCanceled => {}
         Message::FileSelected(path) => return open_document_task(path),
         Message::DocumentOpened(doc) => return app.open_document(doc),
+        Message::LibraryDocumentOpened { entry_id, doc } => {
+            return app.open_library_document(entry_id, doc);
+        }
+        Message::BackToLibrary => return app.return_to_library(),
         Message::DocumentError(error) => {
             app.document_error = Some(error);
             app.pending_renders.clear();
@@ -550,6 +740,195 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::ToggleViewMode => {
             app.compact_view_mode = !app.compact_view_mode;
         }
+        Message::LibraryLoaded(entries) => {
+            app.library_entries = entries;
+            app.library_status = Some(format!("{} PDFs in library", app.library_entries.len()));
+            if !app.search_query.trim().is_empty() {
+                return Task::done(Message::SearchDebounced(app.search_query.clone()));
+            }
+            return app.request_visible_thumbnails();
+        }
+        Message::LibraryRefresh => return app.refresh_library(),
+        Message::LibraryError(error) => {
+            app.library_status = Some(error);
+            app.pending_thumbnails.clear();
+        }
+        Message::ImportFolderDialog => return import_folder_dialog_task(),
+        Message::ImportFolderSelected(path) => {
+            app.library_status = Some(format!("Importing {}...", path.display()));
+            let db = Arc::clone(&app.db);
+            app.settings.watch_directories.push(path.clone());
+            app.settings.watch_directories.sort();
+            app.settings.watch_directories.dedup();
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || import_folder_with_index(&db, &path))
+                        .await?
+                },
+                |result| match result {
+                    Ok(summary) => Message::ImportFinished(summary),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::ImportFinished(summary) => {
+            app.library_status = Some(format!(
+                "Imported {} PDFs{}",
+                summary.entries.len(),
+                if summary.errors.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({} skipped)", summary.errors.len())
+                }
+            ));
+            return app.refresh_library();
+        }
+        Message::OpenLibraryEntry(entry_id) => {
+            if let Some(entry) = app
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            {
+                return open_library_document_task(entry.id, entry.path);
+            }
+        }
+        Message::LibraryEntryClicked(entry_id) => {
+            let now = Instant::now();
+            let is_double_click =
+                app.last_library_click
+                    .as_ref()
+                    .is_some_and(|(last_id, last_click)| {
+                        last_id == &entry_id
+                            && now.duration_since(*last_click) <= Duration::from_millis(500)
+                    });
+
+            app.last_library_click = Some((entry_id.clone(), now));
+
+            if is_double_click {
+                return Task::done(Message::OpenLibraryEntry(entry_id));
+            }
+        }
+        Message::SearchQueryChanged(query) => {
+            app.search_query = query;
+            app.search_generation = app.search_generation.wrapping_add(1);
+            let query = app.search_query.clone();
+            if query.trim().is_empty() {
+                app.search_results = None;
+                app.search_hit_pages.clear();
+                return app.request_visible_thumbnails();
+            }
+            return schedule_search(query);
+        }
+        Message::SearchDebounced(query) => {
+            if query == app.search_query {
+                let db = Arc::clone(&app.db);
+                return Task::perform(search_library_task(db, query), |result| match result {
+                    Ok((entries, hit_pages)) => Message::SearchResults { entries, hit_pages },
+                    Err(error) => Message::LibraryError(error.to_string()),
+                });
+            }
+        }
+        Message::SearchResults { entries, hit_pages } => {
+            app.search_results = Some(entries);
+            app.search_hit_pages = hit_pages;
+            return app.request_visible_thumbnails();
+        }
+        Message::LibraryScrolled {
+            offset_y,
+            viewport_height,
+        } => {
+            app.library_scroll_offset = offset_y.max(0.0);
+            app.library_viewport_height = viewport_height.max(1.0);
+            return app.request_visible_thumbnails();
+        }
+        Message::LibraryWatchEvent(event) => {
+            let db = Arc::clone(&app.db);
+            app.library_status = Some(match &event {
+                LibraryWatchEvent::PdfCreated(path) => format!("Importing {}...", path.display()),
+                LibraryWatchEvent::PdfRemoved(path) => {
+                    format!("Marking missing: {}", path.display())
+                }
+            });
+            return Task::perform(
+                async move { tokio::task::spawn_blocking(move || apply_watch_event(&db, event)).await? },
+                |result| match result {
+                    Ok(()) => Message::LibraryRefresh,
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::TagFilterChanged(tag) => {
+            app.active_tag_filter = tag;
+            return app.request_visible_thumbnails();
+        }
+        Message::StartTagEntry(entry_id) => {
+            app.tag_entry_id = Some(entry_id);
+            app.tag_input.clear();
+        }
+        Message::TagInputChanged(value) => {
+            app.tag_input = value;
+        }
+        Message::SubmitTag => {
+            if let Some(entry_id) = app.tag_entry_id.clone() {
+                let tag = app.tag_input.trim().to_owned();
+                app.tag_entry_id = None;
+                app.tag_input.clear();
+                if !tag.is_empty() {
+                    let db = Arc::clone(&app.db);
+                    return Task::perform(
+                        async move {
+                            let saved_entry_id = entry_id.clone();
+                            let saved_tag = tag.clone();
+                            tokio::task::spawn_blocking(move || {
+                                db.add_tag(&saved_entry_id, &saved_tag)
+                            })
+                            .await??;
+                            Ok::<_, anyhow::Error>((entry_id, tag))
+                        },
+                        |result| match result {
+                            Ok((id, tag)) => Message::EntryTagged { id, tag },
+                            Err(error) => Message::LibraryError(error.to_string()),
+                        },
+                    );
+                }
+            }
+        }
+        Message::EntryTagged { .. } | Message::EntryUntagged { .. } | Message::EntryDeleted(_) => {
+            return app.refresh_library();
+        }
+        Message::ThumbnailReady {
+            entry_id,
+            data,
+            width,
+            height,
+        } => {
+            app.pending_thumbnails.remove(&entry_id);
+            let handle = image::Handle::from_rgba(u32::from(width), u32::from(height), data);
+            app.thumbnails.insert(
+                entry_id,
+                ThumbnailView {
+                    width,
+                    height,
+                    handle,
+                },
+            );
+        }
+        Message::ProgressUpdated { entry_id, page } => {
+            let db = Arc::clone(&app.db);
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || db.update_last_page(&entry_id, page))
+                        .await??;
+                    Ok::<_, anyhow::Error>(())
+                },
+                |result| match result {
+                    Ok(()) => Message::ProgressSaved,
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::ProgressSaved => {}
         Message::OpenJumpDialog => {
             app.jump_dialog_open = true;
             app.jump_input = app
@@ -583,7 +962,17 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::ScrollChanged(offset) => {
             app.scroll_offset = offset;
             app.clamp_scroll_offset();
-            return app.request_visible_pages();
+            let render_task = app.request_visible_pages();
+            let progress_task = app
+                .current_entry_id
+                .clone()
+                .map_or_else(Task::none, |entry_id| {
+                    Task::done(Message::ProgressUpdated {
+                        entry_id,
+                        page: app.current_page(),
+                    })
+                });
+            return Task::batch([render_task, progress_task]);
         }
         Message::ViewportChanged {
             scroll_offset,
@@ -733,13 +1122,7 @@ fn view(app: &PDFolioApp) -> Element<'_, Message> {
         ]
         .into()
     } else {
-        column![
-            view_toolbar(app),
-            container(text("Open a PDF to start reading.").size(18))
-                .center(Length::Fill)
-                .height(Length::Fill)
-        ]
-        .into()
+        column![view_toolbar(app), view_library(app)].into()
     };
 
     container(content)
@@ -747,6 +1130,260 @@ fn view(app: &PDFolioApp) -> Element<'_, Message> {
         .height(Length::Fill)
         .style(move |_| container_style(tokens.background, tokens.text_primary, tokens.border, 0.0))
         .into()
+}
+
+fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.theme.tokens();
+    let entries = app.visible_library_entries();
+    let window = app.visible_library_entry_window(entries.len());
+    let sidebar = view_library_tag_sidebar(app);
+    let header = row![
+        text_input("Search library", &app.search_query)
+            .on_input(Message::SearchQueryChanged)
+            .width(Length::Fill),
+        shell_button("Import folder", tokens).on_press(Message::ImportFolderDialog),
+    ]
+    .spacing(10)
+    .align_y(iced::Alignment::Center);
+
+    let status = app
+        .library_status
+        .as_deref()
+        .unwrap_or("No PDFs imported yet");
+    let mut content = column![header, text(status).size(13).color(tokens.text_secondary),]
+        .spacing(10)
+        .padding(12);
+
+    if entries.is_empty() {
+        content = content.push(
+            container(text("Import a folder of PDFs to build your library.").size(16))
+                .center(Length::Fill)
+                .height(Length::Fill),
+        );
+    } else if app.compact_view_mode {
+        let mut rows = column![].spacing(6);
+        let top_spacer = window.start as f32 * LIBRARY_LIST_ROW_HEIGHT;
+        let bottom_spacer =
+            entries.len().saturating_sub(window.end) as f32 * LIBRARY_LIST_ROW_HEIGHT;
+        if top_spacer > 0.0 {
+            rows = rows.push(container("").height(top_spacer));
+        }
+        for entry in entries[window.clone()].iter() {
+            rows = rows.push(library_entry_row(app, entry.clone(), tokens));
+        }
+        if bottom_spacer > 0.0 {
+            rows = rows.push(container("").height(bottom_spacer));
+        }
+        content = content.push(library_scrollable(rows));
+    } else {
+        let mut rows = column![].spacing(10);
+        let per_row = app.library_entries_per_row();
+        let top_rows = window.start / per_row;
+        let total_rows = entries.len().div_ceil(per_row);
+        let bottom_rows = total_rows.saturating_sub(window.end.div_ceil(per_row));
+        if top_rows > 0 {
+            rows = rows.push(container("").height(top_rows as f32 * LIBRARY_GRID_ROW_HEIGHT));
+        }
+        for chunk in entries[window.clone()].chunks(per_row) {
+            let mut card_row = row![].spacing(10);
+            for entry in chunk {
+                card_row = card_row.push(library_entry_card(app, entry.clone(), tokens));
+            }
+            rows = rows.push(card_row);
+        }
+        if bottom_rows > 0 {
+            rows = rows.push(container("").height(bottom_rows as f32 * LIBRARY_GRID_ROW_HEIGHT));
+        }
+        content = content.push(library_scrollable(rows));
+    }
+
+    row![
+        sidebar,
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_| container_style(
+                tokens.background,
+                tokens.text_primary,
+                tokens.border,
+                0.0
+            ))
+    ]
+    .height(Length::Fill)
+    .into()
+}
+
+fn library_scrollable<'a>(content: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
+    scrollable(content)
+        .height(Length::Fill)
+        .on_scroll(|viewport| {
+            let offset = viewport.absolute_offset();
+            let bounds = viewport.bounds();
+            Message::LibraryScrolled {
+                offset_y: offset.y,
+                viewport_height: bounds.height,
+            }
+        })
+        .into()
+}
+
+fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.theme.tokens();
+    let mut tags = column![
+        text("Tags").size(16).color(tokens.text_primary),
+        shell_button("All", tokens).on_press(Message::TagFilterChanged(None)),
+    ]
+    .spacing(8)
+    .padding(10);
+
+    for tag in app.all_tags() {
+        tags = tags
+            .push(shell_button(tag.clone(), tokens).on_press(Message::TagFilterChanged(Some(tag))));
+    }
+
+    container(tags)
+        .width(180)
+        .height(Length::Fill)
+        .style(move |_| container_style(tokens.surface, tokens.text_primary, tokens.border, 0.0))
+        .into()
+}
+
+fn library_entry_card<'a>(
+    app: &'a PDFolioApp,
+    entry: LibraryEntry,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let entry_id = entry.id.clone();
+    let title = entry_title(&entry);
+    let author = entry
+        .author
+        .clone()
+        .unwrap_or_else(|| String::from("Unknown author"));
+    let progress = progress_label(&entry);
+    let search_page = app.search_hit_pages.get(&entry_id).copied();
+    let tags = entry.tags.clone();
+    let mut body = column![
+        thumbnail_element(app, &entry_id, tokens, 132.0),
+        text(title).size(15).color(tokens.text_primary),
+        text(author).size(12).color(tokens.text_secondary),
+        text(progress).size(12).color(tokens.text_secondary),
+        tags_row(entry_id.clone(), tags, tokens),
+    ]
+    .spacing(6)
+    .padding(10);
+
+    if app.tag_entry_id.as_ref() == Some(&entry_id) {
+        body = body.push(
+            text_input("Tag", &app.tag_input)
+                .on_input(Message::TagInputChanged)
+                .on_submit(Message::SubmitTag),
+        );
+    }
+    if let Some(page) = search_page {
+        body = body.push(
+            text(format!("Match on page {}", u32::from(page) + 1))
+                .size(12)
+                .color(tokens.accent),
+        );
+    }
+
+    button(body)
+        .on_press(Message::LibraryEntryClicked(entry_id))
+        .style(move |_, status| button_style(tokens, status))
+        .width(Length::FillPortion(1))
+        .into()
+}
+
+fn library_entry_row<'a>(
+    app: &'a PDFolioApp,
+    entry: LibraryEntry,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let entry_id = entry.id.clone();
+    let title = entry_title(&entry);
+    let details = format!(
+        "{}{}",
+        entry.author.as_deref().unwrap_or("Unknown author"),
+        entry
+            .page_count
+            .map_or(String::new(), |pages| format!(" . {pages} pages"))
+    );
+    let tags = entry.tags.clone();
+    let progress = progress_label(&entry);
+    let search_page = app.search_hit_pages.get(&entry_id).copied();
+    let mut detail_column = column![
+        text(title).size(15).color(tokens.text_primary),
+        text(details).size(12).color(tokens.text_secondary),
+    ]
+    .spacing(3)
+    .width(Length::Fill);
+    if let Some(page) = search_page {
+        detail_column = detail_column.push(
+            text(format!("Match on page {}", u32::from(page) + 1))
+                .size(12)
+                .color(tokens.accent),
+        );
+    }
+    detail_column = detail_column.push(tags_row(entry_id.clone(), tags, tokens));
+    let row_content = row![
+        thumbnail_element(app, &entry_id, tokens, 52.0),
+        detail_column,
+        text(progress).size(12).color(tokens.text_secondary),
+    ]
+    .spacing(10)
+    .padding(8)
+    .align_y(iced::Alignment::Center);
+
+    button(row_content)
+        .on_press(Message::LibraryEntryClicked(entry_id))
+        .style(move |_, status| button_style(tokens, status))
+        .width(Length::Fill)
+        .into()
+}
+
+fn thumbnail_element<'a>(
+    app: &'a PDFolioApp,
+    entry_id: &EntryId,
+    tokens: ThemeTokens,
+    width: f32,
+) -> Element<'a, Message> {
+    if let Some(thumbnail) = app.thumbnails.get(entry_id) {
+        let height = width * f32::from(thumbnail.height) / f32::from(thumbnail.width.max(1));
+        image(thumbnail.handle.clone())
+            .width(width)
+            .height(height)
+            .into()
+    } else {
+        container(text("PDF").size(13).color(tokens.text_secondary))
+            .center(width)
+            .height(width * 1.32)
+            .style(move |_| {
+                container_style(
+                    tokens.placeholder,
+                    tokens.text_secondary,
+                    tokens.border,
+                    1.0,
+                )
+            })
+            .into()
+    }
+}
+
+fn tags_row<'a>(entry_id: EntryId, tags: Vec<String>, tokens: ThemeTokens) -> Element<'a, Message> {
+    let mut row = row![].spacing(4).align_y(iced::Alignment::Center);
+    for tag in tags {
+        row = row.push(
+            button(text(tag.clone()).size(11).color(tokens.text_primary))
+                .on_press(Message::TagFilterChanged(Some(tag.clone())))
+                .style(move |_, status| button_style(tokens, status)),
+        );
+    }
+    row.push(
+        button(text("+ tag").size(11).color(tokens.text_secondary))
+            .on_press(Message::StartTagEntry(entry_id))
+            .style(move |_, status| button_style(tokens, status)),
+    )
+    .into()
 }
 
 fn view_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
@@ -773,34 +1410,51 @@ fn view_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
         .and_then(|name| name.to_str())
         .unwrap_or("PDF-Folio");
 
-    let toolbar = row![
-        shell_button("Open", tokens).on_press(Message::OpenFileDialog),
-        shell_button(if app.toc_open { "Hide TOC" } else { "Show TOC" }, tokens)
-            .on_press(Message::ToggleSidebar),
-        shell_button("-", tokens).on_press(Message::ZoomOut),
-        text(format!("{} px", app.zoom_width))
-            .size(15)
-            .color(tokens.text_secondary),
-        shell_button("+", tokens).on_press(Message::ZoomIn),
-        shell_button(page_label, tokens).on_press(Message::OpenJumpDialog),
-        shell_button(view_label, tokens).on_press(Message::ToggleViewMode),
-        shell_button(
-            match app.theme {
-                AppTheme::Light => "Dark",
-                AppTheme::Dark => "Light",
-            },
-            tokens
-        )
-        .on_press(Message::ThemeToggled),
-        text(title)
-            .size(16)
-            .color(tokens.text_primary)
-            .width(Length::Fill),
-    ]
-    .spacing(10)
-    .padding(10)
-    .align_y(iced::Alignment::Center);
+    let mut toolbar = row![]
+        .spacing(10)
+        .padding(10)
+        .align_y(iced::Alignment::Center);
 
+    if app.mode == AppMode::Viewer {
+        toolbar = toolbar.push(shell_button("<", tokens).on_press(Message::BackToLibrary));
+    }
+
+    toolbar = toolbar.push(shell_button("Open", tokens).on_press(Message::OpenFileDialog));
+
+    if app.mode == AppMode::Viewer {
+        toolbar = toolbar
+            .push(
+                shell_button(if app.toc_open { "Hide TOC" } else { "Show TOC" }, tokens)
+                    .on_press(Message::ToggleSidebar),
+            )
+            .push(shell_button("-", tokens).on_press(Message::ZoomOut))
+            .push(
+                text(format!("{} px", app.zoom_width))
+                    .size(15)
+                    .color(tokens.text_secondary),
+            )
+            .push(shell_button("+", tokens).on_press(Message::ZoomIn))
+            .push(shell_button(page_label, tokens).on_press(Message::OpenJumpDialog));
+    }
+
+    toolbar = toolbar
+        .push(shell_button(view_label, tokens).on_press(Message::ToggleViewMode))
+        .push(
+            shell_button(
+                match app.theme {
+                    AppTheme::Light => "Dark",
+                    AppTheme::Dark => "Light",
+                },
+                tokens,
+            )
+            .on_press(Message::ThemeToggled),
+        )
+        .push(
+            text(title)
+                .size(16)
+                .color(tokens.text_primary)
+                .width(Length::Fill),
+        );
     container(toolbar)
         .width(Length::Fill)
         .style(move |_| container_style(tokens.surface, tokens.text_primary, tokens.border, 0.0))
@@ -1014,11 +1668,49 @@ async fn render_page(doc: Arc<PdfDoc>, key: TileKey) -> anyhow::Result<(TileKey,
     Ok((key, page))
 }
 
+async fn load_or_render_thumbnail(entry: LibraryEntry) -> anyhow::Result<(EntryId, RenderedPage)> {
+    tokio::task::spawn_blocking(move || {
+        let path = thumbnail_path(&entry.id)?;
+        if path.exists() {
+            let data = std::fs::read(&path)?;
+            let width = 200_u16;
+            let height = (data.len() / (usize::from(width) * 4)).clamp(1, usize::from(u16::MAX));
+            return Ok((
+                entry.id,
+                RenderedPage {
+                    width,
+                    height: height as u16,
+                    rgba: data,
+                },
+            ));
+        }
+
+        let doc = PdfDoc::open(&entry.path)?;
+        let page = doc.render_page(0, 200)?;
+        std::fs::write(path, &page.rgba)?;
+        Ok((entry.id, page))
+    })
+    .await?
+}
+
 fn open_document_task(path: PathBuf) -> Task<Message> {
     Task::perform(
         async move { tokio::task::spawn_blocking(move || PdfDoc::open(&path)).await? },
         |result| match result {
             Ok(doc) => Message::DocumentOpened(Arc::new(doc)),
+            Err(error) => Message::DocumentError(error.to_string()),
+        },
+    )
+}
+
+fn open_library_document_task(entry_id: EntryId, path: PathBuf) -> Task<Message> {
+    Task::perform(
+        async move { tokio::task::spawn_blocking(move || PdfDoc::open(&path)).await? },
+        move |result| match result {
+            Ok(doc) => Message::LibraryDocumentOpened {
+                entry_id: entry_id.clone(),
+                doc: Arc::new(doc),
+            },
             Err(error) => Message::DocumentError(error.to_string()),
         },
     )
@@ -1037,6 +1729,163 @@ fn open_file_dialog_task() -> Task<Message> {
     )
 }
 
+fn import_folder_dialog_task() -> Task<Message> {
+    Task::perform(
+        async {
+            rfd::AsyncFileDialog::new()
+                .pick_folder()
+                .await
+                .map(|folder| folder.path().to_path_buf())
+        },
+        |path| path.map_or(Message::FileDialogCanceled, Message::ImportFolderSelected),
+    )
+}
+
+fn import_folder_with_index(db: &Db, root: &std::path::Path) -> anyhow::Result<ImportSummary> {
+    let paths = scan_pdf_files(root)?;
+    let mut entries = Vec::new();
+    let mut errors = Vec::new();
+
+    for path in paths {
+        match import_pdf_with_index(db, path.clone()) {
+            Ok(entry) => entries.push(entry),
+            Err(error) => errors.push(format!("{}: {error}", path.display())),
+        }
+    }
+
+    Ok(ImportSummary { entries, errors })
+}
+
+fn import_pdf_with_index(db: &Db, path: PathBuf) -> anyhow::Result<ImportedEntry> {
+    let id = EntryId::new(hash_file(&path)?);
+    let inserted = db.entry_by_path(&path)?.is_none();
+    let doc = PdfDoc::open(&path)?;
+    let title = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(ToOwned::to_owned);
+    let page_count = doc.page_count();
+
+    db.insert_entry(&NewLibraryEntry {
+        id: id.clone(),
+        path: path.clone(),
+        title: title.clone(),
+        author: None,
+        page_count: Some(page_count),
+        cover_hash: None,
+    })?;
+
+    let search_index = SearchIndex::open_default()?;
+    let mut documents = Vec::with_capacity(usize::from(page_count));
+    for page in 0..page_count {
+        let body = doc.text_on_page(page).unwrap_or_default();
+        documents.push(IndexDocument {
+            id: id.as_str().to_owned(),
+            title: title.clone().unwrap_or_default(),
+            author: String::new(),
+            body,
+            page: u64::from(page),
+        });
+    }
+    search_index.replace_entry_pages(documents)?;
+
+    Ok(ImportedEntry { id, path, inserted })
+}
+
+async fn search_library_task(
+    db: Arc<Db>,
+    query: String,
+) -> anyhow::Result<(Vec<LibraryEntry>, HashMap<EntryId, u16>)> {
+    tokio::task::spawn_blocking(move || {
+        let entries = db.get_all_entries()?;
+        let normalized = query.trim().to_lowercase();
+        let search_index = SearchIndex::open_default()?;
+        let hits = search_index.search(&query, 200).unwrap_or_default();
+        let mut hit_pages = HashMap::new();
+        let mut ordered_entries = Vec::new();
+
+        for hit in hits {
+            let id = EntryId::new(hit.id);
+            if hit_pages.contains_key(&id) {
+                continue;
+            }
+            hit_pages.insert(id.clone(), hit.page.min(u64::from(u16::MAX)) as u16);
+            if let Some(entry) = entries.iter().find(|entry| entry.id == id) {
+                ordered_entries.push(entry.clone());
+            }
+        }
+
+        for entry in entries {
+            if hit_pages.contains_key(&entry.id) || !entry_matches_query(&entry, &normalized) {
+                continue;
+            }
+            ordered_entries.push(entry);
+        }
+
+        Ok((ordered_entries, hit_pages))
+    })
+    .await?
+}
+
+fn apply_watch_event(db: &Db, event: LibraryWatchEvent) -> anyhow::Result<()> {
+    match event {
+        LibraryWatchEvent::PdfCreated(path) => {
+            if path.exists() {
+                import_pdf_with_index(db, path)?;
+            }
+        }
+        LibraryWatchEvent::PdfRemoved(path) => {
+            db.set_missing_by_path(&path, true)?;
+        }
+    }
+    Ok(())
+}
+
+fn entry_matches_query(entry: &LibraryEntry, normalized_query: &str) -> bool {
+    entry_title(entry).to_lowercase().contains(normalized_query)
+        || entry
+            .author
+            .as_deref()
+            .is_some_and(|author| author.to_lowercase().contains(normalized_query))
+        || entry
+            .path
+            .to_string_lossy()
+            .to_lowercase()
+            .contains(normalized_query)
+        || entry
+            .tags
+            .iter()
+            .any(|tag| tag.to_lowercase().contains(normalized_query))
+}
+
+fn entry_title(entry: &LibraryEntry) -> String {
+    entry.title.clone().unwrap_or_else(|| {
+        entry
+            .path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("Untitled PDF")
+            .to_owned()
+    })
+}
+
+fn progress_label(entry: &LibraryEntry) -> String {
+    if entry.missing {
+        return String::from("Missing");
+    }
+
+    entry.page_count.map_or_else(
+        || String::from("Not opened"),
+        |pages| {
+            if pages == 0 {
+                String::from("Not opened")
+            } else {
+                format!("Page {} / {}", u32::from(entry.last_page) + 1, pages)
+            }
+        },
+    )
+}
+
 fn schedule_zoom_render(generation: u64) -> Task<Message> {
     Task::perform(
         async move {
@@ -1044,6 +1893,16 @@ fn schedule_zoom_render(generation: u64) -> Task<Message> {
             generation
         },
         Message::ZoomRenderSettled,
+    )
+}
+
+fn schedule_search(query: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            query
+        },
+        Message::SearchDebounced,
     )
 }
 
@@ -1141,22 +2000,12 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
 const PAGE_PADDING: f32 = 32.0;
 const PAGE_GAP: f32 = 24.0;
 const LINE_SCROLL_PIXELS: f32 = 48.0;
+const LIBRARY_OVERSCAN_ROWS: usize = 4;
+const LIBRARY_GRID_ROW_HEIGHT: f32 = 290.0;
+const LIBRARY_LIST_ROW_HEIGHT: f32 = 92.0;
 
-fn default_fixture_path() -> Option<PathBuf> {
-    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
-
-    let path = fixture_dir.join("phase1-multipage.pdf");
-    if path.exists() {
-        return Some(path);
-    }
-
-    let path = fixture_dir.join("phase1-single-page.pdf");
-
-    path.exists().then_some(path)
-}
-
-fn subscription(_app: &PDFolioApp) -> Subscription<Message> {
-    event::listen_with(|event, status, _window| {
+fn subscription(app: &PDFolioApp) -> Subscription<Message> {
+    let keyboard = event::listen_with(|event, status, _window| {
         if status == event::Status::Captured {
             return None;
         }
@@ -1207,6 +2056,68 @@ fn subscription(_app: &PDFolioApp) -> Subscription<Message> {
             }
             _ => None,
         }
+    });
+
+    let watcher = if app.settings.watch_directories.is_empty() {
+        Subscription::none()
+    } else {
+        Subscription::run_with(
+            app.settings.watch_directories.clone(),
+            watch_directories_stream,
+        )
+    };
+
+    Subscription::batch([keyboard, watcher])
+}
+
+fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<Item = Message> {
+    let paths = paths.clone();
+    stream::channel(100, async move |mut output| {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut watcher = match LibraryWatcher::new(sender) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                let _ = output.send(Message::LibraryError(error.to_string())).await;
+                return;
+            }
+        };
+
+        for path in &paths {
+            if let Err(error) = watcher.watch_directory(path) {
+                let _ = output
+                    .send(Message::LibraryError(format!(
+                        "Could not watch {}: {error}",
+                        path.display()
+                    )))
+                    .await;
+            }
+        }
+
+        let receiver = Arc::new(std::sync::Mutex::new(receiver));
+        loop {
+            let receiver = Arc::clone(&receiver);
+            let event = tokio::task::spawn_blocking(move || {
+                receiver
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .recv()
+            })
+            .await;
+
+            let Ok(Ok(event)) = event else {
+                break;
+            };
+
+            if output
+                .send(Message::LibraryWatchEvent(event))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+
+        drop(watcher);
     })
 }
 

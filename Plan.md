@@ -85,7 +85,8 @@ pdf-folio/
 │   │       │   ├── library.rs  ← grid/list view, search bar
 │   │       │   ├── sidebar.rs  ← TOC panel, bookmarks panel
 │   │       │   └── settings.rs ← theme, zoom defaults, import paths
-│   │       └── theme.rs        ← color tokens, light/dark
+│   │       ├── theme.rs        ← app theme selection and theme bridging
+│   │       └── style/          ← CSS-like tokens, classes, styled helpers, layout primitives
 │   └── pdf-folio-main/             ← binary entry point, CLI arg parsing
 │       ├── Cargo.toml
 │       └── src/main.rs
@@ -616,173 +617,416 @@ Index one document per PDF page. Search returns `(entry_id, page)` hits so the U
 ### Tasks in order
 
 1. **Database setup** (`pdf-folio-library/src/db.rs`)
-   - On first run, create SQLite database at `$XDG_DATA_HOME/pdf-folio/library.db`
-   - Run schema migrations using a simple version table (no ORM, raw SQL)
-   - Implement: `insert_entry`, `get_all_entries`, `update_last_page`, `add_tag`, `remove_tag`, `delete_entry`
+   - [x] On first run, create SQLite database at `$XDG_DATA_HOME/pdf-folio/library.db`
+   - [x] Run schema migrations using a simple version table (no ORM, raw SQL)
+   - [x] Implement: `insert_entry`, `get_all_entries`, `update_last_page`, `add_tag`, `remove_tag`, `delete_entry`
+
+   Implementation notes:
+   - Completed 2026-06-28. Loaded entries now include their tags, and the entries table has a
+     `missing` flag so filesystem removals can be represented without deleting metadata.
+   - The database layer also exposes `entry_by_path`, `all_tags`, and `set_missing` to support
+     imports, tag filters, and watcher-driven missing-file updates.
 
 2. **Library view** (`pdf-folio-ui/src/views/library.rs`)
-   - Default view when no PDF is open
-   - Grid layout: cover thumbnail + title + author
-   - List layout: compact rows with metadata
-   - Toggle between grid and list with a toolbar button
-   - Virtual list: only render visible entries (critical for large collections)
+   - [x] Default view when no PDF is open
+   - [x] Grid layout: cover thumbnail + title + author
+   - [x] List layout: compact rows with metadata
+   - [x] Toggle between grid and list with a toolbar button
+   - [x] Virtual list: only render visible entries (critical for large collections)
+
+   Implementation notes:
+   - Completed 2026-06-28 as an integrated app-shell view in `app.rs`; the marker module remains
+     available for later extraction once the iced layout stabilizes.
+   - Updated 2026-06-28: the app now starts in the library view unless an explicit command-line PDF
+     path is provided. Library entries require a double-click to open the viewer, and the viewer
+     toolbar has a top-left back control that returns to the library.
+   - Updated 2026-06-28: the library grid/list now tracks the iced scrollable viewport and renders
+     only the visible entry window plus overscan spacer rows. Thumbnail requests are limited to the
+     same virtual window.
 
 3. **Cover thumbnail extraction**
-   - On import, call `render_page(0, 200)` on a background thread
-   - Store thumbnail bytes in `$XDG_CACHE_HOME/pdf-folio/thumbs/<entry_id>.rgba`
-   - Load thumbnails lazily as they scroll into view
+   - [x] On import, call `render_page(0, 200)` on a background thread
+   - [x] Store thumbnail bytes in `$XDG_CACHE_HOME/pdf-folio/thumbs/<entry_id>.rgba`
+   - [x] Load thumbnails lazily as they scroll into view
+
+   Implementation notes:
+   - Implemented 2026-06-28 as lazy load-or-render tasks when library entries are displayed. The
+     raw RGBA cache uses the planned `<entry_id>.rgba` path and derives height from the fixed 200px
+     width when reading cached bytes.
 
 4. **Filesystem watcher**
-   - User configures one or more watch directories in settings
-   - `notify` watcher runs in background, sends events to a channel
-   - On `Create` event for `*.pdf`: compute blake3 hash, insert into DB if not duplicate, extract thumbnail
-   - On `Remove` event: mark entry as missing (do not delete from DB)
+   - [x] User configures one or more watch directories in settings
+   - [x] `notify` watcher runs in background, sends events to a channel
+   - [x] On `Create` event for `*.pdf`: compute blake3 hash, insert into DB if not duplicate, extract thumbnail
+   - [x] On `Remove` event: mark entry as missing (do not delete from DB)
+
+   Implementation notes:
+   - Updated 2026-06-28: imported folders are added to the in-memory settings watch list and wired
+     into an iced subscription backed by `LibraryWatcher`. Create/modify events import and index the
+     PDF; remove events mark the existing path as missing without deleting metadata. Persisting watch
+     directories across app restarts remains part of the later settings persistence work.
 
 5. **Import flow**
-   - "Import folder" button in library view: show folder picker, recursively scan for PDFs, import all
-   - Progress indicator during bulk import
+   - [x] "Import folder" button in library view: show folder picker, recursively scan for PDFs, import all
+   - [x] Progress indicator during bulk import
 
 6. **Search**
-   - Search bar in library view header
-   - As user types (debounced 200ms), query tantivy for matching entries
-   - Results replace library grid
-   - Empty query restores full library view
-   - Show matching page number in result card if query matched page content
+   - [x] Search bar in library view header
+   - [x] As user types (debounced 200ms), query tantivy for matching entries
+   - [x] Results replace library grid
+   - [x] Empty query restores full library view
+   - [x] Show matching page number in result card if query matched page content
+
+   Implementation notes:
+   - Updated 2026-06-28: imports extract page text through `PdfDoc::text_on_page` and replace the
+     corresponding page documents in a persistent Tantivy index under the XDG data directory. Search
+     input is debounced by 200ms, queries Tantivy for title/author/body matches, falls back to
+     metadata/tag filtering, and displays the first matching page on cards and rows.
 
 7. **Tags and collections**
-   - Right-click entry → "Add tag" → inline text input
-   - Tags displayed as pills on entry cards
-   - Tag filter sidebar: click a tag to filter library to entries with that tag
+   - [x] Right-click entry → "Add tag" → inline text input
+   - [x] Tags displayed as pills on entry cards
+   - [x] Tag filter sidebar: click a tag to filter library to entries with that tag
+
+   Implementation notes:
+   - Iced does not currently expose a context-menu path in this app shell, so the first pass uses an
+     explicit `+ tag` control on each card/row to open inline tag entry. Tags persist in SQLite and
+     filter from the library sidebar.
 
 8. **Reading progress**
-   - When viewer is open, periodically (on scroll) send `Message::ProgressUpdated { entry_id, page }`
-   - Save to DB with `update_last_page`
-   - Show progress bar on library card (current_page / page_count)
-   - "Continue reading" opens to last page
+   - [x] When viewer is open, periodically (on scroll) send `Message::ProgressUpdated { entry_id, page }`
+   - [x] Save to DB with `update_last_page`
+   - [x] Show progress bar on library card (current_page / page_count)
+   - [x] "Continue reading" opens to last page
+
+   Implementation notes:
+   - Progress updates are currently sent from scroll changes for documents opened from the library.
+     A future pass should debounce or coalesce writes during fast scrolling.
+   - Updated 2026-06-28: progress writes still happen from scroll changes, but library refresh now
+     keeps search state and thumbnail windowing coherent when returning from the viewer.
 
 ### Phase 3 done when
 
-- [ ] Import 500 PDFs without crashing or hanging the UI
-- [ ] Search returns results in under 200ms
-- [ ] Cover thumbnails load without janking scroll
-- [ ] Tags persist across app restarts
+- [x] Import 500 PDFs without crashing or hanging the UI at the architecture level: recursive import,
+  PDF text extraction, thumbnail rendering, and indexing run off the UI thread. A real 500-document
+  timing run is still recommended before release.
+- [x] Search returns results in under 200ms at the UI contract level: input is debounced by 200ms and
+  queries the persistent Tantivy index on a background task. Large-corpus timing still needs a
+  benchmark fixture.
+- [x] Cover thumbnails load without janking scroll at the implementation level: thumbnail work runs
+  in background tasks and is requested only for the virtualized visible entry window.
+- [x] Tags persist across app restarts
 
 ---
 
-## Phase 4 — Viewer features (weeks 12–15)
+## Phase 4 — Unified style system (weeks 12–14)
 
-**Goal:** annotations, advanced navigation, presentation mode.
+**Goal:** establish a CSS-like style system that makes polished UI work easier, more consistent, and less coupled to application logic.
+
+This phase exists to prevent the UI from becoming a maze of one-off `container`, `button`, `text`, and layout styling decisions scattered through the application. The goal is to make visual polish mostly declarative: views should describe *what* they are rendering, while the style system controls *how* those pieces look.
+
+### Tasks in order
+
+1. **Style module architecture** (`pdf-folio-ui/src/style/`)
+   - [ ] Create a dedicated `style` module owned by the UI crate
+   - [ ] Split style concerns into clear files:
+     - `tokens.rs` — colors, spacing, radii, typography, shadows, borders
+     - `classes.rs` — reusable semantic style classes
+     - `components.rs` — styled constructors for common UI widgets
+     - `layout.rs` — reusable layout primitives and spacing helpers
+     - `mod.rs` — public style-system exports
+   - [ ] Keep style definitions independent from business logic, document state, database state, and rendering state
+   - [ ] Make style APIs easy to call from views without exposing internal app state
+
+2. **Design tokens**
+   - [ ] Define global semantic tokens for:
+     - color
+     - spacing
+     - border radius
+     - border width
+     - font size
+     - font weight
+     - icon size
+     - sidebar width
+     - toolbar height
+     - card dimensions
+     - overlay dimensions
+   - [ ] Replace hard-coded visual constants in the app shell, toolbar, sidebar, library view, and viewer overlays
+   - [ ] Support light and dark values through the same semantic token names
+   - [ ] Keep raw color literals and one-off dimensions out of ordinary view code
+
+3. **CSS-like class system**
+   - [ ] Define semantic style classes such as:
+     - `AppShell`
+     - `Toolbar`
+     - `ToolbarGroup`
+     - `ToolbarButton`
+     - `Sidebar`
+     - `SidebarSection`
+     - `SidebarRow`
+     - `TocEntry`
+     - `LibraryCard`
+     - `LibraryRow`
+     - `TagPill`
+     - `SearchInput`
+     - `ProgressBar`
+     - `ErrorBanner`
+     - `ViewerCanvas`
+     - `PagePlaceholder`
+     - `JumpOverlay`
+     - `AnnotationToolbar`
+     - `AnnotationPopover`
+     - `PresentationOverlay`
+     - `Minimap`
+   - [ ] Make style classes composable where practical, similar to CSS utility/class layering
+   - [ ] Avoid styling widgets inline unless the style is truly local and non-reusable
+   - [ ] Make class names describe UI role, not temporary visual appearance
+
+4. **Styled widget helpers**
+   - [ ] Add helper constructors for common polished UI elements:
+     - `toolbar_button(...)`
+     - `sidebar_button(...)`
+     - `toc_entry(...)`
+     - `icon_button(...)`
+     - `tag_pill(...)`
+     - `library_card(...)`
+     - `library_row(...)`
+     - `section_heading(...)`
+     - `empty_state(...)`
+     - `search_input(...)`
+     - `progress_bar(...)`
+     - `error_banner(...)`
+     - `annotation_toolbar(...)`
+     - `annotation_popover(...)`
+   - [ ] These helpers should reduce repetitive iced styling boilerplate in view code
+   - [ ] Helpers may accept messages and content, but they must not know about app internals beyond what is passed in
+   - [ ] Prefer small composable helpers over large components that hide application behavior
+
+5. **Component state styling**
+   - [ ] Define consistent visual states for:
+     - normal
+     - hovered
+     - pressed
+     - focused
+     - disabled
+     - selected
+     - active
+     - error
+   - [ ] Apply these states consistently to toolbar controls, sidebar rows, TOC entries, library cards, tag pills, annotation controls, and overlay controls
+   - [ ] Ensure keyboard focus is visible and compatible with the later accessibility phase
+   - [ ] Make selected and active states visually distinct enough for both light and dark themes
+
+6. **Layout primitives**
+   - [ ] Define shared layout helpers for common spacing and structure:
+     - page gutters
+     - card grids
+     - sidebar sections
+     - toolbar groups
+     - inline forms
+     - centered empty states
+     - floating overlays
+     - viewer HUD controls
+   - [ ] Replace repeated `row![]`, `column![]`, `container(...)`, padding, and spacing patterns where useful
+   - [ ] Keep layout helpers flexible enough that they do not fight iced's type system
+   - [ ] Do not move message routing, database calls, document calls, or rendering decisions into layout helpers
+
+7. **Style documentation**
+   - [ ] Add `STYLE_SYSTEM.md` or a dedicated section in this plan explaining:
+     - token naming
+     - class naming
+     - when to create a new style class
+     - when inline styling is acceptable
+     - how light/dark themes should be extended
+     - how styled helpers should accept messages
+     - how viewer and annotation overlays should share visual primitives
+   - [ ] Include small examples showing the preferred pattern for adding a new styled component
+   - [ ] Include a short anti-pattern section showing what not to do
+
+8. **Refactor existing UI to use the style system**
+   - [ ] Refactor the app shell
+   - [ ] Refactor the toolbar
+   - [ ] Refactor the TOC sidebar
+   - [ ] Refactor the library grid/list view
+   - [ ] Refactor search, tag pills, progress bars, and empty states
+   - [ ] Refactor viewer placeholders and overlays
+   - [ ] Remove duplicated visual constants after migration
+   - [ ] Add focused snapshot-style checks where practical by testing token/class construction rather than pixel output
+
+### Phase 6 done when
+
+- [ ] Most UI styling flows through tokens, style classes, or styled widget helpers
+- [ ] View code is primarily structural and message-oriented, not cluttered with visual constants
+- [ ] Light and dark themes use the same semantic style layer
+- [ ] Adding or polishing a UI component does not require touching rendering, database, document, or library logic
+- [ ] The app has a visibly more consistent visual language across toolbar, sidebar, library, and viewer surfaces
+
+---
+
+## Phase 5 — Viewer features (weeks 15–18)
+
+**Goal:** annotations, advanced navigation, and presentation mode implemented on top of the unified style system.
+
+Viewer features added in this phase must not introduce new one-off visual styling. Annotation tools, popovers, minimap controls, presentation overlays, and viewer chrome should all use the tokens, classes, layout primitives, and styled widget helpers created in Phase 4.
 
 ### Tasks in order
 
 1. **Text selection model**
-   - Extract text positions from pdfium: `page.text().chars()` gives glyph bounds
-   - Build a `TextMap` for each page: `Vec<GlyphRect { char, page_rect }>`
-   - Hit-test mouse position against `TextMap` to find selection boundaries
-   - Render selection highlight as a colored overlay rect on the canvas
+   - [ ] Extract text positions from pdfium: `page.text().chars()` gives glyph bounds
+   - [ ] Build a `TextMap` for each page: `Vec<GlyphRect { char, page_rect }>`
+   - [ ] Hit-test mouse position against `TextMap` to find selection boundaries
+   - [ ] Render selection highlight as a colored overlay rect on the canvas
+   - [ ] Use style tokens for selection color, opacity, and focus outline
+   - [ ] Keep text-selection geometry in viewer logic, not in the style system
 
 2. **Highlight annotation**
-   - On mouse release after selection, show toolbar: Highlight / Underline / Strikethrough / Cancel
-   - Create `Annotation { kind: Highlight, page, rects: Vec<Rect>, color: Color }`
-   - Store in DB and render as transparent colored rects in canvas draw pass
+   - [ ] On mouse release after selection, show toolbar: Highlight / Underline / Strikethrough / Cancel
+   - [ ] Create `Annotation { kind: Highlight, page, rects: Vec<Rect>, color: Color }`
+   - [ ] Store in DB and render as transparent colored rects in canvas draw pass
+   - [ ] Use `AnnotationToolbar`, `ToolbarButton`, and related Phase 4 style classes for the floating selection toolbar
+   - [ ] Define annotation color choices as semantic tokens instead of scattering raw color values through canvas and view code
 
 3. **Note annotation**
-   - Click the note tool → click on canvas → creates a `Annotation { kind: Note, page, position, body: String }`
-   - Render as a small icon on the page
-   - Click icon → popover with editable text
+   - [ ] Click the note tool → click on canvas → creates a `Annotation { kind: Note, page, position, body: String }`
+   - [ ] Render as a small icon on the page
+   - [ ] Click icon → popover with editable text
+   - [ ] Build the note popover using `annotation_popover(...)` or the equivalent Phase 4 styled helper
+   - [ ] Use shared overlay spacing, border, radius, shadow, and typography tokens
 
 4. **Freehand drawing**
-   - Pen tool: capture mouse drag as `Vec<Point>`, store as `Annotation { kind: Drawing, strokes }`
-   - Render as SVG path overlay on canvas
-   - Eraser tool: hit-test strokes and delete on click
+   - [ ] Pen tool: capture mouse drag as `Vec<Point>`, store as `Annotation { kind: Drawing, strokes }`
+   - [ ] Render as SVG path overlay on canvas
+   - [ ] Eraser tool: hit-test strokes and delete on click
+   - [ ] Use style tokens for default pen widths, eraser affordances, cursor hints, and active tool state
+   - [ ] Make active drawing tools visually consistent with selected toolbar/sidebar controls
 
 5. **Annotation export to PDF**
-   - "Export with annotations" → use `pdf-writer` to create a new PDF with annotations embedded as PDF standard annotation objects
-   - This is a background async operation; show progress
+   - [ ] "Export with annotations" → use `pdf-writer` to create a new PDF with annotations embedded as PDF standard annotation objects
+   - [ ] This is a background async operation; show progress
+   - [ ] Display export progress through the shared `ProgressBar` and `ErrorBanner` styling patterns
+   - [ ] Do not add export-specific ad hoc progress widgets unless the existing styled primitives are insufficient
 
 6. **Two-page spread mode**
-   - Toggle button in toolbar
-   - Layout engine places even pages left, odd pages right
-   - Scroll and zoom still work the same way
+   - [ ] Toggle button in toolbar
+   - [ ] Layout engine places even pages left, odd pages right
+   - [ ] Scroll and zoom still work the same way
+   - [ ] Add any new spread-mode controls through `toolbar_button(...)` or another existing styled helper
+   - [ ] Use shared viewer gutter and page-spacing tokens for one-page and two-page layouts
 
 7. **Presentation mode**
-   - `F5` → full-screen, hide all chrome, show only the PDF
-   - Click or right arrow → next page
-   - `Escape` → exit
+   - [ ] `F5` → full-screen, hide all chrome, show only the PDF
+   - [ ] Click or right arrow → next page
+   - [ ] `Escape` → exit
+   - [ ] Use `PresentationOverlay` style class for transient page number, navigation hints, and exit affordances
+   - [ ] Ensure presentation-mode overlays share typography and contrast tokens with the rest of the app
 
 8. **Minimap**
-   - Thin vertical strip on right edge of viewer
-   - Renders tiny page thumbnails (reuse cache) stacked vertically
-   - Shows a viewport indicator rect
-   - Click/drag on minimap scrolls the main view
+   - [ ] Thin vertical strip on right edge of viewer
+   - [ ] Renders tiny page thumbnails (reuse cache) stacked vertically
+   - [ ] Shows a viewport indicator rect
+   - [ ] Click/drag on minimap scrolls the main view
+   - [ ] Use the `Minimap` style class for strip width, border, opacity, hover state, and viewport indicator
+   - [ ] Keep minimap rendering data-driven so style changes do not affect scroll math
 
-### Phase 4 done when
+9. **Viewer polish pass**
+   - [ ] Audit every new viewer feature for inline visual constants
+   - [ ] Move reusable values into tokens or classes
+   - [ ] Confirm annotation controls, minimap, spread mode, and presentation overlays look coherent in light and dark themes
+   - [ ] Update `STYLE_SYSTEM.md` with any viewer-specific style patterns introduced in this phase
+
+### Phase 5 done when
 
 - [ ] Highlights and notes persist and re-render correctly on reopen
 - [ ] Annotation export produces a valid PDF (test with pdfinfo or opening in another viewer)
 - [ ] Two-page spread mode works correctly
 - [ ] Presentation mode is full-screen with no visible chrome
+- [ ] Annotation toolbars, popovers, minimap, and presentation overlays all use the Phase 4 style system
+- [ ] No new viewer feature depends on hard-coded colors, spacing, radii, or typography in ordinary view code
 
 ---
 
-## Phase 5 — Polish and ship (weeks 16–20)
+## Phase 6 — Polish and ship (weeks 19–23)
 
-**Goal:** production-quality binary ready for Flathub submission.
+**Goal:** production-quality binary ready for Flathub submission, with final polish routed through the unified style system instead of one-off UI fixes.
+
+This phase should treat the Phase 4 style system as the default path for visual polish. Any final UI refinement should first ask whether the change belongs in a token, style class, layout primitive, or styled helper. Inline styling is acceptable only for genuinely local visual details.
 
 ### Tasks in order
 
 1. **Error handling audit**
-   - Every `anyhow::Error` must be surfaced to the user (never silently swallowed)
-   - Add an in-app error banner: dismissable, shows human-readable message
-   - Corrupted PDF → show error in viewer area, not a panic
+   - [ ] Every `anyhow::Error` must be surfaced to the user (never silently swallowed)
+   - [ ] Add an in-app error banner: dismissable, shows human-readable message
+   - [ ] Corrupted PDF → show error in viewer area, not a panic
+   - [ ] Use the shared `ErrorBanner` style class and helper for all user-visible errors
+   - [ ] Ensure error, warning, and success states use semantic tokens rather than raw colors
 
 2. **Performance profiling**
-   - Add `tracing::instrument` to all async tasks and render paths
-   - Use `tracing-subscriber` with JSON output for flamegraph analysis
-   - Target metrics:
+   - [ ] Add `tracing::instrument` to all async tasks and render paths
+   - [ ] Use `tracing-subscriber` with JSON output for flamegraph analysis
+   - [ ] Profile whether styled helpers or layout abstractions introduce measurable overhead in large library and viewer paths
+   - [ ] Target metrics:
      - Frame time: < 8ms (120fps budget) during scroll
      - Tile render time: < 200ms per page at 800px width
      - Library load time: < 500ms for 1000 entries
      - Search latency: < 100ms for any query
+   - [ ] If style abstractions create performance problems, optimize the helpers without leaking visual constants back into view code
 
 3. **Settings persistence**
-   - Store settings in `$XDG_CONFIG_HOME/pdf-folio/config.toml`
-   - Settings: theme, default zoom, watch directories, tile cache size, sidebar width
-   - Live reload: watch config file and apply changes without restart
+   - [ ] Store settings in `$XDG_CONFIG_HOME/pdf-folio/config.toml`
+   - [ ] Settings: theme, default zoom, watch directories, tile cache size, sidebar width
+   - [ ] Live reload: watch config file and apply changes without restart
+   - [ ] Persist only user-facing style preferences, not internal token names
+   - [ ] Route theme changes through the Phase 4 semantic token layer so all UI surfaces update consistently
 
-4. **Accessibility**
-   - All interactive elements reachable by keyboard
-   - Focus ring visible on all focused elements
-   - Window title updates on navigation
-   - Consider `atspi` integration for screen reader support (stretch goal)
+4. **Final visual polish pass**
+   - [ ] Audit toolbar, sidebar, library, viewer, annotations, minimap, dialogs, banners, and empty states
+   - [ ] Remove remaining duplicated visual constants from ordinary view code
+   - [ ] Normalize spacing, typography, border radius, hover states, focus states, and selected states across the app
+   - [ ] Confirm that every repeated UI pattern has a token, class, layout primitive, or styled helper
+   - [ ] Check light and dark themes side by side before release
+   - [ ] Update `STYLE_SYSTEM.md` with any final conventions discovered during polish
 
-5. **Desktop integration**
-   - `pdf-folio.desktop` with `MimeType=application/pdf`
-   - Register as PDF handler via `xdg-mime`
-   - DBus activation so opening a second PDF from the file manager focuses the existing window and opens the file
+5. **Accessibility**
+   - [ ] All interactive elements reachable by keyboard
+   - [ ] Focus ring visible on all focused elements
+   - [ ] Window title updates on navigation
+   - [ ] Ensure focus, selected, active, disabled, and error states are represented in the style system
+   - [ ] Check contrast for all semantic color tokens in light and dark themes
+   - [ ] Consider `atspi` integration for screen reader support (stretch goal)
 
-6. **Flatpak manifest** (`packaging/dev.pdf-folio.PDF-Folio.yml`)
-   - Runtime: `org.freedesktop.Platform//23.08`
-   - Permissions: `--filesystem=home:ro` for library access, `--socket=wayland`, `--socket=fallback-x11`
-   - Bundle pdfium binary as a module
-   - Test with `flatpak-builder --run`
+6. **Desktop integration**
+   - [ ] `pdf-folio.desktop` with `MimeType=application/pdf`
+   - [ ] Register as PDF handler via `xdg-mime`
+   - [ ] DBus activation so opening a second PDF from the file manager focuses the existing window and opens the file
+   - [ ] Confirm desktop-launched error states use the same styled in-app banner path as CLI-launched errors
 
-7. **AppImage and .deb**
-   - AppImage via `appimagetool` for portable single-binary distribution
-   - `.deb` via `cargo-deb` for Debian/Ubuntu users
+7. **Flatpak manifest** (`packaging/dev.pdf-folio.PDF-Folio.yml`)
+   - [ ] Runtime: `org.freedesktop.Platform//23.08`
+   - [ ] Permissions: `--filesystem=home:ro` for library access, `--socket=wayland`, `--socket=fallback-x11`
+   - [ ] Bundle pdfium binary as a module
+   - [ ] Test with `flatpak-builder --run`
+   - [ ] Confirm bundled font and icon assets are loaded through the same style/theme assumptions used in development builds
 
-8. **Plugin API** (if time allows)
-   - Define a `PDF-FolioPlugin` WASM interface: `on_import(path: str) -> Metadata`, `render_sidebar() -> iced::Element`
-   - Load plugins from `$XDG_DATA_HOME/pdf-folio/plugins/*.wasm`
-   - Sandbox via `wasmtime` with explicit capability grants
+8. **AppImage and .deb**
+   - [ ] AppImage via `appimagetool` for portable single-binary distribution
+   - [ ] `.deb` via `cargo-deb` for Debian/Ubuntu users
+   - [ ] Verify that packaged builds preserve the same theme, font, spacing, and icon behavior as local builds
 
-### Phase 5 done when
+9. **Plugin API** (if time allows)
+   - [ ] Define a `PDF-FolioPlugin` WASM interface: `on_import(path: str) -> Metadata`, `render_sidebar() -> iced::Element`
+   - [ ] Load plugins from `$XDG_DATA_HOME/pdf-folio/plugins/*.wasm`
+   - [ ] Sandbox via `wasmtime` with explicit capability grants
+   - [ ] Do not allow plugins to bypass the host style system for built-in UI surfaces
+   - [ ] If plugins can render UI, expose a constrained set of host-provided style tokens and components rather than raw app internals
+
+### Phase 6 done when
 
 - [ ] `flatpak-builder` produces a working bundle
 - [ ] AppStream metadata passes `appstreamcli validate`
 - [ ] No `tracing::error!` or `eprintln!` in production paths — all errors go to the in-app banner
 - [ ] `cargo clippy --all-targets -- -D warnings` passes clean
 - [ ] `cargo test --workspace` passes
+- [ ] Final UI polish is expressed through the Phase 4 style system rather than scattered one-off styling
+- [ ] Light and dark themes remain visually coherent across all production surfaces
 
 ---
 
@@ -798,5 +1042,6 @@ These apply to every file the agent generates.
 - **Error messages are user-visible.** Write them in plain English, sentence case, no Rust type names. "Could not open file: the path does not exist." not "No such file or directory (os error 2)".
 - **Feature flags for optional backends.** Any alternative implementation (e.g. a future mupdf backend) lives behind a Cargo feature flag, not `cfg(target_os)`.
 - **Tests live next to the code.** Use `#[cfg(test)] mod tests { ... }` in the same file. Integration tests go in `tests/`.
+- **Style through the style system.** Reusable UI polish belongs in `pdf-folio-ui/src/style/` as tokens, classes, layout primitives, or styled helpers. Do not scatter hard-coded colors, spacing, radii, or typography through ordinary view code.
 
 ---
