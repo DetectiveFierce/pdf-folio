@@ -1,6 +1,8 @@
-//! Application theme tokens.
+//! Application theme selection.
 
 use iced::Color;
+
+use crate::style::ThemeTokens;
 
 /// Supported visual themes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,44 +28,31 @@ impl AppTheme {
             Self::Light => ThemeTokens {
                 background: Color::from_rgb8(238, 240, 244),
                 surface: Color::WHITE,
+                surface_raised: Color::from_rgb8(247, 249, 252),
                 text_primary: Color::from_rgb8(25, 31, 42),
                 text_secondary: Color::from_rgb8(92, 101, 116),
                 accent: Color::from_rgb8(43, 112, 197),
                 border: Color::from_rgb8(207, 213, 224),
+                error: Color::from_rgb8(176, 48, 64),
                 canvas: Color::from_rgb8(224, 228, 235),
                 placeholder: Color::from_rgb8(204, 211, 221),
+                focus: Color::from_rgb8(43, 112, 197),
+                shadow: Color::from_rgba8(0, 0, 0, 0.20),
             },
             Self::Dark => ThemeTokens {
-                background: Color::from_rgb8(22, 25, 31),
-                surface: Color::from_rgb8(32, 37, 47),
-                text_primary: Color::from_rgb8(238, 241, 246),
-                text_secondary: Color::from_rgb8(157, 166, 181),
-                accent: Color::from_rgb8(104, 166, 255),
-                border: Color::from_rgb8(63, 71, 86),
-                canvas: Color::from_rgb8(34, 38, 46),
-                placeholder: Color::from_rgb8(89, 98, 114),
+                background: Color::from_rgb8(24, 24, 24),
+                surface: Color::from_rgb8(32, 32, 32),
+                surface_raised: Color::from_rgb8(40, 40, 40),
+                text_primary: Color::from_rgb8(228, 228, 228),
+                text_secondary: Color::from_rgb8(153, 153, 153),
+                accent: Color::from_rgb8(102, 102, 102),
+                border: Color::from_rgb8(46, 46, 46),
+                error: Color::from_rgb8(217, 64, 64),
+                canvas: Color::from_rgb8(24, 24, 24),
+                placeholder: Color::from_rgb8(40, 40, 40),
+                focus: Color::from_rgb8(68, 68, 68),
+                shadow: Color::from_rgba8(0, 0, 0, 0.50),
             },
         }
     }
-}
-
-/// Theme color tokens used by PDF-Folio views.
-#[derive(Debug, Clone, Copy)]
-pub struct ThemeTokens {
-    /// Window background.
-    pub background: Color,
-    /// Toolbar and sidebar surface.
-    pub surface: Color,
-    /// Primary text color.
-    pub text_primary: Color,
-    /// Secondary text color.
-    pub text_secondary: Color,
-    /// Accent color for active controls.
-    pub accent: Color,
-    /// Border color.
-    pub border: Color,
-    /// Viewer canvas background.
-    pub canvas: Color,
-    /// Placeholder page fill.
-    pub placeholder: Color,
 }

@@ -118,6 +118,12 @@ pub enum Message {
     },
     /// Library scroll viewport changed.
     LibraryScrolled { offset_y: f32, viewport_height: f32 },
+    /// Begin resizing the library tag sidebar.
+    BeginTagSidebarResize,
+    /// Resize the library tag sidebar to a new logical width.
+    TagSidebarResizeDragged(f32),
+    /// Finish resizing the library tag sidebar.
+    EndTagSidebarResize,
     /// A filesystem watcher event arrived.
     LibraryWatchEvent(LibraryWatchEvent),
     /// Tag filter changed.

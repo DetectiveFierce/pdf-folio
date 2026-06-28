@@ -9,11 +9,10 @@ use anyhow::Result;
 use iced::futures::SinkExt;
 use iced::mouse;
 use iced::stream;
-use iced::widget::{button, canvas, column, container, image, row, scrollable, text, text_input};
-use iced::{
-    event, keyboard, Background, Border, Color, Element, Event, Length, Point, Rectangle, Renderer,
-    Size,
+use iced::widget::{
+    canvas, column, container, image, mouse_area, row, scrollable, text, text_input,
 };
+use iced::{event, keyboard, Element, Event, Length, Point, Rectangle, Renderer, Size};
 use iced::{Subscription, Task, Theme};
 use pdf_folio_core::{Annotation, OutlineNode, PdfDoc, RenderedPage, TileCache, TileKey};
 use pdf_folio_library::{
@@ -22,7 +21,19 @@ use pdf_folio_library::{
 };
 
 use crate::messages::{Message, Shortcut};
-use crate::theme::{AppTheme, ThemeTokens};
+use crate::style::layout::{
+    JUMP_INPUT_WIDTH, LIBRARY_CARD_THUMBNAIL_WIDTH, LIBRARY_GRID_ROW_HEIGHT,
+    LIBRARY_LIST_ROW_HEIGHT, LIBRARY_ROW_PROGRESS_WIDTH, LIBRARY_ROW_THUMBNAIL_WIDTH,
+    LIBRARY_SIDEBAR_MAX_WIDTH, LIBRARY_SIDEBAR_MIN_WIDTH, LIBRARY_SIDEBAR_WIDTH,
+    SIDEBAR_RESIZE_HANDLE_WIDTH, VIEWER_SIDEBAR_WIDTH,
+};
+use crate::style::{
+    container_style, empty_state, icon_button, library_card, library_row, progress_bar,
+    search_input, section_heading, sidebar_button, tag_pill, text_input_style, toc_entry,
+    toolbar_button, viewer_primitives, Class, FontSize, Spacing, ThemeTokens, CARD_GRID_COLUMNS,
+};
+use crate::style::{LIBRARY_OVERSCAN_ROWS, LINE_SCROLL_PIXELS, WINDOW_SIZE};
+use crate::theme::AppTheme;
 
 /// Primary app mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +155,10 @@ pub struct PDFolioApp {
     pub library_scroll_offset: f32,
     /// Last known library viewport height.
     pub library_viewport_height: f32,
+    /// Current width of the library tag sidebar.
+    pub library_tag_sidebar_width: f32,
+    /// Whether the library tag sidebar is being resized.
+    pub resizing_library_tag_sidebar: bool,
     /// Lazily loaded cover thumbnails keyed by entry id.
     pub thumbnails: HashMap<EntryId, ThumbnailView>,
     /// Thumbnail loads/renders currently in flight.
@@ -217,6 +232,8 @@ impl PDFolioApp {
             search_generation: 0,
             library_scroll_offset: 0.0,
             library_viewport_height: 720.0,
+            library_tag_sidebar_width: LIBRARY_SIDEBAR_WIDTH,
+            resizing_library_tag_sidebar: false,
             thumbnails: HashMap::new(),
             pending_thumbnails: HashSet::new(),
             active_tag_filter: None,
@@ -361,8 +378,8 @@ impl PDFolioApp {
 
         let page_count = doc.page_count();
         let top = self.scroll_offset.max(0.0);
-        let bottom = top + self.viewport_height.max(1.0) + PAGE_GAP;
-        let mut y = PAGE_PADDING;
+        let bottom = top + self.viewport_height.max(1.0) + Spacing::PAGE_GAP;
+        let mut y = Spacing::PAGE_GUTTER;
         let mut first = None;
         let mut end = 0;
 
@@ -378,7 +395,7 @@ impl PDFolioApp {
                 break;
             }
 
-            y = page_bottom + PAGE_GAP;
+            y = page_bottom + Spacing::PAGE_GAP;
         }
 
         first.unwrap_or(0)..end.max(first.unwrap_or(0).saturating_add(1).min(page_count))
@@ -408,13 +425,13 @@ impl PDFolioApp {
 
     fn content_height(&self) -> f32 {
         let pages: f32 = (0..self.doc.as_ref().map_or(0, |doc| doc.page_count()))
-            .map(|page| self.page_height(page) + PAGE_GAP)
+            .map(|page| self.page_height(page) + Spacing::PAGE_GAP)
             .sum();
-        pages + PAGE_PADDING * 2.0
+        pages + Spacing::PAGE_GUTTER * 2.0
     }
 
     fn content_width(&self) -> f32 {
-        f32::from(self.zoom_width) + PAGE_PADDING * 2.0
+        f32::from(self.zoom_width) + Spacing::PAGE_GUTTER * 2.0
     }
 
     fn current_page(&self) -> u16 {
@@ -461,7 +478,7 @@ impl PDFolioApp {
         if self.compact_view_mode {
             1
         } else {
-            3
+            CARD_GRID_COLUMNS
         }
     }
 
@@ -524,9 +541,9 @@ impl PDFolioApp {
     }
 
     fn page_top(&self, target_page: u16) -> f32 {
-        let mut y = PAGE_PADDING;
+        let mut y = Spacing::PAGE_GUTTER;
         for page in 0..target_page {
-            y += self.page_height(page) + PAGE_GAP;
+            y += self.page_height(page) + Spacing::PAGE_GAP;
         }
         y
     }
@@ -686,7 +703,7 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
     })
     .subscription(subscription)
     .scale_factor(|app| app.scale_factor)
-    .window_size([960.0, 1080.0])
+    .window_size(WINDOW_SIZE)
     .centered()
     .run()?;
 
@@ -841,6 +858,18 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library_scroll_offset = offset_y.max(0.0);
             app.library_viewport_height = viewport_height.max(1.0);
             return app.request_visible_thumbnails();
+        }
+        Message::BeginTagSidebarResize => {
+            app.resizing_library_tag_sidebar = true;
+        }
+        Message::TagSidebarResizeDragged(width) => {
+            if app.resizing_library_tag_sidebar {
+                app.library_tag_sidebar_width =
+                    width.clamp(LIBRARY_SIDEBAR_MIN_WIDTH, LIBRARY_SIDEBAR_MAX_WIDTH);
+            }
+        }
+        Message::EndTagSidebarResize => {
+            app.resizing_library_tag_sidebar = false;
         }
         Message::LibraryWatchEvent(event) => {
             let db = Arc::clone(&app.db);
@@ -1128,7 +1157,7 @@ fn view(app: &PDFolioApp) -> Element<'_, Message> {
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(move |_| container_style(tokens.background, tokens.text_primary, tokens.border, 0.0))
+        .style(move |_| container_style(tokens, Class::AppShell))
         .into()
 }
 
@@ -1138,30 +1167,36 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let window = app.visible_library_entry_window(entries.len());
     let sidebar = view_library_tag_sidebar(app);
     let header = row![
-        text_input("Search library", &app.search_query)
-            .on_input(Message::SearchQueryChanged)
-            .width(Length::Fill),
-        shell_button("Import folder", tokens).on_press(Message::ImportFolderDialog),
+        search_input(
+            "Search library",
+            &app.search_query,
+            tokens,
+            Message::SearchQueryChanged
+        )
+        .width(Length::Fill),
+        toolbar_button("Import folder", tokens).on_press(Message::ImportFolderDialog),
     ]
-    .spacing(10)
+    .spacing(Spacing::MD)
     .align_y(iced::Alignment::Center);
 
     let status = app
         .library_status
         .as_deref()
         .unwrap_or("No PDFs imported yet");
-    let mut content = column![header, text(status).size(13).color(tokens.text_secondary),]
-        .spacing(10)
-        .padding(12);
+    let mut content = column![
+        header,
+        text(status).size(FontSize::SM).color(tokens.text_secondary),
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::LG);
 
     if entries.is_empty() {
-        content = content.push(
-            container(text("Import a folder of PDFs to build your library.").size(16))
-                .center(Length::Fill)
-                .height(Length::Fill),
-        );
+        content = content.push(empty_state(
+            "Import a folder of PDFs to build your library.",
+            tokens,
+        ));
     } else if app.compact_view_mode {
-        let mut rows = column![].spacing(6);
+        let mut rows = column![].spacing(Spacing::SM);
         let top_spacer = window.start as f32 * LIBRARY_LIST_ROW_HEIGHT;
         let bottom_spacer =
             entries.len().saturating_sub(window.end) as f32 * LIBRARY_LIST_ROW_HEIGHT;
@@ -1176,7 +1211,7 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         }
         content = content.push(library_scrollable(rows));
     } else {
-        let mut rows = column![].spacing(10);
+        let mut rows = column![].spacing(Spacing::MD);
         let per_row = app.library_entries_per_row();
         let top_rows = window.start / per_row;
         let total_rows = entries.len().div_ceil(per_row);
@@ -1185,7 +1220,7 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             rows = rows.push(container("").height(top_rows as f32 * LIBRARY_GRID_ROW_HEIGHT));
         }
         for chunk in entries[window.clone()].chunks(per_row) {
-            let mut card_row = row![].spacing(10);
+            let mut card_row = row![].spacing(Spacing::MD);
             for entry in chunk {
                 card_row = card_row.push(library_entry_card(app, entry.clone(), tokens));
             }
@@ -1202,12 +1237,7 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         container(content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(move |_| container_style(
-                tokens.background,
-                tokens.text_primary,
-                tokens.border,
-                0.0
-            ))
+            .style(move |_| container_style(tokens, Class::AppShell))
     ]
     .height(Length::Fill)
     .into()
@@ -1229,23 +1259,45 @@ fn library_scrollable<'a>(content: iced::widget::Column<'a, Message>) -> Element
 
 fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens();
+    let sidebar_width = app.library_tag_sidebar_width;
     let mut tags = column![
-        text("Tags").size(16).color(tokens.text_primary),
-        shell_button("All", tokens).on_press(Message::TagFilterChanged(None)),
+        section_heading("Tags", tokens),
+        sidebar_button(truncate_for_width("All", sidebar_width, 0.0), tokens)
+            .on_press(Message::TagFilterChanged(None)),
     ]
-    .spacing(8)
-    .padding(10);
+    .spacing(Spacing::SM)
+    .padding(Spacing::MD);
 
     for tag in app.all_tags() {
-        tags = tags
-            .push(shell_button(tag.clone(), tokens).on_press(Message::TagFilterChanged(Some(tag))));
+        let label = truncate_for_width(&tag, sidebar_width, 0.0);
+        tags =
+            tags.push(sidebar_button(label, tokens).on_press(Message::TagFilterChanged(Some(tag))));
     }
 
-    container(tags)
-        .width(180)
+    let sidebar = container(tags)
+        .width(sidebar_width)
         .height(Length::Fill)
-        .style(move |_| container_style(tokens.surface, tokens.text_primary, tokens.border, 0.0))
-        .into()
+        .style(move |_| container_style(tokens, Class::Sidebar));
+
+    let handle_color = if app.resizing_library_tag_sidebar {
+        tokens.focus
+    } else {
+        tokens.border
+    };
+    let resize_handle = mouse_area(
+        container("")
+            .width(SIDEBAR_RESIZE_HANDLE_WIDTH)
+            .height(Length::Fill)
+            .style(move |_| {
+                let mut style = container_style(tokens, Class::Sidebar);
+                style.background = Some(iced::Background::Color(handle_color));
+                style
+            }),
+    )
+    .on_press(Message::BeginTagSidebarResize)
+    .on_release(Message::EndTagSidebarResize);
+
+    row![sidebar, resize_handle].height(Length::Fill).into()
 }
 
 fn library_entry_card<'a>(
@@ -1260,17 +1312,23 @@ fn library_entry_card<'a>(
         .clone()
         .unwrap_or_else(|| String::from("Unknown author"));
     let progress = progress_label(&entry);
+    let progress_value = progress_fraction(&entry);
     let search_page = app.search_hit_pages.get(&entry_id).copied();
     let tags = entry.tags.clone();
     let mut body = column![
-        thumbnail_element(app, &entry_id, tokens, 132.0),
-        text(title).size(15).color(tokens.text_primary),
-        text(author).size(12).color(tokens.text_secondary),
-        text(progress).size(12).color(tokens.text_secondary),
+        thumbnail_element(app, &entry_id, tokens, LIBRARY_CARD_THUMBNAIL_WIDTH),
+        text(title)
+            .size(FontSize::CONTROL)
+            .color(tokens.text_primary),
+        text(author).size(FontSize::SM).color(tokens.text_secondary),
+        text(progress)
+            .size(FontSize::SM)
+            .color(tokens.text_secondary),
+        progress_bar(progress_value, tokens),
         tags_row(entry_id.clone(), tags, tokens),
     ]
-    .spacing(6)
-    .padding(10);
+    .spacing(Spacing::SM)
+    .padding(Spacing::MD);
 
     if app.tag_entry_id.as_ref() == Some(&entry_id) {
         body = body.push(
@@ -1282,15 +1340,13 @@ fn library_entry_card<'a>(
     if let Some(page) = search_page {
         body = body.push(
             text(format!("Match on page {}", u32::from(page) + 1))
-                .size(12)
+                .size(FontSize::SM)
                 .color(tokens.accent),
         );
     }
 
-    button(body)
+    library_card(body, tokens)
         .on_press(Message::LibraryEntryClicked(entry_id))
-        .style(move |_, status| button_style(tokens, status))
-        .width(Length::FillPortion(1))
         .into()
 }
 
@@ -1310,34 +1366,44 @@ fn library_entry_row<'a>(
     );
     let tags = entry.tags.clone();
     let progress = progress_label(&entry);
+    let progress_value = progress_fraction(&entry);
     let search_page = app.search_hit_pages.get(&entry_id).copied();
     let mut detail_column = column![
-        text(title).size(15).color(tokens.text_primary),
-        text(details).size(12).color(tokens.text_secondary),
+        text(title)
+            .size(FontSize::CONTROL)
+            .color(tokens.text_primary),
+        text(details)
+            .size(FontSize::SM)
+            .color(tokens.text_secondary),
     ]
-    .spacing(3)
+    .spacing(Spacing::XS)
     .width(Length::Fill);
     if let Some(page) = search_page {
         detail_column = detail_column.push(
             text(format!("Match on page {}", u32::from(page) + 1))
-                .size(12)
+                .size(FontSize::SM)
                 .color(tokens.accent),
         );
     }
     detail_column = detail_column.push(tags_row(entry_id.clone(), tags, tokens));
     let row_content = row![
-        thumbnail_element(app, &entry_id, tokens, 52.0),
+        thumbnail_element(app, &entry_id, tokens, LIBRARY_ROW_THUMBNAIL_WIDTH),
         detail_column,
-        text(progress).size(12).color(tokens.text_secondary),
+        column![
+            text(progress)
+                .size(FontSize::SM)
+                .color(tokens.text_secondary),
+            progress_bar(progress_value, tokens),
+        ]
+        .spacing(Spacing::XS)
+        .width(LIBRARY_ROW_PROGRESS_WIDTH),
     ]
-    .spacing(10)
-    .padding(8)
+    .spacing(Spacing::MD)
+    .padding(Spacing::SM)
     .align_y(iced::Alignment::Center);
 
-    button(row_content)
+    library_row(row_content, tokens)
         .on_press(Message::LibraryEntryClicked(entry_id))
-        .style(move |_, status| button_style(tokens, status))
-        .width(Length::Fill)
         .into()
 }
 
@@ -1354,36 +1420,23 @@ fn thumbnail_element<'a>(
             .height(height)
             .into()
     } else {
-        container(text("PDF").size(13).color(tokens.text_secondary))
+        container(text("PDF").size(FontSize::SM).color(tokens.text_secondary))
             .center(width)
             .height(width * 1.32)
-            .style(move |_| {
-                container_style(
-                    tokens.placeholder,
-                    tokens.text_secondary,
-                    tokens.border,
-                    1.0,
-                )
-            })
+            .style(move |_| container_style(tokens, Class::PagePlaceholder))
             .into()
     }
 }
 
 fn tags_row<'a>(entry_id: EntryId, tags: Vec<String>, tokens: ThemeTokens) -> Element<'a, Message> {
-    let mut row = row![].spacing(4).align_y(iced::Alignment::Center);
+    let mut row = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
     for tag in tags {
         row = row.push(
-            button(text(tag.clone()).size(11).color(tokens.text_primary))
-                .on_press(Message::TagFilterChanged(Some(tag.clone())))
-                .style(move |_, status| button_style(tokens, status)),
+            tag_pill(tag.clone(), tokens).on_press(Message::TagFilterChanged(Some(tag.clone()))),
         );
     }
-    row.push(
-        button(text("+ tag").size(11).color(tokens.text_secondary))
-            .on_press(Message::StartTagEntry(entry_id))
-            .style(move |_, status| button_style(tokens, status)),
-    )
-    .into()
+    row.push(tag_pill("+ tag", tokens).on_press(Message::StartTagEntry(entry_id)))
+        .into()
 }
 
 fn view_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
@@ -1411,36 +1464,36 @@ fn view_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
         .unwrap_or("PDF-Folio");
 
     let mut toolbar = row![]
-        .spacing(10)
-        .padding(10)
+        .spacing(Spacing::MD)
+        .padding(Spacing::MD)
         .align_y(iced::Alignment::Center);
 
     if app.mode == AppMode::Viewer {
-        toolbar = toolbar.push(shell_button("<", tokens).on_press(Message::BackToLibrary));
+        toolbar = toolbar.push(icon_button("<", tokens).on_press(Message::BackToLibrary));
     }
 
-    toolbar = toolbar.push(shell_button("Open", tokens).on_press(Message::OpenFileDialog));
+    toolbar = toolbar.push(toolbar_button("Open", tokens).on_press(Message::OpenFileDialog));
 
     if app.mode == AppMode::Viewer {
         toolbar = toolbar
             .push(
-                shell_button(if app.toc_open { "Hide TOC" } else { "Show TOC" }, tokens)
+                toolbar_button(if app.toc_open { "Hide TOC" } else { "Show TOC" }, tokens)
                     .on_press(Message::ToggleSidebar),
             )
-            .push(shell_button("-", tokens).on_press(Message::ZoomOut))
+            .push(icon_button("-", tokens).on_press(Message::ZoomOut))
             .push(
                 text(format!("{} px", app.zoom_width))
-                    .size(15)
+                    .size(FontSize::CONTROL)
                     .color(tokens.text_secondary),
             )
-            .push(shell_button("+", tokens).on_press(Message::ZoomIn))
-            .push(shell_button(page_label, tokens).on_press(Message::OpenJumpDialog));
+            .push(icon_button("+", tokens).on_press(Message::ZoomIn))
+            .push(toolbar_button(page_label, tokens).on_press(Message::OpenJumpDialog));
     }
 
     toolbar = toolbar
-        .push(shell_button(view_label, tokens).on_press(Message::ToggleViewMode))
+        .push(toolbar_button(view_label, tokens).on_press(Message::ToggleViewMode))
         .push(
-            shell_button(
+            toolbar_button(
                 match app.theme {
                     AppTheme::Light => "Dark",
                     AppTheme::Dark => "Light",
@@ -1451,13 +1504,13 @@ fn view_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
         )
         .push(
             text(title)
-                .size(16)
+                .size(FontSize::HEADING)
                 .color(tokens.text_primary)
                 .width(Length::Fill),
         );
     container(toolbar)
         .width(Length::Fill)
-        .style(move |_| container_style(tokens.surface, tokens.text_primary, tokens.border, 0.0))
+        .style(move |_| container_style(tokens, Class::Toolbar))
         .into()
 }
 
@@ -1466,10 +1519,10 @@ fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let body: Element<'_, Message> = if app.outline.is_empty() {
         container(
             text("No table of contents")
-                .size(14)
+                .size(FontSize::MD)
                 .color(tokens.text_secondary),
         )
-        .padding(12)
+        .padding(Spacing::LG)
         .width(Length::Fill)
         .into()
     } else {
@@ -1485,13 +1538,13 @@ fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     };
 
     container(
-        column![text("Contents").size(16).color(tokens.text_primary), body]
-            .spacing(8)
-            .padding(10),
+        column![section_heading("Contents", tokens), body]
+            .spacing(Spacing::SM)
+            .padding(Spacing::MD),
     )
-    .width(240)
+    .width(VIEWER_SIDEBAR_WIDTH)
     .height(Length::Fill)
-    .style(move |_| container_style(tokens.surface, tokens.text_primary, tokens.border, 0.0))
+    .style(move |_| container_style(tokens, Class::Sidebar))
     .into()
 }
 
@@ -1502,7 +1555,7 @@ fn outline_list<'a>(
     expanded_paths: &'a HashSet<Vec<usize>>,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let mut list = column![].spacing(4);
+    let mut list = column![].spacing(Spacing::XS);
 
     for (index, node) in nodes.iter().enumerate() {
         let mut path = parent_path.clone();
@@ -1525,16 +1578,16 @@ fn outline_list<'a>(
             } else {
                 " "
             })
-            .size(13)
+            .size(FontSize::SM)
             .color(tokens.text_secondary),
-            text(label).size(14).color(tokens.text_primary)
+            text(label).size(FontSize::MD).color(tokens.text_primary)
         ]
-        .spacing(4)
+        .spacing(Spacing::XS)
         .align_y(iced::Alignment::Center);
         if let Some(page) = node.page {
             row = row.push(
                 text(format!("{}", u32::from(page) + 1))
-                    .size(12)
+                    .size(FontSize::SM)
                     .color(tokens.text_secondary),
             );
             let message = if has_children {
@@ -1570,96 +1623,35 @@ fn outline_button<'a>(
     message: Message,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
-    button(content)
-        .on_press(message)
-        .style(move |_, status| button_style(tokens, status))
-        .width(Length::Fill)
+    toc_entry(content, tokens).on_press(message)
 }
 
 fn view_jump_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens();
     let max_page = app.doc.as_ref().map_or(0, |doc| doc.page_count());
     let dialog = row![
-        text("Go to page").size(15).color(tokens.text_primary),
+        text("Go to page")
+            .size(FontSize::CONTROL)
+            .color(tokens.text_primary),
         text_input("Page", &app.jump_input)
             .on_input(Message::JumpInputChanged)
             .on_submit(Message::SubmitJump)
-            .width(90),
+            .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+            .width(JUMP_INPUT_WIDTH),
         text(format!("of {max_page}"))
-            .size(14)
+            .size(FontSize::MD)
             .color(tokens.text_secondary),
-        shell_button("Go", tokens).on_press(Message::SubmitJump),
-        shell_button("Cancel", tokens).on_press(Message::CloseOverlay),
+        toolbar_button("Go", tokens).on_press(Message::SubmitJump),
+        toolbar_button("Cancel", tokens).on_press(Message::CloseOverlay),
     ]
-    .spacing(10)
-    .padding(10)
+    .spacing(Spacing::MD)
+    .padding(Spacing::MD)
     .align_y(iced::Alignment::Center);
 
     container(dialog)
         .width(Length::Fill)
-        .style(move |_| container_style(tokens.surface, tokens.text_primary, tokens.border, 0.0))
+        .style(move |_| container_style(tokens, Class::JumpOverlay))
         .into()
-}
-
-fn shell_button<'a>(
-    label: impl Into<String>,
-    tokens: ThemeTokens,
-) -> iced::widget::Button<'a, Message> {
-    button(text(label.into()).color(tokens.text_primary))
-        .style(move |_, status| button_style(tokens, status))
-}
-
-fn container_style(
-    background: Color,
-    text_color: Color,
-    border_color: Color,
-    border_width: f32,
-) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(background)),
-        text_color: Some(text_color),
-        border: Border {
-            width: border_width,
-            color: border_color,
-            ..Border::default()
-        },
-        ..container::Style::default()
-    }
-}
-
-fn button_style(tokens: ThemeTokens, status: button::Status) -> button::Style {
-    let background = match status {
-        button::Status::Active => tokens.surface,
-        button::Status::Hovered => mix_color(tokens.surface, tokens.accent, 0.16),
-        button::Status::Pressed => mix_color(tokens.surface, tokens.accent, 0.28),
-        button::Status::Disabled => tokens.background,
-    };
-    let text_color = if matches!(status, button::Status::Disabled) {
-        tokens.text_secondary
-    } else {
-        tokens.text_primary
-    };
-
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color,
-        border: Border {
-            width: 1.0,
-            color: tokens.border,
-            radius: 4.0.into(),
-        },
-        ..button::Style::default()
-    }
-}
-
-fn mix_color(base: Color, overlay: Color, amount: f32) -> Color {
-    let amount = amount.clamp(0.0, 1.0);
-    Color {
-        r: base.r + (overlay.r - base.r) * amount,
-        g: base.g + (overlay.g - base.g) * amount,
-        b: base.b + (overlay.b - base.b) * amount,
-        a: base.a + (overlay.a - base.a) * amount,
-    }
 }
 
 async fn render_page(doc: Arc<PdfDoc>, key: TileKey) -> anyhow::Result<(TileKey, RenderedPage)> {
@@ -1886,6 +1878,42 @@ fn progress_label(entry: &LibraryEntry) -> String {
     )
 }
 
+fn progress_fraction(entry: &LibraryEntry) -> f32 {
+    if entry.missing {
+        return 0.0;
+    }
+
+    entry.page_count.map_or(0.0, |pages| {
+        if pages == 0 {
+            0.0
+        } else {
+            (f32::from(entry.last_page) + 1.0) / f32::from(pages)
+        }
+    })
+}
+
+fn truncate_for_width(label: &str, width: f32, reserved_width: f32) -> String {
+    const APPROX_CHAR_WIDTH: f32 = 7.5;
+    const ELLIPSIS: &str = "...";
+
+    let available = (width - reserved_width - (Spacing::MD * 2.0)).max(0.0);
+    let max_chars = (available / APPROX_CHAR_WIDTH).floor().max(0.0) as usize;
+    let char_count = label.chars().count();
+
+    if char_count <= max_chars {
+        return label.to_owned();
+    }
+
+    if max_chars <= ELLIPSIS.len() {
+        return ELLIPSIS.chars().take(max_chars).collect();
+    }
+
+    let keep = max_chars - ELLIPSIS.len();
+    let mut truncated: String = label.chars().take(keep).collect();
+    truncated.push_str(ELLIPSIS);
+    truncated
+}
+
 fn schedule_zoom_render(generation: u64) -> Task<Message> {
     Task::perform(
         async move {
@@ -1960,15 +1988,17 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let background = canvas::Path::rectangle(Point::ORIGIN, bounds.size());
         let tokens = self.app.theme.tokens();
-        frame.fill(&background, tokens.canvas);
+        let viewer_style = viewer_primitives(tokens);
+        frame.fill(&background, viewer_style.canvas);
 
         let Some(doc) = &self.app.doc else {
             return vec![frame.into_geometry()];
         };
 
         let page_width = f32::from(self.app.zoom_width);
-        let x = ((bounds.width - page_width) / 2.0).max(PAGE_PADDING) - self.app.horizontal_offset;
-        let mut y = PAGE_PADDING - self.app.scroll_offset;
+        let x = ((bounds.width - page_width) / 2.0).max(Spacing::PAGE_GUTTER)
+            - self.app.horizontal_offset;
+        let mut y = Spacing::PAGE_GUTTER - self.app.scroll_offset;
 
         for page in 0..doc.page_count() {
             let height = self.app.page_height(page);
@@ -1982,27 +2012,23 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
                 frame.draw_image(rect, canvas::Image::new(rendered.handle.clone()).snap(true));
             } else {
                 let shadow = canvas::Path::rectangle(
-                    Point::new(rect.x + 2.0, rect.y + 2.0),
+                    Point::new(
+                        rect.x + viewer_style.page_shadow.offset_x,
+                        rect.y + viewer_style.page_shadow.offset_y,
+                    ),
                     Size::new(rect.width, rect.height),
                 );
-                frame.fill(&shadow, Color::from_rgba8(0, 0, 0, 0.20));
+                frame.fill(&shadow, viewer_style.page_shadow.color);
                 let placeholder = canvas::Path::rectangle(rect.position(), rect.size());
-                frame.fill(&placeholder, tokens.placeholder);
+                frame.fill(&placeholder, viewer_style.placeholder);
             }
 
-            y += height + PAGE_GAP;
+            y += height + Spacing::PAGE_GAP;
         }
 
         vec![frame.into_geometry()]
     }
 }
-
-const PAGE_PADDING: f32 = 32.0;
-const PAGE_GAP: f32 = 24.0;
-const LINE_SCROLL_PIXELS: f32 = 48.0;
-const LIBRARY_OVERSCAN_ROWS: usize = 4;
-const LIBRARY_GRID_ROW_HEIGHT: f32 = 290.0;
-const LIBRARY_LIST_ROW_HEIGHT: f32 = 92.0;
 
 fn subscription(app: &PDFolioApp) -> Subscription<Message> {
     let keyboard = event::listen_with(|event, status, _window| {
@@ -2067,7 +2093,21 @@ fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         )
     };
 
-    Subscription::batch([keyboard, watcher])
+    let sidebar_resize = if app.resizing_library_tag_sidebar {
+        event::listen_with(|event, _status, _window| match event {
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                Some(Message::TagSidebarResizeDragged(position.x))
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                Some(Message::EndTagSidebarResize)
+            }
+            _ => None,
+        })
+    } else {
+        Subscription::none()
+    };
+
+    Subscription::batch([keyboard, watcher, sidebar_resize])
 }
 
 fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<Item = Message> {

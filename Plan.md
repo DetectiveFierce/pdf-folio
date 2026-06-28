@@ -728,18 +728,26 @@ This phase exists to prevent the UI from becoming a maze of one-off `container`,
 ### Tasks in order
 
 1. **Style module architecture** (`pdf-folio-ui/src/style/`)
-   - [ ] Create a dedicated `style` module owned by the UI crate
-   - [ ] Split style concerns into clear files:
+   - [x] Create a dedicated `style` module owned by the UI crate
+   - [x] Split style concerns into clear files:
      - `tokens.rs` — colors, spacing, radii, typography, shadows, borders
      - `classes.rs` — reusable semantic style classes
      - `components.rs` — styled constructors for common UI widgets
      - `layout.rs` — reusable layout primitives and spacing helpers
      - `mod.rs` — public style-system exports
-   - [ ] Keep style definitions independent from business logic, document state, database state, and rendering state
-   - [ ] Make style APIs easy to call from views without exposing internal app state
+   - [x] Keep style definitions independent from business logic, document state, database state, and rendering state
+   - [x] Make style APIs easy to call from views without exposing internal app state
+
+   Implementation notes:
+   - Completed 2026-06-28. The UI crate now exposes `style::{tokens, classes, components,
+     layout}` with semantic tokens, style classes, reusable constructors, and shared dimensions.
+   - The style layer takes only passed-in tokens/content/messages and does not read app, document,
+     database, library, or rendering state.
+   - Updated 2026-06-28: added `TextAlignment` and `ContentAlignment` tokens plus alignment helper
+     constructors so text/content placement can be controlled through the style layer.
 
 2. **Design tokens**
-   - [ ] Define global semantic tokens for:
+   - [x] Define global semantic tokens for:
      - color
      - spacing
      - border radius
@@ -751,12 +759,22 @@ This phase exists to prevent the UI from becoming a maze of one-off `container`,
      - toolbar height
      - card dimensions
      - overlay dimensions
-   - [ ] Replace hard-coded visual constants in the app shell, toolbar, sidebar, library view, and viewer overlays
-   - [ ] Support light and dark values through the same semantic token names
-   - [ ] Keep raw color literals and one-off dimensions out of ordinary view code
+   - [x] Replace hard-coded visual constants in the app shell, toolbar, sidebar, library view, and viewer overlays
+   - [x] Support light and dark values through the same semantic token names
+   - [x] Keep raw color literals and one-off dimensions out of ordinary view code
+
+   Implementation notes:
+   - Light/dark color values now live behind the shared `ThemeTokens` type, and repeated spacing,
+     font, sidebar, card, row, window, page-gutter, and overlay dimensions moved into style tokens
+     or layout constants.
+   - Updated 2026-06-28: the dark theme now uses a neutral gray Shelve-like palette with
+     `#181818`-style app background, `#202020` surfaces, `#282828` raised surfaces/placeholders,
+     subdued gray text, neutral hover/focus states, and thin gray progress/search controls.
+   - Viewer canvas background, page placeholders, and page shadows are exposed through
+     `viewer_primitives(tokens)` so render math stays separate from drawing appearance.
 
 3. **CSS-like class system**
-   - [ ] Define semantic style classes such as:
+   - [x] Define semantic style classes such as:
      - `AppShell`
      - `Toolbar`
      - `ToolbarGroup`
@@ -778,12 +796,17 @@ This phase exists to prevent the UI from becoming a maze of one-off `container`,
      - `AnnotationPopover`
      - `PresentationOverlay`
      - `Minimap`
-   - [ ] Make style classes composable where practical, similar to CSS utility/class layering
-   - [ ] Avoid styling widgets inline unless the style is truly local and non-reusable
-   - [ ] Make class names describe UI role, not temporary visual appearance
+   - [x] Make style classes composable where practical, similar to CSS utility/class layering
+   - [x] Avoid styling widgets inline unless the style is truly local and non-reusable
+   - [x] Make class names describe UI role, not temporary visual appearance
+
+   Implementation notes:
+   - `Class` now names shell, toolbar, sidebar, TOC, library, tag, overlay, annotation, presentation,
+     minimap, and placeholder roles. `container_style(...)` and `button_style(...)` map those roles
+     to iced styles.
 
 4. **Styled widget helpers**
-   - [ ] Add helper constructors for common polished UI elements:
+   - [x] Add helper constructors for common polished UI elements:
      - `toolbar_button(...)`
      - `sidebar_button(...)`
      - `toc_entry(...)`
@@ -798,12 +821,18 @@ This phase exists to prevent the UI from becoming a maze of one-off `container`,
      - `error_banner(...)`
      - `annotation_toolbar(...)`
      - `annotation_popover(...)`
-   - [ ] These helpers should reduce repetitive iced styling boilerplate in view code
-   - [ ] Helpers may accept messages and content, but they must not know about app internals beyond what is passed in
-   - [ ] Prefer small composable helpers over large components that hide application behavior
+   - [x] These helpers should reduce repetitive iced styling boilerplate in view code
+   - [x] Helpers may accept messages and content, but they must not know about app internals beyond what is passed in
+   - [x] Prefer small composable helpers over large components that hide application behavior
+
+   Implementation notes:
+   - Existing shell, toolbar, sidebar, TOC, search, tag, empty-state, library card/row, and progress
+     UI now use the new helpers where practical.
+   - Annotation toolbar/popover helpers were added as small content wrappers for Phase 5 rather than
+     feature-specific components.
 
 5. **Component state styling**
-   - [ ] Define consistent visual states for:
+   - [x] Define consistent visual states for:
      - normal
      - hovered
      - pressed
@@ -812,12 +841,17 @@ This phase exists to prevent the UI from becoming a maze of one-off `container`,
      - selected
      - active
      - error
-   - [ ] Apply these states consistently to toolbar controls, sidebar rows, TOC entries, library cards, tag pills, annotation controls, and overlay controls
-   - [ ] Ensure keyboard focus is visible and compatible with the later accessibility phase
-   - [ ] Make selected and active states visually distinct enough for both light and dark themes
+   - [x] Apply these states consistently to toolbar controls, sidebar rows, TOC entries, library cards, tag pills, annotation controls, and overlay controls
+   - [x] Ensure keyboard focus is visible and compatible with the later accessibility phase
+   - [x] Make selected and active states visually distinct enough for both light and dark themes
+
+   Implementation notes:
+   - `ComponentState` centralizes the shared state vocabulary. Iced button statuses are mapped into
+     that vocabulary now; focused/selected/active/error are available for upcoming widgets and
+     accessibility work through the same style path.
 
 6. **Layout primitives**
-   - [ ] Define shared layout helpers for common spacing and structure:
+   - [x] Define shared layout helpers for common spacing and structure:
      - page gutters
      - card grids
      - sidebar sections
@@ -826,12 +860,20 @@ This phase exists to prevent the UI from becoming a maze of one-off `container`,
      - centered empty states
      - floating overlays
      - viewer HUD controls
-   - [ ] Replace repeated `row![]`, `column![]`, `container(...)`, padding, and spacing patterns where useful
-   - [ ] Keep layout helpers flexible enough that they do not fight iced's type system
-   - [ ] Do not move message routing, database calls, document calls, or rendering decisions into layout helpers
+   - [x] Replace repeated `row![]`, `column![]`, `container(...)`, padding, and spacing patterns where useful
+   - [x] Keep layout helpers flexible enough that they do not fight iced's type system
+   - [x] Do not move message routing, database calls, document calls, or rendering decisions into layout helpers
+
+   Implementation notes:
+   - Shared layout constants now cover page gutters/gaps, library virtualization row heights,
+     thumbnail widths, sidebar widths, jump input width, window size, and scroll-line pixels.
+   - Message routing and app behavior remain in `app.rs`.
+   - Updated 2026-06-28: the library tag sidebar width is now user-resizable by dragging its right
+     edge, clamped by style layout constants, and tag names are truncated with `...` as the panel
+     narrows.
 
 7. **Style documentation**
-   - [ ] Add `STYLE_SYSTEM.md` or a dedicated section in this plan explaining:
+   - [x] Add `STYLE_SYSTEM.md` or a dedicated section in this plan explaining:
      - token naming
      - class naming
      - when to create a new style class
@@ -839,26 +881,36 @@ This phase exists to prevent the UI from becoming a maze of one-off `container`,
      - how light/dark themes should be extended
      - how styled helpers should accept messages
      - how viewer and annotation overlays should share visual primitives
-   - [ ] Include small examples showing the preferred pattern for adding a new styled component
-   - [ ] Include a short anti-pattern section showing what not to do
+   - [x] Include small examples showing the preferred pattern for adding a new styled component
+   - [x] Include a short anti-pattern section showing what not to do
+
+   Implementation notes:
+   - Added `STYLE_SYSTEM.md` with module responsibilities, naming guidance, examples, component
+     state guidance, viewer/overlay guidance, and anti-patterns.
 
 8. **Refactor existing UI to use the style system**
-   - [ ] Refactor the app shell
-   - [ ] Refactor the toolbar
-   - [ ] Refactor the TOC sidebar
-   - [ ] Refactor the library grid/list view
-   - [ ] Refactor search, tag pills, progress bars, and empty states
-   - [ ] Refactor viewer placeholders and overlays
-   - [ ] Remove duplicated visual constants after migration
-   - [ ] Add focused snapshot-style checks where practical by testing token/class construction rather than pixel output
+   - [x] Refactor the app shell
+   - [x] Refactor the toolbar
+   - [x] Refactor the TOC sidebar
+   - [x] Refactor the library grid/list view
+   - [x] Refactor search, tag pills, progress bars, and empty states
+   - [x] Refactor viewer placeholders and overlays
+   - [x] Remove duplicated visual constants after migration
+   - [x] Add focused snapshot-style checks where practical by testing token/class construction rather than pixel output
 
-### Phase 6 done when
+   Implementation notes:
+   - Added focused tests for semantic container classes and button state differences in
+     `style::classes`.
+   - Library cards/rows now include visual progress bars backed by the shared progress helper.
+   - Verified with `cargo test --workspace` on 2026-06-28.
 
-- [ ] Most UI styling flows through tokens, style classes, or styled widget helpers
-- [ ] View code is primarily structural and message-oriented, not cluttered with visual constants
-- [ ] Light and dark themes use the same semantic style layer
-- [ ] Adding or polishing a UI component does not require touching rendering, database, document, or library logic
-- [ ] The app has a visibly more consistent visual language across toolbar, sidebar, library, and viewer surfaces
+### Phase 4 done when
+
+- [x] Most UI styling flows through tokens, style classes, or styled widget helpers
+- [x] View code is primarily structural and message-oriented, not cluttered with visual constants
+- [x] Light and dark themes use the same semantic style layer
+- [x] Adding or polishing a UI component does not require touching rendering, database, document, or library logic
+- [x] The app has a visibly more consistent visual language across toolbar, sidebar, library, and viewer surfaces
 
 ---
 
