@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use anyhow::{anyhow, Context, Result};
-use pdfium_render::prelude::{PdfBookmark, PdfDocument, PdfRenderConfig, Pdfium};
+use pdfium_render::prelude::{
+    PdfBookmark, PdfDocument, PdfDocumentMetadataTagType, PdfRenderConfig, Pdfium,
+};
 
 /// A rendered PDF page in RGBA8 format.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +153,21 @@ impl PdfDoc {
 
             let text = page.text()?.all();
             Ok(text)
+        })
+    }
+
+    /// Returns the document author metadata, if present and non-empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Pdfium cannot load the document.
+    pub fn metadata_author(&self) -> Result<Option<String>> {
+        self.with_document(|document| {
+            Ok(document
+                .metadata()
+                .get(PdfDocumentMetadataTagType::Author)
+                .map(|tag| tag.value().trim().to_owned())
+                .filter(|author| !author.is_empty()))
         })
     }
 

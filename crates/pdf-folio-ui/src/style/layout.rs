@@ -7,11 +7,13 @@ pub const VIEWER_SIDEBAR_WIDTH: f32 = 228.0;
 /// Sidebar width for library tag filters.
 pub const LIBRARY_SIDEBAR_WIDTH: f32 = 112.0;
 /// Minimum width for the resizable library tag sidebar.
-pub const LIBRARY_SIDEBAR_MIN_WIDTH: f32 = 56.0;
+pub const LIBRARY_SIDEBAR_MIN_WIDTH: f32 = 80.0;
 /// Maximum width for the resizable library tag sidebar.
 pub const LIBRARY_SIDEBAR_MAX_WIDTH: f32 = 340.0;
 /// Width of the draggable sidebar resize handle.
 pub const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 8.0;
+/// Visible width of the sidebar resize handle when idle.
+pub const SIDEBAR_RESIZE_HANDLE_VISUAL_WIDTH: f32 = 2.0;
 /// Toolbar height used as a sizing token for future settings persistence.
 pub const TOOLBAR_HEIGHT: f32 = 58.0;
 /// Overscan rows rendered above and below the visible library window.

@@ -9,22 +9,25 @@ use anyhow::Result;
 use iced::futures::SinkExt;
 use iced::mouse;
 use iced::stream;
+use iced::widget::text::Wrapping;
 use iced::widget::{
-    canvas, column, container, image, mouse_area, row, scrollable, text, text_input,
+    button, canvas, column, container, image, mouse_area, row, scrollable, text, text_input,
+    tooltip, Svg,
 };
 use iced::{event, keyboard, Element, Event, Length, Point, Rectangle, Renderer, Size};
 use iced::{Subscription, Task, Theme};
 use pdf_folio_core::{Annotation, OutlineNode, PdfDoc, RenderedPage, TileCache, TileKey};
 use pdf_folio_library::{
     hash_file, scan_pdf_files, thumbnail_path, Db, EntryId, ImportSummary, ImportedEntry,
-    IndexDocument, LibraryEntry, LibraryWatchEvent, LibraryWatcher, NewLibraryEntry, SearchIndex,
+    IndexDocument, LibraryEntry, LibraryLayoutMode, LibraryPreferences, LibrarySortMode,
+    LibraryWatchEvent, LibraryWatcher, NewLibraryEntry, SearchIndex,
 };
 
 use crate::messages::{Message, Shortcut};
 use crate::style::layout::{
     JUMP_INPUT_WIDTH, LIBRARY_CARD_THUMBNAIL_WIDTH, LIBRARY_GRID_ROW_HEIGHT,
     LIBRARY_LIST_ROW_HEIGHT, LIBRARY_ROW_PROGRESS_WIDTH, LIBRARY_ROW_THUMBNAIL_WIDTH,
-    LIBRARY_SIDEBAR_MAX_WIDTH, LIBRARY_SIDEBAR_MIN_WIDTH, LIBRARY_SIDEBAR_WIDTH,
+    LIBRARY_SIDEBAR_MAX_WIDTH, LIBRARY_SIDEBAR_MIN_WIDTH, SIDEBAR_RESIZE_HANDLE_VISUAL_WIDTH,
     SIDEBAR_RESIZE_HANDLE_WIDTH, VIEWER_SIDEBAR_WIDTH,
 };
 use crate::style::{
@@ -34,6 +37,11 @@ use crate::style::{
 };
 use crate::style::{LIBRARY_OVERSCAN_ROWS, LINE_SCROLL_PIXELS, WINDOW_SIZE};
 use crate::theme::AppTheme;
+
+const CHEVRON_LEFT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"##;
+const CHEVRON_RIGHT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"##;
+const LIBRARY_CARD_TITLE_WIDTH: f32 = LIBRARY_CARD_THUMBNAIL_WIDTH;
+const LIBRARY_ROW_TITLE_WIDTH: f32 = 520.0;
 
 /// Primary app mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,6 +151,8 @@ pub struct PDFolioApp {
     pub annotations: Vec<Annotation>,
     /// Loaded library entries.
     pub library_entries: Vec<LibraryEntry>,
+    /// Active library sort mode.
+    pub library_sort_mode: LibrarySortMode,
     /// Current library search query.
     pub search_query: String,
     /// Search results, if search mode is active.
@@ -157,6 +167,8 @@ pub struct PDFolioApp {
     pub library_viewport_height: f32,
     /// Current width of the library tag sidebar.
     pub library_tag_sidebar_width: f32,
+    /// Whether the library tag sidebar is open.
+    pub library_tag_sidebar_open: bool,
     /// Whether the library tag sidebar is being resized.
     pub resizing_library_tag_sidebar: bool,
     /// Lazily loaded cover thumbnails keyed by entry id.
@@ -200,6 +212,8 @@ impl PDFolioApp {
     /// Returns an error when the library database cannot be opened.
     pub fn new() -> Result<Self> {
         let settings = Settings::default();
+        let db = Arc::new(Db::open_default()?);
+        let preferences = db.library_preferences().unwrap_or_default();
         Ok(Self {
             mode: AppMode::Library,
             doc: None,
@@ -221,18 +235,22 @@ impl PDFolioApp {
             toc_open: true,
             outline: Vec::new(),
             expanded_outline_paths: HashSet::new(),
-            compact_view_mode: false,
+            compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),
             jump_dialog_open: false,
             jump_input: String::new(),
             annotations: Vec::new(),
             library_entries: Vec::new(),
+            library_sort_mode: preferences.sort_mode,
             search_query: String::new(),
             search_results: None,
             search_hit_pages: HashMap::new(),
             search_generation: 0,
             library_scroll_offset: 0.0,
             library_viewport_height: 720.0,
-            library_tag_sidebar_width: LIBRARY_SIDEBAR_WIDTH,
+            library_tag_sidebar_width: preferences
+                .sidebar_width
+                .clamp(LIBRARY_SIDEBAR_MIN_WIDTH, LIBRARY_SIDEBAR_MAX_WIDTH),
+            library_tag_sidebar_open: true,
             resizing_library_tag_sidebar: false,
             thumbnails: HashMap::new(),
             pending_thumbnails: HashSet::new(),
@@ -243,7 +261,7 @@ impl PDFolioApp {
             last_library_click: None,
             theme: AppTheme::Dark,
             settings,
-            db: Arc::new(Db::open_default()?),
+            db,
         })
     }
 
@@ -531,8 +549,9 @@ impl PDFolioApp {
 
     fn refresh_library(&mut self) -> Task<Message> {
         let db = Arc::clone(&self.db);
+        let sort_mode = self.library_sort_mode;
         Task::perform(
-            async move { tokio::task::spawn_blocking(move || db.get_all_entries()).await? },
+            async move { tokio::task::spawn_blocking(move || db.get_entries_sorted(sort_mode)).await? },
             |result| match result {
                 Ok(entries) => Message::LibraryLoaded(entries),
                 Err(error) => Message::LibraryError(error.to_string()),
@@ -691,7 +710,11 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
                 .map(open_document_task)
                 .unwrap_or_else(Task::none);
             let load_task = app.clone().refresh_library();
-            (app.clone(), Task::batch([open_task, load_task]))
+            let attribution_task = attribute_pending_metadata_task(Arc::clone(&app.db));
+            (
+                app.clone(),
+                Task::batch([open_task, load_task, attribution_task]),
+            )
         },
         update,
         view,
@@ -756,6 +779,12 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ToggleViewMode => {
             app.compact_view_mode = !app.compact_view_mode;
+            return save_library_preferences_task(app);
+        }
+        Message::LibrarySortChanged(sort_mode) => {
+            app.library_sort_mode = sort_mode;
+            app.library_scroll_offset = 0.0;
+            return Task::batch([save_library_preferences_task(app), app.refresh_library()]);
         }
         Message::LibraryLoaded(entries) => {
             app.library_entries = entries;
@@ -800,6 +829,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             ));
             return app.refresh_library();
         }
+        Message::AuthorAttributionFinished => return app.refresh_library(),
         Message::OpenLibraryEntry(entry_id) => {
             if let Some(entry) = app
                 .library_entries
@@ -840,9 +870,12 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::SearchDebounced(query) => {
             if query == app.search_query {
                 let db = Arc::clone(&app.db);
-                return Task::perform(search_library_task(db, query), |result| match result {
-                    Ok((entries, hit_pages)) => Message::SearchResults { entries, hit_pages },
-                    Err(error) => Message::LibraryError(error.to_string()),
+                let sort_mode = app.library_sort_mode;
+                return Task::perform(search_library_task(db, query, sort_mode), |result| {
+                    match result {
+                        Ok((entries, hit_pages)) => Message::SearchResults { entries, hit_pages },
+                        Err(error) => Message::LibraryError(error.to_string()),
+                    }
                 });
             }
         }
@@ -859,6 +892,13 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library_viewport_height = viewport_height.max(1.0);
             return app.request_visible_thumbnails();
         }
+        Message::CollapseLibrarySidebar => {
+            app.library_tag_sidebar_open = false;
+            app.resizing_library_tag_sidebar = false;
+        }
+        Message::ExpandLibrarySidebar => {
+            app.library_tag_sidebar_open = true;
+        }
         Message::BeginTagSidebarResize => {
             app.resizing_library_tag_sidebar = true;
         }
@@ -870,6 +910,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::EndTagSidebarResize => {
             app.resizing_library_tag_sidebar = false;
+            return save_library_preferences_task(app);
         }
         Message::LibraryWatchEvent(event) => {
             let db = Arc::clone(&app.db);
@@ -957,7 +998,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 },
             );
         }
-        Message::ProgressSaved => {}
+        Message::ProgressSaved | Message::LibraryPreferencesSaved => {}
         Message::OpenJumpDialog => {
             app.jump_dialog_open = true;
             app.jump_input = app
@@ -1165,19 +1206,37 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens();
     let entries = app.visible_library_entries();
     let window = app.visible_library_entry_window(entries.len());
-    let sidebar = view_library_tag_sidebar(app);
-    let header = row![
-        search_input(
-            "Search library",
-            &app.search_query,
+    let mut header = row![];
+    if !app.library_tag_sidebar_open {
+        header = header.push(sidebar_chevron_button(
+            CHEVRON_RIGHT_SVG,
+            "Expand Sidebar",
+            Message::ExpandLibrarySidebar,
             tokens,
-            Message::SearchQueryChanged
+        ));
+    }
+    let header = header
+        .push(
+            search_input(
+                "Search library",
+                &app.search_query,
+                tokens,
+                Message::SearchQueryChanged,
+            )
+            .width(Length::Fill),
         )
-        .width(Length::Fill),
-        toolbar_button("Import folder", tokens).on_press(Message::ImportFolderDialog),
-    ]
-    .spacing(Spacing::MD)
-    .align_y(iced::Alignment::Center);
+        .push(
+            toolbar_button(
+                format!("Sort: {}", sort_mode_label(app.library_sort_mode)),
+                tokens,
+            )
+            .on_press(Message::LibrarySortChanged(next_sort_mode(
+                app.library_sort_mode,
+            ))),
+        )
+        .push(toolbar_button("Import folder", tokens).on_press(Message::ImportFolderDialog))
+        .spacing(Spacing::MD)
+        .align_y(iced::Alignment::Center);
 
     let status = app
         .library_status
@@ -1232,15 +1291,16 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         content = content.push(library_scrollable(rows));
     }
 
-    row![
-        sidebar,
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_| container_style(tokens, Class::AppShell))
-    ]
-    .height(Length::Fill)
-    .into()
+    let main_content = container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| container_style(tokens, Class::AppShell));
+
+    let mut layout = row![].height(Length::Fill);
+    if app.library_tag_sidebar_open {
+        layout = layout.push(view_library_tag_sidebar(app));
+    }
+    layout.push(main_content).height(Length::Fill).into()
 }
 
 fn library_scrollable<'a>(content: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
@@ -1260,8 +1320,19 @@ fn library_scrollable<'a>(content: iced::widget::Column<'a, Message>) -> Element
 fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens();
     let sidebar_width = app.library_tag_sidebar_width;
-    let mut tags = column![
+    let heading = row![
         section_heading("Tags", tokens),
+        sidebar_chevron_button(
+            CHEVRON_LEFT_SVG,
+            "Collapse Sidebar",
+            Message::CollapseLibrarySidebar,
+            tokens,
+        ),
+    ]
+    .spacing(Spacing::XS)
+    .align_y(iced::Alignment::Center);
+    let mut tags = column![
+        heading,
         sidebar_button(truncate_for_width("All", sidebar_width, 0.0), tokens)
             .on_press(Message::TagFilterChanged(None)),
     ]
@@ -1284,20 +1355,78 @@ fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     } else {
         tokens.border
     };
+    let handle_visual_width = if app.resizing_library_tag_sidebar {
+        SIDEBAR_RESIZE_HANDLE_WIDTH
+    } else {
+        SIDEBAR_RESIZE_HANDLE_VISUAL_WIDTH
+    };
     let resize_handle = mouse_area(
-        container("")
-            .width(SIDEBAR_RESIZE_HANDLE_WIDTH)
-            .height(Length::Fill)
-            .style(move |_| {
-                let mut style = container_style(tokens, Class::Sidebar);
-                style.background = Some(iced::Background::Color(handle_color));
-                style
-            }),
+        container(
+            container("")
+                .width(handle_visual_width)
+                .height(Length::Fill)
+                .style(move |_| {
+                    let mut style = container_style(tokens, Class::Sidebar);
+                    style.background = Some(iced::Background::Color(handle_color));
+                    style
+                }),
+        )
+        .width(SIDEBAR_RESIZE_HANDLE_WIDTH)
+        .height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center),
     )
     .on_press(Message::BeginTagSidebarResize)
-    .on_release(Message::EndTagSidebarResize);
+    .on_release(Message::EndTagSidebarResize)
+    .interaction(mouse::Interaction::ResizingHorizontally);
 
     row![sidebar, resize_handle].height(Length::Fill).into()
+}
+
+fn sidebar_chevron_button<'a>(
+    icon: &'static [u8],
+    tooltip_label: &'a str,
+    message: Message,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
+        .width(18.0)
+        .height(18.0)
+        .style(move |_, _| iced::widget::svg::Style {
+            color: Some(tokens.text_primary),
+        });
+    let button = button(
+        container(icon)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .width(28.0)
+    .height(28.0)
+    .padding(0)
+    .style(move |_, _| iced::widget::button::Style {
+        background: None,
+        text_color: tokens.text_primary,
+        border: iced::Border {
+            width: 0.0,
+            color: tokens.surface,
+            radius: 4.0.into(),
+        },
+        ..iced::widget::button::Style::default()
+    })
+    .on_press(message);
+
+    tooltip(
+        button,
+        container(
+            text(tooltip_label)
+                .size(FontSize::SM)
+                .color(tokens.text_primary),
+        )
+        .padding(Spacing::SM)
+        .style(move |_| container_style(tokens, Class::JumpOverlay)),
+        tooltip::Position::Bottom,
+    )
+    .delay(Duration::from_millis(600))
+    .into()
 }
 
 fn library_entry_card<'a>(
@@ -1308,23 +1437,36 @@ fn library_entry_card<'a>(
     let entry_id = entry.id.clone();
     let title = entry_title(&entry);
     let author = entry
-        .author
+        .display_author
         .clone()
+        .or_else(|| entry.author.clone())
         .unwrap_or_else(|| String::from("Unknown author"));
-    let progress = progress_label(&entry);
-    let progress_value = progress_fraction(&entry);
+    let pages = page_count_label(&entry);
+    let size = file_size_label(&entry);
+    let opened = last_opened_label(&entry);
     let search_page = app.search_hit_pages.get(&entry_id).copied();
     let tags = entry.tags.clone();
     let mut body = column![
         thumbnail_element(app, &entry_id, tokens, LIBRARY_CARD_THUMBNAIL_WIDTH),
-        text(title)
-            .size(FontSize::CONTROL)
-            .color(tokens.text_primary),
+        truncated_title(title, LIBRARY_CARD_TITLE_WIDTH, tokens),
         text(author).size(FontSize::SM).color(tokens.text_secondary),
-        text(progress)
-            .size(FontSize::SM)
-            .color(tokens.text_secondary),
-        progress_bar(progress_value, tokens),
+        row![
+            text(pages)
+                .size(FontSize::SM)
+                .color(tokens.text_secondary)
+                .wrapping(Wrapping::None)
+                .width(Length::Fill),
+            text("-").size(FontSize::SM).color(tokens.text_secondary),
+            text(size)
+                .size(FontSize::SM)
+                .color(tokens.text_secondary)
+                .wrapping(Wrapping::None)
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+        text(opened).size(FontSize::SM).color(tokens.text_secondary),
         tags_row(entry_id.clone(), tags, tokens),
     ]
     .spacing(Spacing::SM)
@@ -1359,19 +1501,16 @@ fn library_entry_row<'a>(
     let title = entry_title(&entry);
     let details = format!(
         "{}{}",
-        entry.author.as_deref().unwrap_or("Unknown author"),
+        entry_author(&entry),
         entry
             .page_count
             .map_or(String::new(), |pages| format!(" . {pages} pages"))
     );
     let tags = entry.tags.clone();
-    let progress = progress_label(&entry);
     let progress_value = progress_fraction(&entry);
     let search_page = app.search_hit_pages.get(&entry_id).copied();
     let mut detail_column = column![
-        text(title)
-            .size(FontSize::CONTROL)
-            .color(tokens.text_primary),
+        truncated_title(title, LIBRARY_ROW_TITLE_WIDTH, tokens),
         text(details)
             .size(FontSize::SM)
             .color(tokens.text_secondary),
@@ -1389,14 +1528,9 @@ fn library_entry_row<'a>(
     let row_content = row![
         thumbnail_element(app, &entry_id, tokens, LIBRARY_ROW_THUMBNAIL_WIDTH),
         detail_column,
-        column![
-            text(progress)
-                .size(FontSize::SM)
-                .color(tokens.text_secondary),
-            progress_bar(progress_value, tokens),
-        ]
-        .spacing(Spacing::XS)
-        .width(LIBRARY_ROW_PROGRESS_WIDTH),
+        column![progress_bar(progress_value, tokens),]
+            .spacing(Spacing::XS)
+            .width(LIBRARY_ROW_PROGRESS_WIDTH),
     ]
     .spacing(Spacing::MD)
     .padding(Spacing::SM)
@@ -1413,16 +1547,19 @@ fn thumbnail_element<'a>(
     tokens: ThemeTokens,
     width: f32,
 ) -> Element<'a, Message> {
+    let max_height = width * 1.32;
     if let Some(thumbnail) = app.thumbnails.get(entry_id) {
         let height = width * f32::from(thumbnail.height) / f32::from(thumbnail.width.max(1));
-        image(thumbnail.handle.clone())
+        let display_height = height.min(max_height);
+        container(image(thumbnail.handle.clone()).width(width).height(height))
             .width(width)
-            .height(height)
+            .align_top(display_height)
+            .clip(true)
             .into()
     } else {
         container(text("PDF").size(FontSize::SM).color(tokens.text_secondary))
             .center(width)
-            .height(width * 1.32)
+            .height(max_height)
             .style(move |_| container_style(tokens, Class::PagePlaceholder))
             .into()
     }
@@ -1733,6 +1870,37 @@ fn import_folder_dialog_task() -> Task<Message> {
     )
 }
 
+fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
+    let db = Arc::clone(&app.db);
+    let preferences = LibraryPreferences {
+        sort_mode: app.library_sort_mode,
+        layout_mode: if app.compact_view_mode {
+            LibraryLayoutMode::List
+        } else {
+            LibraryLayoutMode::Grid
+        },
+        selected_folder: None,
+        sidebar_width: app.library_tag_sidebar_width,
+        visible_metadata_fields: vec![
+            String::from("author"),
+            String::from("page_count"),
+            String::from("file_size"),
+        ],
+    };
+
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || db.save_library_preferences(&preferences))
+                .await??;
+            Ok::<_, anyhow::Error>(())
+        },
+        |result| match result {
+            Ok(()) => Message::LibraryPreferencesSaved,
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
 fn import_folder_with_index(db: &Db, root: &std::path::Path) -> anyhow::Result<ImportSummary> {
     let paths = scan_pdf_files(root)?;
     let mut entries = Vec::new();
@@ -1757,12 +1925,15 @@ fn import_pdf_with_index(db: &Db, path: PathBuf) -> anyhow::Result<ImportedEntry
         .and_then(|stem| stem.to_str())
         .map(ToOwned::to_owned);
     let page_count = doc.page_count();
+    let author = attributed_author(&doc);
 
     db.insert_entry(&NewLibraryEntry {
         id: id.clone(),
         path: path.clone(),
         title: title.clone(),
-        author: None,
+        author: author.clone(),
+        author_attributed: true,
+        page_count_attributed: true,
         page_count: Some(page_count),
         cover_hash: None,
     })?;
@@ -1774,7 +1945,7 @@ fn import_pdf_with_index(db: &Db, path: PathBuf) -> anyhow::Result<ImportedEntry
         documents.push(IndexDocument {
             id: id.as_str().to_owned(),
             title: title.clone().unwrap_or_default(),
-            author: String::new(),
+            author: author.clone().unwrap_or_default(),
             body,
             page: u64::from(page),
         });
@@ -1784,12 +1955,107 @@ fn import_pdf_with_index(db: &Db, path: PathBuf) -> anyhow::Result<ImportedEntry
     Ok(ImportedEntry { id, path, inserted })
 }
 
+fn attribute_pending_metadata_task(db: Arc<Db>) -> Task<Message> {
+    Task::perform(
+        async move { tokio::task::spawn_blocking(move || attribute_pending_metadata(&db)).await? },
+        |result| match result {
+            Ok(()) => Message::AuthorAttributionFinished,
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn attribute_pending_metadata(db: &Db) -> anyhow::Result<()> {
+    for entry in db.get_all_entries()?.into_iter().filter(|entry| {
+        !entry.missing && (!entry.author_attributed || !entry.page_count_attributed)
+    }) {
+        let doc = open_entry_doc(&entry);
+        if !entry.author_attributed {
+            let author = doc.as_ref().and_then(attributed_author);
+            db.update_author_attribution(&entry.id, author.as_deref())?;
+        }
+        if !entry.page_count_attributed {
+            let page_count = doc.as_ref().map(|doc| doc.page_count());
+            db.update_page_count_attribution(&entry.id, page_count)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn open_entry_doc(entry: &LibraryEntry) -> Option<PdfDoc> {
+    entry
+        .path
+        .exists()
+        .then(|| PdfDoc::open(&entry.path).ok())
+        .flatten()
+}
+
+fn attributed_author(doc: &PdfDoc) -> Option<String> {
+    doc.metadata_author()
+        .ok()
+        .flatten()
+        .and_then(|author| clean_author_candidate(&author))
+        .or_else(|| author_from_contents(doc))
+}
+
+fn author_from_contents(doc: &PdfDoc) -> Option<String> {
+    let pages_to_scan = doc.page_count().min(3);
+    for page in 0..pages_to_scan {
+        let text = doc.text_on_page(page).ok()?;
+        for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            if let Some(author) = author_from_line(line) {
+                return Some(author);
+            }
+        }
+    }
+    None
+}
+
+fn author_from_line(line: &str) -> Option<String> {
+    let normalized = line.trim().trim_matches(['.', ',', ';', ':']);
+    for prefix in ["Author:", "Authors:", "By:", "Written by "] {
+        if let Some(candidate) = normalized.strip_prefix(prefix) {
+            return clean_author_candidate(candidate);
+        }
+    }
+
+    normalized
+        .strip_prefix("By ")
+        .and_then(clean_author_candidate)
+}
+
+fn clean_author_candidate(candidate: &str) -> Option<String> {
+    let candidate = candidate
+        .trim()
+        .trim_matches(['.', ',', ';', ':', '-', ' '])
+        .replace('\n', " ");
+    let candidate = candidate.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = candidate.to_lowercase();
+    let digit_count = candidate.chars().filter(|ch| ch.is_ascii_digit()).count();
+
+    if candidate.len() < 2
+        || candidate.len() > 80
+        || lower == "anonymous"
+        || lower == "unknown"
+        || lower.contains("http")
+        || lower.contains("www.")
+        || lower.contains("copyright")
+        || digit_count > 4
+    {
+        return None;
+    }
+
+    Some(candidate)
+}
+
 async fn search_library_task(
     db: Arc<Db>,
     query: String,
+    sort_mode: LibrarySortMode,
 ) -> anyhow::Result<(Vec<LibraryEntry>, HashMap<EntryId, u16>)> {
     tokio::task::spawn_blocking(move || {
-        let entries = db.get_all_entries()?;
+        let entries = db.get_entries_sorted(sort_mode)?;
         let normalized = query.trim().to_lowercase();
         let search_index = SearchIndex::open_default()?;
         let hits = search_index.search(&query, 200).unwrap_or_default();
@@ -1835,10 +2101,9 @@ fn apply_watch_event(db: &Db, event: LibraryWatchEvent) -> anyhow::Result<()> {
 
 fn entry_matches_query(entry: &LibraryEntry, normalized_query: &str) -> bool {
     entry_title(entry).to_lowercase().contains(normalized_query)
-        || entry
-            .author
-            .as_deref()
-            .is_some_and(|author| author.to_lowercase().contains(normalized_query))
+        || entry_author(entry)
+            .to_lowercase()
+            .contains(normalized_query)
         || entry
             .path
             .to_string_lossy()
@@ -1851,31 +2116,126 @@ fn entry_matches_query(entry: &LibraryEntry, normalized_query: &str) -> bool {
 }
 
 fn entry_title(entry: &LibraryEntry) -> String {
-    entry.title.clone().unwrap_or_else(|| {
-        entry
-            .path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("Untitled PDF")
-            .to_owned()
-    })
+    entry
+        .display_title
+        .clone()
+        .or_else(|| entry.title.clone())
+        .unwrap_or_else(|| {
+            entry
+                .path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("Untitled PDF")
+                .to_owned()
+        })
 }
 
-fn progress_label(entry: &LibraryEntry) -> String {
-    if entry.missing {
-        return String::from("Missing");
+fn entry_author(entry: &LibraryEntry) -> String {
+    entry
+        .display_author
+        .clone()
+        .or_else(|| entry.author.clone())
+        .unwrap_or_else(|| String::from("Unknown author"))
+}
+
+fn sort_mode_label(sort_mode: LibrarySortMode) -> &'static str {
+    match sort_mode {
+        LibrarySortMode::Manual => "Manual",
+        LibrarySortMode::TitleAsc => "Title A-Z",
+        LibrarySortMode::TitleDesc => "Title Z-A",
+        LibrarySortMode::AuthorAsc => "Author A-Z",
+        LibrarySortMode::AuthorDesc => "Author Z-A",
+        LibrarySortMode::RecentlyAdded => "Recently Added",
+        LibrarySortMode::RecentlyOpened => "Recently Opened",
+        LibrarySortMode::ReadingProgress => "Progress",
+        LibrarySortMode::PageCount => "Page Count",
+        LibrarySortMode::MissingFiles => "Missing",
+    }
+}
+
+fn next_sort_mode(sort_mode: LibrarySortMode) -> LibrarySortMode {
+    match sort_mode {
+        LibrarySortMode::Manual => LibrarySortMode::TitleAsc,
+        LibrarySortMode::TitleAsc => LibrarySortMode::TitleDesc,
+        LibrarySortMode::TitleDesc => LibrarySortMode::AuthorAsc,
+        LibrarySortMode::AuthorAsc => LibrarySortMode::AuthorDesc,
+        LibrarySortMode::AuthorDesc => LibrarySortMode::RecentlyAdded,
+        LibrarySortMode::RecentlyAdded => LibrarySortMode::RecentlyOpened,
+        LibrarySortMode::RecentlyOpened => LibrarySortMode::ReadingProgress,
+        LibrarySortMode::ReadingProgress => LibrarySortMode::PageCount,
+        LibrarySortMode::PageCount => LibrarySortMode::MissingFiles,
+        LibrarySortMode::MissingFiles => LibrarySortMode::Manual,
+    }
+}
+
+fn truncated_title<'a>(title: String, width: f32, tokens: ThemeTokens) -> Element<'a, Message> {
+    let visible = truncate_for_width(&title, width, 0.0);
+    let is_truncated = visible != title;
+    let label = text(visible)
+        .size(FontSize::CONTROL)
+        .color(tokens.text_primary)
+        .wrapping(Wrapping::None)
+        .width(width);
+
+    if !is_truncated {
+        return label.into();
     }
 
+    tooltip(
+        label,
+        container(text(title).size(FontSize::SM).color(tokens.text_primary))
+            .padding(Spacing::SM)
+            .style(move |_| container_style(tokens, Class::JumpOverlay)),
+        tooltip::Position::Bottom,
+    )
+    .delay(Duration::from_millis(600))
+    .into()
+}
+
+fn page_count_label(entry: &LibraryEntry) -> String {
     entry.page_count.map_or_else(
-        || String::from("Not opened"),
+        || String::from("Unknown pages"),
         |pages| {
-            if pages == 0 {
-                String::from("Not opened")
+            if pages == 1 {
+                String::from("1 Page")
             } else {
-                format!("Page {} / {}", u32::from(entry.last_page) + 1, pages)
+                format!("{pages} Pages")
             }
         },
     )
+}
+
+fn last_opened_label(entry: &LibraryEntry) -> String {
+    entry.opened_at.map_or_else(
+        || String::from("Never opened"),
+        |opened_at| format!("Last opened {}", opened_at.format("%b %-d, %Y")),
+    )
+}
+
+fn file_size_label(entry: &LibraryEntry) -> String {
+    std::fs::metadata(&entry.path).map_or_else(
+        |_| String::from("Unknown size"),
+        |metadata| format_file_size(metadata.len()),
+    )
+}
+
+fn format_file_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[unit])
+    } else if value >= 10.0 {
+        format!("{value:.0} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 
 fn progress_fraction(entry: &LibraryEntry) -> f32 {

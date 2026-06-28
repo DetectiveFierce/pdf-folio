@@ -6,7 +6,7 @@ use std::sync::Arc;
 use iced::keyboard;
 use iced::Point;
 use pdf_folio_core::{Annotation, AnnotationId, PdfDoc, TileKey};
-use pdf_folio_library::{EntryId, ImportSummary, LibraryEntry, LibraryWatchEvent};
+use pdf_folio_library::{EntryId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent};
 
 use crate::Settings;
 
@@ -81,6 +81,10 @@ pub enum Message {
     ToggleSidebar,
     /// Toggle the placeholder view mode control.
     ToggleViewMode,
+    /// Change the library sort mode.
+    LibrarySortChanged(LibrarySortMode),
+    /// Library view preferences were persisted.
+    LibraryPreferencesSaved,
     /// Add an annotation.
     AnnotationAdded(Annotation),
     /// Delete an annotation.
@@ -99,6 +103,8 @@ pub enum Message {
     ImportFolderSelected(PathBuf),
     /// Bulk import finished.
     ImportFinished(ImportSummary),
+    /// Background author attribution finished.
+    AuthorAttributionFinished,
     /// Open a library entry in the viewer.
     OpenLibraryEntry(EntryId),
     /// A library entry was clicked.
@@ -118,6 +124,10 @@ pub enum Message {
     },
     /// Library scroll viewport changed.
     LibraryScrolled { offset_y: f32, viewport_height: f32 },
+    /// Collapse the library tag sidebar.
+    CollapseLibrarySidebar,
+    /// Expand the library tag sidebar.
+    ExpandLibrarySidebar,
     /// Begin resizing the library tag sidebar.
     BeginTagSidebarResize,
     /// Resize the library tag sidebar to a new logical width.

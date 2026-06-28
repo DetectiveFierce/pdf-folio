@@ -912,100 +912,385 @@ This phase exists to prevent the UI from becoming a maze of one-off `container`,
 - [x] Adding or polishing a UI component does not require touching rendering, database, document, or library logic
 - [x] The app has a visibly more consistent visual language across toolbar, sidebar, library, and viewer surfaces
 
----
+## Phase 5 — Library manager expansion (weeks 15–18)
 
-## Phase 5 — Viewer features (weeks 15–18)
+**Goal:** turn the first-pass library manager into a polished native PDF library system with sorting, selection, metadata editing, folders, drag-and-drop organization, and bulk actions.
 
-**Goal:** annotations, advanced navigation, and presentation mode implemented on top of the unified style system.
-
-Viewer features added in this phase must not introduce new one-off visual styling. Annotation tools, popovers, minimap controls, presentation overlays, and viewer chrome should all use the tokens, classes, layout primitives, and styled widget helpers created in Phase 4.
+Library features added in this phase must use the Phase 4 style system. Library cards, rows, selection affordances, folder controls, metadata editors, drag targets, context actions, empty states, and bulk-edit surfaces should all be styled through tokens, classes, layout primitives, or styled helpers.
 
 ### Tasks in order
 
-1. **Text selection model**
+1. **Library data model expansion** (`pdf-folio-library/src/db.rs`)
+   - [x] Add stable manual ordering support for PDFs
+     - `manual_order INTEGER NOT NULL`
+     - preserve gaps between order values where practical so reordering does not require rewriting the whole table every time
+   - [x] Add user-editable metadata fields
+     - `display_title TEXT`
+     - `display_author TEXT`
+     - `sort_title TEXT`
+     - `sort_author TEXT`
+     - `metadata_locked INTEGER DEFAULT 0`
+   - [x] Add folder support
+     - `folders(id, name, parent_id, manual_order, created_at, updated_at)`
+     - `entry_folders(entry_id, folder_id, manual_order)`
+   - [x] Add optional library state tables for persisted view preferences
+     - active sort mode
+     - active layout mode
+     - selected folder
+     - sidebar width
+     - visible metadata fields
+   - [x] Add migrations without losing existing imported PDFs, tags, progress, bookmarks, thumbnails, or search index state
+   - [x] Add focused database tests for ordering, folder membership, metadata edits, and cascade behavior
+
+   Implementation notes:
+   - Completed 2026-06-28. `entries` now has `manual_order`, display metadata overrides,
+     explicit sort keys, and `metadata_locked`; existing databases are migrated with `ALTER TABLE`
+     additions and backfilled order/sort values.
+   - Added public `FolderId`, `Folder`, `LibrarySortMode`, `LibraryLayoutMode`, and
+     `LibraryPreferences` types plus APIs for manual entry ordering, metadata override/reset,
+     title sort cleanup, folder CRUD, folder membership, invalid folder-move protection, and
+     preference load/save.
+   - Folder deletion cascades folder membership and nested folders but leaves PDF entries intact.
+   - Focused tests cover manual ordering, metadata edits/reset, folder membership/nesting/cascade,
+     invalid descendant moves, and preference round-tripping.
+
+2. **Sort and view modes**
+   - [x] Add sortable library modes:
+     - Manual order
+     - Title A-Z / Z-A
+     - Author A-Z / Z-A
+     - Recently added
+     - Recently opened
+     - Reading progress
+     - Page count
+     - Missing files
+   - [x] Manual order must preserve exactly the order the user leaves PDFs in
+     - Storage/API support is complete; drag-and-drop UI still needs to call the ordering API.
+   - [x] Store the active sort mode and restore it on app restart
+   - [ ] Disable drag-to-reorder in non-manual sorted views, or show a clear affordance that reordering requires switching to Manual
+   - [ ] Keep search results sortable without mutating the underlying manual order unless the user explicitly switches to Manual and drags entries there
+   - [ ] Add toolbar or sidebar controls for sort mode, sort direction, grid/list mode, and visible metadata density
+     - Sort mode and grid/list controls are present and persisted; visible metadata density is stored in preferences but does not have a UI selector yet.
+
+   Implementation notes:
+   - Completed 2026-06-28 at the data/query level and with a minimal UI control. The library header
+     has a Phase 4-styled cycling sort button, and the existing grid/list toggle persists via
+     `library_preferences`.
+   - `PDFolioApp::refresh_library()` now queries `Db::get_entries_sorted(app.library_sort_mode)`.
+     Search uses the selected sort mode as its base ordering, while Tantivy full-text hits are still
+     promoted first; a later search/filter pass should add clearer match-source sorting controls.
+   - Sidebar width is now loaded from and saved to `library_preferences`.
+
+3. **Drag-and-drop PDF reordering**
+   - [ ] In Manual view, allow dragging PDFs to reorder them
+   - [ ] Support both grid and list reordering
+   - [ ] Show insertion indicators between rows/cards
+   - [ ] Auto-scroll the library viewport while dragging near the top or bottom edge
+   - [ ] Persist the new order immediately after drop
+   - [ ] Keep drag math separate from style definitions; style only controls the visual drag state, insertion marker, opacity, focus ring, and hover target
+   - [ ] Add tests for reorder calculations independent of iced UI code
+
+4. **Multi-selection model**
+   - [ ] Add selection state to the library view
+     - single click selects one PDF
+     - Ctrl-click toggles selection
+     - Shift-click selects a contiguous range
+     - Ctrl+A selects all visible PDFs
+     - Escape clears selection
+   - [ ] Support selection across grid and list views
+   - [ ] Keep selection stable when changing between grid/list layouts
+   - [ ] Decide and document behavior when filters/search change while items are selected
+   - [ ] Show selected count in the toolbar
+   - [ ] Add a bulk-action toolbar that appears only when one or more PDFs are selected
+   - [ ] Style selected, active, focused, and hovered states through the Phase 4 component-state system
+
+5. **Bulk editing and bulk actions**
+   - [ ] Bulk edit selected PDFs
+     - add tags
+     - remove tags
+     - add to folder
+     - remove from folder
+     - delete from library metadata only
+     - optionally move files to trash after explicit confirmation
+   - [ ] Bulk metadata actions
+     - clear custom title
+     - clear custom author
+     - refresh metadata from PDF
+     - rebuild thumbnails
+     - reindex full text
+   - [ ] Show confirmation dialogs for destructive actions
+   - [ ] Show progress for long bulk operations
+   - [ ] Surface partial failures clearly, for example: "Updated 48 PDFs; 2 could not be changed."
+   - [ ] Use shared `ProgressBar`, `ErrorBanner`, toolbar, dialog, and empty-state styling paths
+
+6. **Edit PDF title and author**
+   - [ ] Add an entry details/editor panel
+   - [ ] Allow editing display title and display author
+   - [x] Preserve original extracted metadata separately from user overrides
+   - [x] Add "Reset to PDF metadata" action
+     - Database API is complete; UI action still needs to be surfaced in the editor/details panel.
+   - [x] Add "Apply title sort cleanup" helper for leading articles such as "The", "A", and "An"
+     - Database API is complete; UI action still needs to be surfaced in the editor/details panel.
+   - [x] Make title and author edits immediately visible in cards, rows, search results, and sort modes
+     - Display paths now prefer override fields when present; editor UI is still pending.
+   - [ ] Update Tantivy metadata fields after edits so search reflects user-visible title and author
+   - [x] Add validation for empty titles, extremely long fields, and invalid control characters
+
+   Implementation notes:
+   - Started 2026-06-28. Storage and display plumbing are in place: original `title`/`author`
+     remain separate from `display_title`/`display_author`, and cards, rows, local search matching,
+     and sort modes prefer display metadata. The visible editor/details panel is not implemented yet.
+
+7. **Folders and folder management**
+   - [ ] Add a folder sidebar for library organization
+   - [x] Support creating, renaming, deleting, and nesting folders
+     - Database API is complete; folder-management UI is still pending.
+   - [ ] Support dragging PDFs into folders
+   - [ ] Support dragging selected PDFs into folders as a bulk operation
+   - [ ] Support dragging folders to reorder them in Manual folder order
+   - [ ] Support dragging folders into other folders to nest them
+   - [x] Prevent invalid folder operations
+     - folder cannot be moved into itself
+     - folder cannot be moved into one of its descendants
+     - deleting a folder does not delete PDFs unless explicitly requested through a separate destructive action
+   - [ ] Show smart counts next to folders
+     - total PDFs
+     - unread/in-progress count where useful
+     - missing-file count where useful
+   - [ ] Add folder empty states with clear import/add instructions
+   - [ ] Persist expanded/collapsed folder state across restarts
+
+   Implementation notes:
+   - Started 2026-06-28 at the database/API layer. Folder tree creation, rename, delete, nesting,
+     moving, membership, and folder-entry queries are implemented and tested. The existing tag
+     sidebar has not yet been replaced or expanded into a folder organization sidebar.
+
+8. **Collections, tags, and folders interaction**
+   - [ ] Clarify the product model:
+     - folders are manual, user-managed hierarchy
+     - tags are flexible labels
+     - collections are saved queries or curated groups, if retained
+   - [ ] Add saved searches or smart collections if useful:
+     - Recently added
+     - Continue reading
+     - Unread
+     - In progress
+     - Finished
+     - Missing files
+     - Untagged
+   - [ ] Ensure tags and folders can both filter the same library without surprising behavior
+   - [ ] Add a visible breadcrumb or filter summary when the user is inside a folder, tag filter, search query, or smart collection
+   - [ ] Add "Clear filters" action
+
+9. **Native library manager affordances**
+   - [ ] Add context menus or equivalent explicit actions for PDFs and folders
+   - [ ] Add keyboard shortcuts:
+     - Enter: open selected PDF
+     - F2: rename selected PDF title or folder
+     - Delete: remove from library after confirmation
+     - Ctrl+F: focus search
+     - Ctrl+A: select all visible
+     - Escape: clear selection or close active editor
+   - [ ] Add details sidebar for the selected PDF
+     - cover thumbnail
+     - title
+     - author
+     - path
+     - page count
+     - reading progress
+     - tags
+     - folders
+     - added/opened dates
+     - missing-file status
+   - [ ] Add "Reveal in file manager" action
+   - [ ] Add "Open containing folder" action
+   - [ ] Add "Relink missing file" action
+   - [ ] Add duplicate detection UI for PDFs with matching content hashes
+   - [ ] Add thumbnail refresh action
+   - [ ] Add full-text reindex action
+
+10. **Import and organization polish**
+    - [ ] During import, infer title and author from PDF metadata where available
+    - [ ] Fall back to filename-derived title when metadata is missing or poor
+    - [ ] Offer an import destination folder
+    - [ ] Preserve folder-relative organization when importing a directory tree if the user chooses that option
+    - [ ] Show import summary:
+      - added
+      - skipped duplicates
+      - failed
+      - already present
+    - [ ] Add a post-import review view for fixing missing titles/authors
+    - [ ] Keep all import and indexing work off the UI thread
+
+11. **Library search and filtering upgrade**
+    - [ ] Search title, author, tags, folder names, and full text
+    - [ ] Add filter chips for active tags, folders, reading state, and missing state
+    - [ ] Add advanced search affordances later if needed, but keep the default search simple
+    - [ ] Preserve sort mode while searching
+    - [ ] Make manual ordering behavior clear when search/filtering hides some entries
+    - [ ] Show matching page number and match source where practical:
+      - title
+      - author
+      - tag
+      - full text page hit
+
+12. **Library performance and correctness pass**
+    - [ ] Confirm virtualized grid/list behavior still works with selection, drag-and-drop, details panel, and folders
+    - [ ] Benchmark 1000, 5000, and 10000-entry library views
+    - [ ] Ensure drag-and-drop does not trigger excessive database writes
+    - [ ] Batch SQLite updates for bulk actions
+    - [ ] Avoid blocking the iced update loop during metadata edits, folder operations, imports, thumbnail refreshes, and reindexing
+    - [ ] Add tracing spans for sorting, filtering, selection changes, folder operations, and bulk edits
+
+13. **Library style-system pass**
+    - [ ] Add or refine style classes for:
+      - `LibraryToolbar`
+      - `BulkActionBar`
+      - `SelectionBadge`
+      - `FolderSidebar`
+      - `FolderRow`
+      - `FolderDropTarget`
+      - `DragInsertionMarker`
+      - `MetadataEditor`
+      - `DetailsPanel`
+      - `SortMenu`
+      - `FilterChip`
+      - `ContextMenu`
+      - `ConfirmDialog`
+    - [ ] Add styled helpers for common library controls:
+      - sortable header button
+      - folder row
+      - selected library card
+      - selected library row
+      - metadata field editor
+      - bulk-action button
+      - filter chip
+      - drag insertion marker
+    - [ ] Update `STYLE_SYSTEM.md` with library-specific styling conventions
+    - [ ] Confirm light and dark themes are coherent for selected, dragged, drop-target, disabled, missing-file, and error states
+
+### Phase 5 done when
+
+- [ ] Manual PDF ordering works and persists exactly as the user leaves it
+- [ ] PDFs can be dragged to reorder them in Manual view
+- [ ] PDFs can be selected singly, in ranges, and in bulk
+- [ ] Bulk edit actions work for tags, folders, metadata refresh, thumbnail rebuild, and reindexing
+- [ ] PDF display title and display author are editable, searchable, sortable, and resettable
+- [ ] Folders can be created, renamed, deleted, nested, reordered, and used as drag-and-drop targets
+- [ ] Folder ordering and PDF ordering inside folders persist across restarts
+- [ ] Details/editor panel gives the user native-library-manager control over metadata and organization
+- [ ] Search, filters, tags, folders, and sort modes compose without surprising state loss
+- [ ] Library interactions remain responsive for at least 1000 PDFs and are architecturally ready for larger collections
+- [ ] New library UI uses the Phase 4 style system rather than one-off styling
+
+---
+
+## Phase 6 — Viewer features (weeks 19–22)
+
+**Goal:** advanced navigation, text interaction, layout modes, and presentation mode implemented on top of the unified style system.
+
+Viewer features added in this phase must not introduce new one-off visual styling. Find controls, text-selection affordances, minimap controls, presentation overlays, and viewer chrome should all use the tokens, classes, layout primitives, and styled widget helpers created in Phase 4.
+
+### Tasks in order
+
+1. **Text selection and copy**
    - [ ] Extract text positions from pdfium: `page.text().chars()` gives glyph bounds
    - [ ] Build a `TextMap` for each page: `Vec<GlyphRect { char, page_rect }>`
    - [ ] Hit-test mouse position against `TextMap` to find selection boundaries
    - [ ] Render selection highlight as a colored overlay rect on the canvas
+   - [ ] Add copy-to-clipboard for selected text
    - [ ] Use style tokens for selection color, opacity, and focus outline
    - [ ] Keep text-selection geometry in viewer logic, not in the style system
 
-2. **Highlight annotation**
-   - [ ] On mouse release after selection, show toolbar: Highlight / Underline / Strikethrough / Cancel
-   - [ ] Create `Annotation { kind: Highlight, page, rects: Vec<Rect>, color: Color }`
-   - [ ] Store in DB and render as transparent colored rects in canvas draw pass
-   - [ ] Use `AnnotationToolbar`, `ToolbarButton`, and related Phase 4 style classes for the floating selection toolbar
-   - [ ] Define annotation color choices as semantic tokens instead of scattering raw color values through canvas and view code
+2. **Find in document**
+   - [ ] Add `Ctrl+F` find overlay in the viewer
+   - [ ] Search extracted page text for the current document
+   - [ ] Show match count and current match index
+   - [ ] Add next/previous match controls
+   - [ ] Jump to the page and scroll position for the selected match
+   - [ ] Highlight visible matches on the canvas
+   - [ ] Reuse `SearchInput`, overlay, toolbar, and text-state styling from the Phase 4 style system
 
-3. **Note annotation**
-   - [ ] Click the note tool → click on canvas → creates a `Annotation { kind: Note, page, position, body: String }`
-   - [ ] Render as a small icon on the page
-   - [ ] Click icon → popover with editable text
-   - [ ] Build the note popover using `annotation_popover(...)` or the equivalent Phase 4 styled helper
-   - [ ] Use shared overlay spacing, border, radius, shadow, and typography tokens
+3. **Page navigation polish**
+   - [ ] Improve page indicator so it supports direct page entry
+   - [ ] Add first-page and last-page commands
+   - [ ] Add previous-page and next-page commands
+   - [ ] Preserve current horizontal position where reasonable during page jumps
+   - [ ] Ensure keyboard navigation, toolbar controls, and page-jump overlay all share one message path
+   - [ ] Keep navigation affordances styled through existing toolbar and overlay helpers
 
-4. **Freehand drawing**
-   - [ ] Pen tool: capture mouse drag as `Vec<Point>`, store as `Annotation { kind: Drawing, strokes }`
-   - [ ] Render as SVG path overlay on canvas
-   - [ ] Eraser tool: hit-test strokes and delete on click
-   - [ ] Use style tokens for default pen widths, eraser affordances, cursor hints, and active tool state
-   - [ ] Make active drawing tools visually consistent with selected toolbar/sidebar controls
-
-5. **Annotation export to PDF**
-   - [ ] "Export with annotations" → use `pdf-writer` to create a new PDF with annotations embedded as PDF standard annotation objects
-   - [ ] This is a background async operation; show progress
-   - [ ] Display export progress through the shared `ProgressBar` and `ErrorBanner` styling patterns
-   - [ ] Do not add export-specific ad hoc progress widgets unless the existing styled primitives are insufficient
-
-6. **Two-page spread mode**
+4. **Two-page spread mode**
    - [ ] Toggle button in toolbar
-   - [ ] Layout engine places even pages left, odd pages right
-   - [ ] Scroll and zoom still work the same way
+   - [ ] Layout engine places paired pages side by side
+   - [ ] Support correct first-page handling for documents whose first page should stand alone
+   - [ ] Scroll and zoom still work through the same viewer state model
    - [ ] Add any new spread-mode controls through `toolbar_button(...)` or another existing styled helper
    - [ ] Use shared viewer gutter and page-spacing tokens for one-page and two-page layouts
 
-7. **Presentation mode**
+5. **Fit modes**
+   - [ ] Add fit-width mode
+   - [ ] Add fit-page mode
+   - [ ] Add actual-size mode if practical
+   - [ ] Make zoom controls clearly show whether a fit mode is active
+   - [ ] Preserve fit mode across window resizes until the user explicitly chooses a fixed zoom level
+   - [ ] Keep fit-mode layout math in viewer logic and visual state in the style system
+
+6. **Presentation mode**
    - [ ] `F5` → full-screen, hide all chrome, show only the PDF
    - [ ] Click or right arrow → next page
+   - [ ] Left arrow → previous page
    - [ ] `Escape` → exit
    - [ ] Use `PresentationOverlay` style class for transient page number, navigation hints, and exit affordances
    - [ ] Ensure presentation-mode overlays share typography and contrast tokens with the rest of the app
 
-8. **Minimap**
+7. **Minimap**
    - [ ] Thin vertical strip on right edge of viewer
-   - [ ] Renders tiny page thumbnails (reuse cache) stacked vertically
+   - [ ] Renders tiny page thumbnails stacked vertically
    - [ ] Shows a viewport indicator rect
    - [ ] Click/drag on minimap scrolls the main view
    - [ ] Use the `Minimap` style class for strip width, border, opacity, hover state, and viewport indicator
    - [ ] Keep minimap rendering data-driven so style changes do not affect scroll math
 
+8. **Bookmarks and reading state**
+   - [ ] Add viewer control for adding a bookmark at the current page
+   - [ ] Render bookmarks in the sidebar or a dedicated viewer panel
+   - [ ] Allow renaming and deleting bookmarks
+   - [ ] Jump to a bookmark from the sidebar
+   - [ ] Persist bookmarks in SQLite
+   - [ ] Keep bookmark controls styled through sidebar row, toolbar, and inline-form helpers
+
 9. **Viewer polish pass**
    - [ ] Audit every new viewer feature for inline visual constants
    - [ ] Move reusable values into tokens or classes
-   - [ ] Confirm annotation controls, minimap, spread mode, and presentation overlays look coherent in light and dark themes
+   - [ ] Confirm find controls, selection, minimap, spread mode, presentation overlays, and bookmark controls look coherent in light and dark themes
    - [ ] Update `STYLE_SYSTEM.md` with any viewer-specific style patterns introduced in this phase
 
-### Phase 5 done when
+### Phase 6 done when
 
-- [ ] Highlights and notes persist and re-render correctly on reopen
-- [ ] Annotation export produces a valid PDF (test with pdfinfo or opening in another viewer)
+- [ ] Text selection and copy work for normal text PDFs
+- [ ] Find-in-document works and can jump between matches
 - [ ] Two-page spread mode works correctly
+- [ ] Fit-width and fit-page modes behave correctly during resize and zoom changes
 - [ ] Presentation mode is full-screen with no visible chrome
-- [ ] Annotation toolbars, popovers, minimap, and presentation overlays all use the Phase 4 style system
+- [ ] Minimap navigation works without interfering with normal scroll and zoom
+- [ ] Bookmarks persist and navigate correctly on reopen
+- [ ] Viewer controls, minimap, find overlay, bookmark UI, and presentation overlays all use the Phase 4 style system
 - [ ] No new viewer feature depends on hard-coded colors, spacing, radii, or typography in ordinary view code
 
 ---
 
-## Phase 6 — Polish and ship (weeks 19–23)
+## Phase 7 — Polish and ship (weeks 23–27)
 
 **Goal:** production-quality binary ready for Flathub submission, with final polish routed through the unified style system instead of one-off UI fixes.
 
 This phase should treat the Phase 4 style system as the default path for visual polish. Any final UI refinement should first ask whether the change belongs in a token, style class, layout primitive, or styled helper. Inline styling is acceptable only for genuinely local visual details.
 
+Before final release, verify that the expanded Phase 5 library manager and Phase 6 viewer features work together cleanly. In particular, test transitions between library selection, metadata editing, folder navigation, opening a PDF, saving reading progress, returning to the same library view, and preserving sort/filter/selection state where appropriate.
+
 ### Tasks in order
 
 1. **Error handling audit**
-   - [ ] Every `anyhow::Error` must be surfaced to the user (never silently swallowed)
+   - [ ] Every `anyhow::Error` must be surfaced to the user
    - [ ] Add an in-app error banner: dismissable, shows human-readable message
    - [ ] Corrupted PDF → show error in viewer area, not a panic
    - [ ] Use the shared `ErrorBanner` style class and helper for all user-visible errors
@@ -1016,23 +1301,25 @@ This phase should treat the Phase 4 style system as the default path for visual 
    - [ ] Use `tracing-subscriber` with JSON output for flamegraph analysis
    - [ ] Profile whether styled helpers or layout abstractions introduce measurable overhead in large library and viewer paths
    - [ ] Target metrics:
-     - Frame time: < 8ms (120fps budget) during scroll
+     - Frame time: < 8ms during scroll
      - Tile render time: < 200ms per page at 800px width
      - Library load time: < 500ms for 1000 entries
      - Search latency: < 100ms for any query
+     - Manual reorder commit: < 100ms for visible-window drag/drop
+     - Bulk metadata edit: batched and responsive for 500 selected entries
    - [ ] If style abstractions create performance problems, optimize the helpers without leaking visual constants back into view code
 
 3. **Settings persistence**
    - [ ] Store settings in `$XDG_CONFIG_HOME/pdf-folio/config.toml`
-   - [ ] Settings: theme, default zoom, watch directories, tile cache size, sidebar width
+   - [ ] Settings: theme, default zoom, watch directories, tile cache size, sidebar width, active library sort, active library layout, folder sidebar width, details panel state
    - [ ] Live reload: watch config file and apply changes without restart
    - [ ] Persist only user-facing style preferences, not internal token names
    - [ ] Route theme changes through the Phase 4 semantic token layer so all UI surfaces update consistently
 
 4. **Final visual polish pass**
-   - [ ] Audit toolbar, sidebar, library, viewer, annotations, minimap, dialogs, banners, and empty states
+   - [ ] Audit toolbar, sidebar, library, folders, bulk-action bar, metadata editor, viewer, minimap, dialogs, banners, and empty states
    - [ ] Remove remaining duplicated visual constants from ordinary view code
-   - [ ] Normalize spacing, typography, border radius, hover states, focus states, and selected states across the app
+   - [ ] Normalize spacing, typography, border radius, hover states, focus states, selected states, dragged states, and drop-target states across the app
    - [ ] Confirm that every repeated UI pattern has a token, class, layout primitive, or styled helper
    - [ ] Check light and dark themes side by side before release
    - [ ] Update `STYLE_SYSTEM.md` with any final conventions discovered during polish
@@ -1041,15 +1328,18 @@ This phase should treat the Phase 4 style system as the default path for visual 
    - [ ] All interactive elements reachable by keyboard
    - [ ] Focus ring visible on all focused elements
    - [ ] Window title updates on navigation
-   - [ ] Ensure focus, selected, active, disabled, and error states are represented in the style system
+   - [ ] Library selection, folder navigation, metadata editing, and drag-and-drop alternatives are usable without a mouse
+   - [ ] Viewer find, selection, bookmarks, page navigation, and presentation controls are usable by keyboard
+   - [ ] Ensure focus, selected, active, disabled, dragged, drop-target, and error states are represented in the style system
    - [ ] Check contrast for all semantic color tokens in light and dark themes
-   - [ ] Consider `atspi` integration for screen reader support (stretch goal)
+   - [ ] Consider `atspi` integration for screen reader support
 
 6. **Desktop integration**
    - [ ] `pdf-folio.desktop` with `MimeType=application/pdf`
    - [ ] Register as PDF handler via `xdg-mime`
    - [ ] DBus activation so opening a second PDF from the file manager focuses the existing window and opens the file
    - [ ] Confirm desktop-launched error states use the same styled in-app banner path as CLI-launched errors
+   - [ ] Confirm "Reveal in file manager" and "Open containing folder" use native desktop behavior where available
 
 7. **Flatpak manifest** (`packaging/dev.pdf-folio.PDF-Folio.yml`)
    - [ ] Runtime: `org.freedesktop.Platform//23.08`
@@ -1070,13 +1360,15 @@ This phase should treat the Phase 4 style system as the default path for visual 
    - [ ] Do not allow plugins to bypass the host style system for built-in UI surfaces
    - [ ] If plugins can render UI, expose a constrained set of host-provided style tokens and components rather than raw app internals
 
-### Phase 6 done when
+### Phase 7 done when
 
 - [ ] `flatpak-builder` produces a working bundle
 - [ ] AppStream metadata passes `appstreamcli validate`
 - [ ] No `tracing::error!` or `eprintln!` in production paths — all errors go to the in-app banner
 - [ ] `cargo clippy --all-targets -- -D warnings` passes clean
 - [ ] `cargo test --workspace` passes
+- [ ] Manual ordering, folder management, metadata editing, selection, and bulk actions survive app restarts
+- [ ] Viewer find, fit modes, bookmarks, minimap, and presentation mode work reliably
 - [ ] Final UI polish is expressed through the Phase 4 style system rather than scattered one-off styling
 - [ ] Light and dark themes remain visually coherent across all production surfaces
 
@@ -1095,5 +1387,3 @@ These apply to every file the agent generates.
 - **Feature flags for optional backends.** Any alternative implementation (e.g. a future mupdf backend) lives behind a Cargo feature flag, not `cfg(target_os)`.
 - **Tests live next to the code.** Use `#[cfg(test)] mod tests { ... }` in the same file. Integration tests go in `tests/`.
 - **Style through the style system.** Reusable UI polish belongs in `pdf-folio-ui/src/style/` as tokens, classes, layout primitives, or styled helpers. Do not scatter hard-coded colors, spacing, radii, or typography through ordinary view code.
-
----

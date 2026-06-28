@@ -5,7 +5,10 @@ pub mod importer;
 pub mod indexer;
 pub mod watcher;
 
-pub use db::{Db, EntryId, LibraryEntry, NewLibraryEntry};
+pub use db::{
+    Db, EntryId, Folder, FolderId, LibraryEntry, LibraryLayoutMode, LibraryPreferences,
+    LibrarySortMode, NewLibraryEntry,
+};
 pub use importer::{
     hash_file, import_folder, import_pdf, scan_pdf_files, thumbnail_cache_dir, thumbnail_path,
     ImportSummary, ImportedEntry,

@@ -75,6 +75,8 @@ pub fn import_pdf(db: &Db, path: &Path) -> Result<ImportedEntry> {
         path: path.to_path_buf(),
         title: title_from_path(path),
         author: None,
+        author_attributed: false,
+        page_count_attributed: false,
         page_count: None,
         cover_hash: None,
     })?;
