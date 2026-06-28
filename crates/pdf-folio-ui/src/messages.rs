@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use iced::keyboard;
+use iced::Point;
 use pdf_folio_core::{Annotation, AnnotationId, PdfDoc, TileKey};
 use pdf_folio_library::{EntryId, LibraryEntry};
 
@@ -20,17 +22,40 @@ pub enum Message {
     /// A document operation failed.
     DocumentError(String),
     /// A page render finished.
-    PageRendered { key: TileKey, data: Vec<u8> },
+    PageRendered {
+        key: TileKey,
+        data: Vec<u8>,
+        width: u16,
+        height: u16,
+    },
     /// A thumbnail render finished.
     ThumbnailReady { page: u16, data: Vec<u8> },
     /// Scroll offset changed.
     ScrollChanged(f32),
+    /// Scroll offset and viewport size changed.
+    ViewportChanged {
+        scroll_offset: f32,
+        width: f32,
+        height: f32,
+    },
+    /// Wheel input over the document viewport.
+    ViewportWheelScrolled {
+        delta_x: f32,
+        delta_y: f32,
+        cursor: Point,
+        viewport_width: f32,
+        viewport_height: f32,
+    },
+    /// Keyboard modifiers changed.
+    ModifiersChanged(keyboard::Modifiers),
     /// Increase zoom.
     ZoomIn,
     /// Decrease zoom.
     ZoomOut,
     /// Set rendered page width in pixels.
     ZoomSet(u16),
+    /// A wheel zoom gesture has been idle long enough to render the final zoom level.
+    ZoomRenderSettled(u64),
     /// Jump to a zero-based page.
     JumpToPage(u16),
     /// Toggle the table-of-contents panel.
@@ -55,6 +80,19 @@ pub enum Message {
     EntryDeleted(EntryId),
     /// Toggle app theme.
     ThemeToggled,
+    /// A keyboard shortcut was pressed.
+    ShortcutPressed(Shortcut),
     /// Settings changed.
     SettingsChanged(Settings),
+}
+
+/// Keyboard shortcuts handled by the Phase 1 viewer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shortcut {
+    /// Increase zoom.
+    In,
+    /// Decrease zoom.
+    Out,
+    /// Reset zoom to the configured default.
+    Reset,
 }

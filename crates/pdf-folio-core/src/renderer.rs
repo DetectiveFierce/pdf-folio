@@ -61,6 +61,15 @@ impl TileCache {
         cache.resize(capacity);
     }
 
+    /// Removes all cached tiles.
+    pub fn clear(&self) {
+        let mut cache = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.clear();
+    }
+
     /// Returns the number of cached tiles.
     pub fn len(&self) -> usize {
         let cache = self

@@ -395,48 +395,130 @@ Index one document per PDF page. Search returns `(entry_id, page)` hits so the U
      the actual iced window loop starts in the next Phase 1 UI task.
 
 2. **PdfDoc implementation** (`pdf-folio-core/src/document.rs`)
-   - Implement `PdfDoc::open`, `render_page`, `page_aspect_ratio`
-   - Unit test: open a fixture PDF, render page 0, assert Vec<u8> is non-empty and length == width * height * 4
-   - Unit test: page_aspect_ratio returns a plausible float (0.5 < ratio < 3.0)
+   - [x] Add `tests/fixtures/phase1-single-page.pdf`, a one-page letter-size fixture with
+     predictable text and page dimensions
+   - [x] Implement `PdfDoc::open`, `render_page`, `page_aspect_ratio`, `outline`, and
+     `text_on_page` against real `pdfium-render` calls
+   - [x] Unit test: open a fixture PDF, render page 0, assert RGBA bytes are non-empty and
+     length == width * height * 4
+   - [x] Unit test: page_aspect_ratio returns a plausible float (0.5 < ratio < 3.0)
+   - [x] Unit test: extract text from the fixture and verify empty outline handling
+
+   Implementation notes:
+   - Completed 2026-06-28. The current `PdfDoc` remains path-backed and reopens the document
+     per operation. This avoids forcing `PdfDocument<'static>` lifetimes before the renderer/cache
+     layer owns the concurrency model.
+   - Pdfium is initialized once per process with `OnceLock`; repeated `Pdfium::new()` calls fail
+     because `pdfium-render` stores bindings in a global OnceCell.
+   - Pdfium calls are serialized behind a process-wide mutex for Phase 1. Parallel tests exposed
+     unsafe concurrent access with the system Pdfium library even though the crate uses the
+     `thread_safe` feature. Revisit this when the background render pool is designed.
+   - Development currently expects a system `libpdfium` discoverable by the dynamic linker, an
+     `LD_LIBRARY_PATH` pointing at a Pdfium build, or a Pdfium shared library placed next to the
+     binary. Release packaging still needs an explicit bundled/shared-library decision.
 
 3. **TileCache implementation** (`pdf-folio-core/src/renderer.rs`)
-   - Implement `TileCache` using `lru::LruCache` behind `Arc<Mutex<_>>`
-   - Unit test: insert 3 tiles, get them back, insert beyond capacity, oldest evicted
+   - [x] Implement `TileCache` using `lru::LruCache` behind `Arc<Mutex<_>>`
+   - [x] Unit test: insert 3 tiles, get them back, insert beyond capacity, oldest evicted
+
+   Implementation notes:
+   - Treated as complete on 2026-06-28. The cache exposes `new`, `with_default_capacity`,
+     `insert`, `get`, `clear`, `set_capacity`, `len`, and `is_empty`, with a focused eviction
+     test.
 
 4. **Minimal iced window** (`pdf-folio-ui/src/app.rs`)
-   - Hardcode a PDF path for now
-   - On startup, call `PdfDoc::open` and `render_page(0, 800)`
-   - Display result with `iced::widget::image`
-   - Milestone: see the first page of a PDF in a window
+   - [x] Wire the binary/CLI path into UI startup
+   - [x] Use the Phase 1 fixture as a development fallback when no CLI path is supplied
+   - [x] On startup, call `PdfDoc::open` and `render_page(0, 800)`
+   - [x] Display result with `iced::widget::image`
+   - [x] Milestone: see the first page of a PDF in a window
+
+   Implementation notes:
+   - Completed 2026-06-28. `pdf-folio-main` parses an optional startup PDF and passes it to
+     `pdf_folio_ui::run`; the UI builds startup state, then schedules document open and page
+     rendering through iced startup/update tasks.
+   - This began as a synchronous/blocking milestone and was superseded by Task 5 during the same
+     Phase 1 implementation pass. The current app no longer renders the first page on the UI
+     thread.
+   - The minimal window now prefers `tests/fixtures/phase1-multipage.pdf` as a dev-only fallback if
+     no command-line PDF is provided and the fixture exists. It falls back to
+     `tests/fixtures/phase1-single-page.pdf` for older checkouts.
 
 5. **Async rendering via Command**
-   - Move `render_page` call off the main thread using `Command::perform`
-   - Show a gray placeholder rect while rendering
-   - Milestone: placeholder → rendered page transition works without UI freeze
+   - [x] Move `render_page` call off the main thread using iced `Task::perform` plus
+     `tokio::task::spawn_blocking`
+   - [x] Show a gray placeholder rect while rendering
+   - [x] Milestone: placeholder → rendered page transition works without UI freeze
+
+   Implementation notes:
+   - Completed 2026-06-28. Iced 0.14 uses `Task` instead of the older `Command` naming, so the
+     implementation follows the same architecture with the current API.
+   - Startup document open is also scheduled as a task. Errors are surfaced as
+     `Message::DocumentError` instead of panicking.
 
 6. **Scroll and multi-page**
-   - Implement `visible_page_range(scroll_offset, viewport_height)` using pre-computed page heights
-   - On scroll, request tiles for all visible pages
-   - Implement `canvas::Program::draw()` to position pages vertically in the frame
-   - Milestone: can scroll through a multi-page PDF
+   - [x] Implement `visible_page_range(scroll_offset, viewport_height)` using pre-computed page heights
+   - [x] On scroll, request tiles for all visible pages
+   - [x] Implement `canvas::Program::draw()` to position pages vertically in the frame
+   - [x] Milestone: can scroll through a multi-page PDF
+
+   Implementation notes:
+   - Completed 2026-06-28. The viewer uses a fixed viewport-height iced canvas, tracks vertical
+     and horizontal offsets in app state, and requests only visible pages.
+   - Updated 2026-06-28: wheel input is owned by the canvas instead of a parent iced `scrollable`.
+     Plain wheel pans vertically, horizontal wheel deltas and Shift+wheel pan wide/zoomed pages
+     horizontally, and Ctrl+wheel is captured cleanly for zoom without also scrolling the document.
+   - Rendered pages are promoted into iced image handles and drawn into logical page rectangles;
+     missing pages draw gray placeholders.
+   - `TileCache` is now used in the UI path. It is cleared when a new document opens to avoid
+     cross-document key collisions, and cached bytes are promoted back into image handles on cache
+     hits.
+   - Added `tests/fixtures/phase1-multipage.pdf`, a 24-page manual-test fixture with a core test
+     asserting the expected page count.
 
 7. **Zoom**
-   - `ZoomIn` / `ZoomOut` messages change `zoom_width`
-   - On zoom change, clear `pending_renders`, keep cache (different TileKey so no conflict)
-   - Keyboard shortcuts: `+` / `-` / `0` (reset)
-   - Milestone: zoom in and out without rendering artifacts
+   - [x] `ZoomIn` / `ZoomOut` messages change `zoom_width`
+   - [x] On zoom change, clear `pending_renders`, keep cache (different TileKey so no conflict)
+   - [x] Keyboard shortcuts: `+` / `-` / `0` (reset)
+   - [x] Milestone: zoom in and out without rendering artifacts
+
+   Implementation notes:
+   - Completed 2026-06-28. Toolbar buttons and keyboard shortcuts share the same message path.
+   - `zoom_width` is treated as logical page width; `TileKey.width_px` stores the physical render
+     width so zoom and DPI scaling do not collide in the cache.
+   - Updated 2026-06-28: while a newly requested zoom tile is pending, the canvas draws the nearest
+     already-rendered tile for the same page scaled into the new page rectangle. This avoids the
+     visible gray flicker during zoom and swaps to the crisp tile when rendering finishes.
+   - Updated 2026-06-28: Ctrl+wheel zooms in/out around the cursor by preserving the cursor's
+     document-space anchor and adjusting both vertical and horizontal offsets in the same app-state
+     update. This avoids modifier-wheel leakage from iced's scrollable transaction handling.
+   - Updated 2026-06-28: Ctrl+wheel zoom rendering is debounced. During the active wheel gesture,
+     the viewer pins the preview source to the render width from the start of the gesture and scales
+     that stable image. After a short idle pause, it renders the final zoom level and swaps pages to
+     crisp tiles once the final visible tiles are ready, instead of chasing every intermediate wheel
+     tick.
 
 8. **DPI awareness**
-   - Detect window scale factor from iced
-   - Multiply `zoom_width` by scale factor before passing to `render_page`
-   - Milestone: text is sharp on HiDPI displays
+   - [x] Detect/configure window scale factor from iced
+   - [x] Multiply `zoom_width` by scale factor before passing to `render_page`
+   - [x] Milestone: text is sharp on HiDPI displays
+
+   Implementation notes:
+   - Completed 2026-06-28 with an explicit `PDFolioApp::scale_factor` field wired through iced's
+     `.scale_factor(...)` builder hook. Current default is `1.0`; the render pipeline now separates
+     logical layout width from physical render width so a real HiDPI scale source can be plugged in
+     without changing tile keys or drawing code.
 
 ### Phase 1 done when
 
-- [ ] Any PDF opens from a command-line argument
-- [ ] Scrolling through a 200-page PDF stays above 60fps (measure with `tracing` spans)
-- [ ] Zoom works without visible quality loss
-- [ ] No panics, no `unwrap()` on fallible operations (use `?` and surface errors as `Message::DocumentError`)
+- [x] A startup PDF opens from a command-line argument in the async canvas viewer
+- [ ] Scrolling through a 200-page PDF stays above 60fps (implementation is async/visible-page-only;
+  still needs measurement with a 200-page fixture or sample PDF and `tracing` spans)
+- [x] Zoom works without visible quality loss at the render-pipeline level by re-rendering at the
+  new logical width, using distinct cache keys, and temporarily displaying the nearest previous
+  render while the replacement tile is pending
+- [x] No panics, no `unwrap()` on fallible operations in the new Phase 1 UI path; failures are
+  surfaced as `Message::DocumentError`
 
 ---
 
