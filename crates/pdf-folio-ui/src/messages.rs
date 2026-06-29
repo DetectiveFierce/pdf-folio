@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use iced::keyboard;
 use iced::Point;
@@ -109,6 +110,16 @@ pub enum Message {
     OpenLibraryEntry(EntryId),
     /// A library entry was clicked.
     LibraryEntryClicked(EntryId),
+    /// Begin dragging a library entry for manual reordering.
+    BeginLibraryEntryDrag(EntryId),
+    /// Cursor moved while dragging a library entry.
+    LibraryEntryDragMoved(Point),
+    /// Auto-scroll timer tick while dragging a library entry.
+    LibraryAutoScrollTick(Instant),
+    /// Finish the active library entry drag.
+    EndLibraryEntryDrag,
+    /// Manual entry ordering was persisted.
+    ManualEntryOrderSaved,
     /// A library entry document was opened successfully.
     LibraryDocumentOpened { entry_id: EntryId, doc: Arc<PdfDoc> },
     /// Return from the viewer to the library.
@@ -123,7 +134,13 @@ pub enum Message {
         hit_pages: std::collections::HashMap<EntryId, u16>,
     },
     /// Library scroll viewport changed.
-    LibraryScrolled { offset_y: f32, viewport_height: f32 },
+    LibraryScrolled {
+        offset_y: f32,
+        viewport_x: f32,
+        viewport_y: f32,
+        viewport_width: f32,
+        viewport_height: f32,
+    },
     /// Collapse the library tag sidebar.
     CollapseLibrarySidebar,
     /// Expand the library tag sidebar.

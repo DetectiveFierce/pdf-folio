@@ -965,30 +965,50 @@ Library features added in this phase must use the Phase 4 style system. Library 
      - Page count
      - Missing files
    - [x] Manual order must preserve exactly the order the user leaves PDFs in
-     - Storage/API support is complete; drag-and-drop UI still needs to call the ordering API.
+     - Storage/API support is complete; the library UI now persists manual drag reorder drops via
+       `Db::set_manual_entry_order`.
    - [x] Store the active sort mode and restore it on app restart
-   - [ ] Disable drag-to-reorder in non-manual sorted views, or show a clear affordance that reordering requires switching to Manual
-   - [ ] Keep search results sortable without mutating the underlying manual order unless the user explicitly switches to Manual and drags entries there
+   - [x] Disable drag-to-reorder in non-manual sorted views, or show a clear affordance that reordering requires switching to Manual
+     - The UI shows a reorder status hint and disables drag handles outside an unfiltered Manual view.
+   - [x] Keep search results sortable without mutating the underlying manual order unless the user explicitly switches to Manual and drags entries there
+     - Search and tag-filtered views remain sorted but do not allow manual reorder drops yet; this
+       prevents partial visible subsets from rewriting the root manual order.
    - [ ] Add toolbar or sidebar controls for sort mode, sort direction, grid/list mode, and visible metadata density
-     - Sort mode and grid/list controls are present and persisted; visible metadata density is stored in preferences but does not have a UI selector yet.
+     - Sort mode is now a themed dropdown in the library menu bar and grid/list controls are present
+       and persisted; visible metadata density is stored in preferences but does not have a UI
+       selector yet.
 
    Implementation notes:
    - Completed 2026-06-28 at the data/query level and with a minimal UI control. The library header
-     has a Phase 4-styled cycling sort button, and the existing grid/list toggle persists via
+     has a Phase 4-styled sort dropdown, and the existing grid/list toggle persists via
      `library_preferences`.
+   - Updated 2026-06-28: dropdown menus and tooltips use rounded, themed overlay styles matching
+     the app surface, border, focus, and shadow tokens.
    - `PDFolioApp::refresh_library()` now queries `Db::get_entries_sorted(app.library_sort_mode)`.
      Search uses the selected sort mode as its base ordering, while Tantivy full-text hits are still
      promoted first; a later search/filter pass should add clearer match-source sorting controls.
    - Sidebar width is now loaded from and saved to `library_preferences`.
 
 3. **Drag-and-drop PDF reordering**
-   - [ ] In Manual view, allow dragging PDFs to reorder them
-   - [ ] Support both grid and list reordering
-   - [ ] Show insertion indicators between rows/cards
-   - [ ] Auto-scroll the library viewport while dragging near the top or bottom edge
-   - [ ] Persist the new order immediately after drop
-   - [ ] Keep drag math separate from style definitions; style only controls the visual drag state, insertion marker, opacity, focus ring, and hover target
-   - [ ] Add tests for reorder calculations independent of iced UI code
+   - [x] In Manual view, allow dragging PDFs to reorder them
+   - [x] Support both grid and list reordering
+   - [x] Show insertion indicators between rows/cards
+   - [x] Auto-scroll the library viewport while dragging near the top or bottom edge
+   - [x] Persist the new order immediately after drop
+   - [x] Keep drag math separate from style definitions; style only controls the visual drag state, insertion marker, opacity, focus ring, and hover target
+   - [x] Add tests for reorder calculations independent of iced UI code
+
+   Implementation notes:
+   - Updated 2026-06-28: `PDFolioApp` has a `LibraryDragState` plus begin/move/end messages.
+     A drag starts from a thresholded press-and-move on a card or row surface. The drop slot is
+     previewed with a stable semi-transparent in-flow placeholder, while a separate floating preview
+     follows the cursor above the grid/list; the in-memory manual list updates optimistically and
+     saves the complete visible manual order on mouse release.
+   - Reorder remains intentionally enabled only when sort mode is Manual and no search or tag filter
+     is active. Filtered/manual subset ordering is still open.
+   - Updated 2026-06-28: drag auto-scroll now uses a stable scrollable ID, a 60 Hz drag-only tick,
+     real viewport bounds from iced's scroll callback, a quadratic edge-zone velocity curve, and
+     programmatic scroll operations. Unit tests cover the edge-zone velocity math.
 
 4. **Multi-selection model**
    - [ ] Add selection state to the library view
@@ -1165,7 +1185,7 @@ Library features added in this phase must use the Phase 4 style system. Library 
       - metadata field editor
       - bulk-action button
       - filter chip
-      - drag insertion marker
+      - drag ghost preview
     - [ ] Update `STYLE_SYSTEM.md` with library-specific styling conventions
     - [ ] Confirm light and dark themes are coherent for selected, dragged, drop-target, disabled, missing-file, and error states
 

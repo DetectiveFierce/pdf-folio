@@ -130,6 +130,28 @@ impl LibrarySortMode {
             Self::MissingFiles => "missing_files",
         }
     }
+
+    /// Returns the user-facing label for this sort mode.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Manual => "Manual",
+            Self::TitleAsc => "Title A-Z",
+            Self::TitleDesc => "Title Z-A",
+            Self::AuthorAsc => "Author A-Z",
+            Self::AuthorDesc => "Author Z-A",
+            Self::RecentlyAdded => "Recently Added",
+            Self::RecentlyOpened => "Recently Opened",
+            Self::ReadingProgress => "Progress",
+            Self::PageCount => "Page Count",
+            Self::MissingFiles => "Missing",
+        }
+    }
+}
+
+impl std::fmt::Display for LibrarySortMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
 }
 
 impl std::str::FromStr for LibrarySortMode {

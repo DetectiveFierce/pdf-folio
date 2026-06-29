@@ -1,7 +1,7 @@
 //! Reusable semantic style classes.
 
-use iced::widget::{button, container, progress_bar, text_input};
-use iced::{Background, Border, Color};
+use iced::widget::{button, container, pick_list, progress_bar, scrollable, text_input};
+use iced::{overlay, Background, Border, Color, Shadow as IcedShadow, Vector};
 
 use super::tokens::{BorderWidth, Radius, ThemeTokens};
 
@@ -42,6 +42,8 @@ pub enum Class {
     PagePlaceholder,
     /// Jump-to-page overlay.
     JumpOverlay,
+    /// Tooltip overlay.
+    Tooltip,
     /// Annotation toolbar.
     AnnotationToolbar,
     /// Annotation popover.
@@ -52,6 +54,8 @@ pub enum Class {
     Minimap,
     /// Empty-state panel.
     EmptyState,
+    /// Library drag insertion marker.
+    DragInsertionMarker,
 }
 
 /// Visual state shared by components that do not expose an iced status directly.
@@ -128,6 +132,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
             Radius::NONE,
         ),
         Class::JumpOverlay
+        | Class::Tooltip
         | Class::AnnotationToolbar
         | Class::AnnotationPopover
         | Class::PresentationOverlay
@@ -144,6 +149,13 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
             tokens.border,
             BorderWidth::HAIRLINE,
             Radius::MD,
+        ),
+        Class::DragInsertionMarker => (
+            tokens.focus,
+            tokens.text_primary,
+            tokens.focus,
+            BorderWidth::NONE,
+            Radius::SM,
         ),
         Class::TagPill => (
             mix_color(tokens.surface, tokens.accent, 0.12),
@@ -241,6 +253,63 @@ pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -
     }
 }
 
+/// Returns an iced pick-list style for a semantic class.
+pub fn pick_list_style(
+    tokens: ThemeTokens,
+    _class: Class,
+    status: pick_list::Status,
+) -> pick_list::Style {
+    let is_active = matches!(
+        status,
+        pick_list::Status::Hovered | pick_list::Status::Opened { .. }
+    );
+    let background = if is_active {
+        mix_color(tokens.surface_raised, tokens.accent, 0.16)
+    } else {
+        tokens.surface_raised
+    };
+
+    pick_list::Style {
+        text_color: tokens.text_primary,
+        placeholder_color: tokens.text_secondary,
+        handle_color: tokens.text_secondary,
+        background: Background::Color(background),
+        border: Border {
+            width: BorderWidth::HAIRLINE,
+            color: if is_active {
+                tokens.focus
+            } else {
+                tokens.border
+            },
+            radius: Radius::SM.into(),
+        },
+    }
+}
+
+/// Returns an iced dropdown menu style for themed popup menus.
+pub fn menu_style(tokens: ThemeTokens) -> overlay::menu::Style {
+    overlay::menu::Style {
+        background: Background::Color(tokens.surface_raised),
+        border: Border {
+            width: BorderWidth::HAIRLINE,
+            color: tokens.border,
+            radius: Radius::SM.into(),
+        },
+        text_color: tokens.text_primary,
+        selected_text_color: tokens.text_primary,
+        selected_background: Background::Color(mix_color(
+            tokens.surface_raised,
+            tokens.accent,
+            0.30,
+        )),
+        shadow: IcedShadow {
+            color: tokens.shadow,
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 12.0,
+        },
+    }
+}
+
 /// Returns an iced text-input style for a semantic class.
 pub fn text_input_style(
     tokens: ThemeTokens,
@@ -286,6 +355,64 @@ pub fn progress_bar_style(tokens: ThemeTokens, _class: Class) -> progress_bar::S
             width: BorderWidth::NONE,
             color: tokens.border,
             radius: 2.0.into(),
+        },
+    }
+}
+
+/// Returns an iced scrollable style for a semantic class.
+pub fn scrollable_style(
+    tokens: ThemeTokens,
+    _class: Class,
+    status: scrollable::Status,
+) -> scrollable::Style {
+    let base_scroller = match status {
+        scrollable::Status::Active { .. } => tokens.border,
+        scrollable::Status::Hovered { .. } => mix_color(tokens.border, tokens.focus, 0.42),
+        scrollable::Status::Dragged { .. } => tokens.accent,
+    };
+    let rail = scrollable::Rail {
+        background: Some(Background::Color(mix_color(
+            tokens.background,
+            tokens.surface,
+            0.64,
+        ))),
+        border: Border {
+            width: BorderWidth::NONE,
+            color: tokens.border,
+            radius: Radius::SM.into(),
+        },
+        scroller: scrollable::Scroller {
+            background: Background::Color(base_scroller),
+            border: Border {
+                width: BorderWidth::NONE,
+                color: base_scroller,
+                radius: Radius::SM.into(),
+            },
+        },
+    };
+
+    scrollable::Style {
+        container: container::Style::default(),
+        vertical_rail: rail,
+        horizontal_rail: rail,
+        gap: Some(Background::Color(tokens.surface)),
+        auto_scroll: scrollable::AutoScroll {
+            background: Background::Color(mix_color(
+                tokens.surface_raised,
+                tokens.background,
+                0.18,
+            )),
+            border: Border {
+                width: BorderWidth::HAIRLINE,
+                color: tokens.focus,
+                radius: 999.0.into(),
+            },
+            shadow: IcedShadow {
+                color: tokens.shadow,
+                offset: Vector::ZERO,
+                blur_radius: 4.0,
+            },
+            icon: tokens.text_primary,
         },
     }
 }
