@@ -9,9 +9,12 @@ use iced::Color;
 use kdl::{KdlDocument, KdlNode, KdlValue};
 
 use super::classes::{mix_color, Class, ComponentState};
-use super::tokens::{ClassStyle, PrimitiveTokens, ThemeTokens, VisualStyle};
+use super::tokens::{
+    AppLabelTokens, AppLayoutTokens, BoxSpacing, ClassStyle, ComponentLayout, ComponentTextStyle,
+    CornerRadius, LabelSection, PrimitiveTokens, ThemeTokens, VisualStyle,
+};
 
-const BUNDLED_STYLE_FILES: [(&str, &str); 4] = [
+const BUNDLED_STYLE_FILES: [(&str, &str); 6] = [
     (
         "styles/themes/espresso.kdl",
         include_str!("../../styles/themes/espresso.kdl"),
@@ -25,8 +28,16 @@ const BUNDLED_STYLE_FILES: [(&str, &str); 4] = [
         include_str!("../../styles/components/core.kdl"),
     ),
     (
-        "styles/components/library.kdl",
-        include_str!("../../styles/components/library.kdl"),
+        "styles/components/library/sidebar.kdl",
+        include_str!("../../styles/components/library/sidebar.kdl"),
+    ),
+    (
+        "styles/components/library/library.kdl",
+        include_str!("../../styles/components/library/library.kdl"),
+    ),
+    (
+        "styles/application.kdl",
+        include_str!("../../styles/application.kdl"),
     ),
 ];
 
@@ -34,6 +45,8 @@ const BUNDLED_STYLE_FILES: [(&str, &str); 4] = [
 #[derive(Debug, Clone)]
 pub struct StyleBook {
     themes: HashMap<String, ThemeTokens>,
+    layout: AppLayoutTokens,
+    labels: AppLabelTokens,
     style_dirs: Vec<PathBuf>,
 }
 
@@ -76,8 +89,12 @@ impl StyleBook {
         for (name, source) in sources {
             raw.apply_source(&name, &source)?;
         }
+        let layout = raw.layout.clone();
+        let labels = raw.labels.clone();
         Ok(Self {
             themes: raw.compile()?,
+            layout,
+            labels,
             style_dirs,
         })
     }
@@ -91,6 +108,16 @@ impl StyleBook {
             .unwrap_or_else(fallback_dark_tokens)
     }
 
+    /// Returns KDL-backed layout tokens for the application shell.
+    pub fn layout(&self) -> &AppLayoutTokens {
+        &self.layout
+    }
+
+    /// Returns KDL-backed label tokens for the application shell.
+    pub fn labels(&self) -> &AppLabelTokens {
+        &self.labels
+    }
+
     /// Directories watched for style changes.
     pub fn style_dirs(&self) -> &[PathBuf] {
         &self.style_dirs
@@ -100,6 +127,8 @@ impl StyleBook {
 #[derive(Debug, Default)]
 struct RawStyleBook {
     themes: HashMap<String, RawTheme>,
+    layout: AppLayoutTokens,
+    labels: AppLabelTokens,
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +145,8 @@ impl RawStyleBook {
                 "theme" => self.apply_theme_node(name, node)?,
                 "component" => self.apply_component_node(name, node)?,
                 "primitive" => self.apply_primitive_node(name, node)?,
+                "layout" => self.apply_layout_node(name, node)?,
+                "labels" => self.apply_labels_node(name, node)?,
                 other => {
                     return Err(format!(
                         "{name}: unsupported top-level style node `{other}`"
@@ -167,34 +198,528 @@ impl RawStyleBook {
     }
 
     fn apply_component_node(&mut self, name: &str, node: &KdlNode) -> Result<(), String> {
-        let class = parse_class(node_string_arg(name, node, 0)?)
-            .ok_or_else(|| format!("{name}: unknown style class"))?;
+        let component_name = node_string_arg(name, node, 0)?;
+        let Some(class) = parse_class(component_name) else {
+            return self.apply_app_component_node(name, component_name, node);
+        };
         let children = node
             .children()
             .ok_or_else(|| format!("{name}: component `{class:?}` must have state children"))?;
 
         for child in children.nodes() {
-            let state = parse_state(child.name().value()).ok_or_else(|| {
-                format!(
-                    "{name}: unknown component state `{}` for `{class:?}`",
-                    child.name().value()
-                )
-            })?;
-            let target_themes = child
-                .get("theme")
-                .and_then(KdlValue::as_string)
-                .map(|theme| vec![theme.to_owned()])
-                .unwrap_or_else(|| self.themes.keys().cloned().collect());
-            for theme in target_themes {
-                let Some(raw_theme) = self.themes.get_mut(&theme) else {
+            match child.name().value() {
+                "layout" => {
+                    let layout = self.apply_class_component_layout_node(name, class, child)?;
+                    for raw_theme in self.themes.values_mut() {
+                        let current = raw_theme.tokens.class_styles[class.index()].layout;
+                        raw_theme.tokens.class_styles[class.index()].layout =
+                            current.merged(layout);
+                    }
+                }
+                "text" => {
+                    let text = parse_component_text(name, child)?;
+                    for raw_theme in self.themes.values_mut() {
+                        let current = raw_theme.tokens.class_styles[class.index()].text;
+                        raw_theme.tokens.class_styles[class.index()].text = current.merged(text);
+                    }
+                }
+                "labels" => {
+                    self.apply_component_labels_node(name, class, child)?;
+                }
+                state_name => {
+                    let state = parse_state(state_name).ok_or_else(|| {
+                        format!("{name}: unknown component property or state `{state_name}`")
+                    })?;
+                    let target_themes = child
+                        .get("theme")
+                        .and_then(KdlValue::as_string)
+                        .map(|theme| vec![theme.to_owned()])
+                        .unwrap_or_else(|| self.themes.keys().cloned().collect());
+                    for theme in target_themes {
+                        let Some(raw_theme) = self.themes.get_mut(&theme) else {
+                            return Err(format!(
+                                "{name}: component `{class:?}` references unknown theme `{theme}`"
+                            ));
+                        };
+                        let style = parse_visual_style(name, child, &raw_theme.tokens)?;
+                        raw_theme.tokens.class_styles[class.index()].states[state.index()] =
+                            raw_theme.tokens.class_styles[class.index()].states[state.index()]
+                                .merged(style);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_class_component_layout_node(
+        &mut self,
+        name: &str,
+        class: Class,
+        node: &KdlNode,
+    ) -> Result<ComponentLayout, String> {
+        let mut layout = ComponentLayout::EMPTY;
+        for entry in node.entries() {
+            let Some(property) = entry.name().map(|name| name.value()) else {
+                continue;
+            };
+            match property {
+                "width" => {
+                    let value = value_as_f32(name, entry.value())?;
+                    layout.width = Some(value);
+                    match class {
+                        Class::Sidebar => self.layout.library_sidebar_width = value,
+                        Class::LibraryCard => self.layout.library_grid_card_width = value,
+                        _ => {}
+                    }
+                }
+                "width_portion" => {
+                    layout.width_portion = Some(value_as_u16(name, entry.value())?);
+                }
+                "height" => layout.height = Some(value_as_f32(name, entry.value())?),
+                "padding" => {
+                    layout.padding = layout
+                        .padding
+                        .merged(BoxSpacing::uniform(value_as_f32(name, entry.value())?));
+                }
+                "padding_x" => {
+                    let value = value_as_f32(name, entry.value())?;
+                    layout.padding = layout.padding.merged(BoxSpacing {
+                        left: Some(value),
+                        right: Some(value),
+                        ..BoxSpacing::EMPTY
+                    });
+                }
+                "padding_y" => {
+                    let value = value_as_f32(name, entry.value())?;
+                    layout.padding = layout.padding.merged(BoxSpacing {
+                        top: Some(value),
+                        bottom: Some(value),
+                        ..BoxSpacing::EMPTY
+                    });
+                }
+                "padding_left" => layout.padding.left = Some(value_as_f32(name, entry.value())?),
+                "padding_right" => layout.padding.right = Some(value_as_f32(name, entry.value())?),
+                "padding_top" => layout.padding.top = Some(value_as_f32(name, entry.value())?),
+                "padding_bottom" => {
+                    layout.padding.bottom = Some(value_as_f32(name, entry.value())?);
+                }
+                "margin" => {
+                    layout.margin = layout
+                        .margin
+                        .merged(BoxSpacing::uniform(value_as_f32(name, entry.value())?));
+                }
+                "margin_x" => {
+                    let value = value_as_f32(name, entry.value())?;
+                    layout.margin = layout.margin.merged(BoxSpacing {
+                        left: Some(value),
+                        right: Some(value),
+                        ..BoxSpacing::EMPTY
+                    });
+                }
+                "margin_y" => {
+                    let value = value_as_f32(name, entry.value())?;
+                    layout.margin = layout.margin.merged(BoxSpacing {
+                        top: Some(value),
+                        bottom: Some(value),
+                        ..BoxSpacing::EMPTY
+                    });
+                }
+                "margin_left" => layout.margin.left = Some(value_as_f32(name, entry.value())?),
+                "margin_right" => layout.margin.right = Some(value_as_f32(name, entry.value())?),
+                "margin_top" => layout.margin.top = Some(value_as_f32(name, entry.value())?),
+                "margin_bottom" => {
+                    layout.margin.bottom = Some(value_as_f32(name, entry.value())?);
+                }
+                "spacing" => layout.spacing = Some(value_as_f32(name, entry.value())?),
+                other => self.apply_class_layout_property(name, class, other, entry.value())?,
+            }
+        }
+        if let Some(children) = node.children() {
+            for child in children.nodes() {
+                match child.name().value() {
+                    "padding" => {
+                        layout.padding = layout.padding.merged(parse_box_spacing(name, child)?);
+                    }
+                    "margin" => {
+                        layout.margin = layout.margin.merged(parse_box_spacing(name, child)?);
+                    }
+                    other => return Err(format!("{name}: unknown layout child `{other}`")),
+                }
+            }
+        }
+        Ok(layout)
+    }
+
+    fn apply_class_layout_property(
+        &mut self,
+        name: &str,
+        class: Class,
+        property: &str,
+        value: &KdlValue,
+    ) -> Result<(), String> {
+        match class {
+            Class::Sidebar => match property {
+                "min_width" => self.layout.library_sidebar_min_width = value_as_f32(name, value)?,
+                "max_width" => self.layout.library_sidebar_max_width = value_as_f32(name, value)?,
+                "resize_handle_width" => {
+                    self.layout.sidebar_resize_handle_width = value_as_f32(name, value)?
+                }
+                "resize_handle_visual_width" => {
+                    self.layout.sidebar_resize_handle_visual_width = value_as_f32(name, value)?
+                }
+                other => return Err(format!("{name}: unknown Sidebar layout `{other}`")),
+            },
+            Class::LibraryCard => match property {
+                "columns" => self.layout.card_grid_columns = value_as_usize(name, value)?,
+                "row_height" => self.layout.library_grid_row_height = value_as_f32(name, value)?,
+                "content_width" => {
+                    self.layout.library_card_content_width = value_as_f32(name, value)?
+                }
+                "title_width" => self.layout.library_card_title_width = value_as_f32(name, value)?,
+                "info_height" => self.layout.library_card_info_height = value_as_f32(name, value)?,
+                "media_max_height" => {
+                    self.layout.library_card_media_max_height = value_as_f32(name, value)?
+                }
+                "thumbnail_width" => {
+                    self.layout.library_card_thumbnail_width = value_as_f32(name, value)?
+                }
+                "masonry_gap" => self.layout.library_masonry_gap = value_as_f32(name, value)?,
+                "scrollbar_gutter" => {
+                    self.layout.library_scrollbar_gutter = value_as_f32(name, value)?
+                }
+                other => return Err(format!("{name}: unknown LibraryCard layout `{other}`")),
+            },
+            Class::LibraryFolderCard => match property {
+                "row_height" => {
+                    self.layout.library_folder_grid_row_height = value_as_f32(name, value)?
+                }
+                other => {
                     return Err(format!(
-                        "{name}: component `{class:?}` references unknown theme `{theme}`"
+                        "{name}: unknown LibraryFolderCard layout `{other}`"
+                    ))
+                }
+            },
+            Class::LibraryRow => match property {
+                "row_height" => self.layout.library_list_row_height = value_as_f32(name, value)?,
+                "folder_row_height" => {
+                    self.layout.library_folder_list_row_height = value_as_f32(name, value)?
+                }
+                "title_width" => self.layout.library_row_title_width = value_as_f32(name, value)?,
+                "thumbnail_width" => {
+                    self.layout.library_row_thumbnail_width = value_as_f32(name, value)?
+                }
+                "progress_width" => {
+                    self.layout.library_row_progress_width = value_as_f32(name, value)?
+                }
+                other => return Err(format!("{name}: unknown LibraryRow layout `{other}`")),
+            },
+            Class::DragInsertionMarker => match property {
+                "preview_grid_x_offset" => {
+                    self.layout.library_drag_preview_grid_x_offset = value_as_f32(name, value)?
+                }
+                "preview_grid_y_offset" => {
+                    self.layout.library_drag_preview_grid_y_offset = value_as_f32(name, value)?
+                }
+                "preview_list_x_offset" => {
+                    self.layout.library_drag_preview_list_x_offset = value_as_f32(name, value)?
+                }
+                "preview_list_y_offset" => {
+                    self.layout.library_drag_preview_list_y_offset = value_as_f32(name, value)?
+                }
+                "placeholder_content_alpha" => {
+                    self.layout.library_drag_placeholder_content_alpha = value_as_f32(name, value)?
+                }
+                other => {
+                    return Err(format!(
+                        "{name}: unknown DragInsertionMarker layout `{other}`"
+                    ))
+                }
+            },
+            Class::JumpOverlay => match property {
+                "input_width" => self.layout.jump_input_width = value_as_f32(name, value)?,
+                other => return Err(format!("{name}: unknown JumpOverlay layout `{other}`")),
+            },
+            _ => return Err(format!("{name}: unknown layout property `{property}`")),
+        }
+        Ok(())
+    }
+
+    fn apply_app_component_node(
+        &mut self,
+        name: &str,
+        component_name: &str,
+        node: &KdlNode,
+    ) -> Result<(), String> {
+        let children = node
+            .children()
+            .ok_or_else(|| format!("{name}: component `{component_name}` must have children"))?;
+        for child in children.nodes() {
+            match child.name().value() {
+                "layout" => self.apply_app_component_layout_node(name, component_name, child)?,
+                "labels" => self.apply_app_component_labels_node(name, component_name, child)?,
+                other => {
+                    return Err(format!(
+                        "{name}: unsupported `{component_name}` component property `{other}`"
                     ));
-                };
-                let style = parse_visual_style(name, child, &raw_theme.tokens)?;
-                raw_theme.tokens.class_styles[class.index()].states[state.index()] =
-                    raw_theme.tokens.class_styles[class.index()].states[state.index()]
-                        .merged(style);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_app_component_layout_node(
+        &mut self,
+        name: &str,
+        component_name: &str,
+        node: &KdlNode,
+    ) -> Result<(), String> {
+        for entry in node.entries() {
+            let Some(property) = entry.name().map(|name| name.value()) else {
+                continue;
+            };
+            match component_name {
+                "AppWindow" => match property {
+                    "width" => self.layout.window_width = value_as_f32(name, entry.value())?,
+                    "height" => self.layout.window_height = value_as_f32(name, entry.value())?,
+                    other => return Err(format!("{name}: unknown AppWindow layout `{other}`")),
+                },
+                "ViewerSidebar" => match property {
+                    "width" => {
+                        self.layout.viewer_sidebar_width = value_as_f32(name, entry.value())?
+                    }
+                    other => return Err(format!("{name}: unknown ViewerSidebar layout `{other}`")),
+                },
+                "LibrarySidebar" => match property {
+                    "width" => {
+                        self.layout.library_sidebar_width = value_as_f32(name, entry.value())?
+                    }
+                    "min_width" => {
+                        self.layout.library_sidebar_min_width = value_as_f32(name, entry.value())?
+                    }
+                    "max_width" => {
+                        self.layout.library_sidebar_max_width = value_as_f32(name, entry.value())?
+                    }
+                    "resize_handle_width" => {
+                        self.layout.sidebar_resize_handle_width = value_as_f32(name, entry.value())?
+                    }
+                    "resize_handle_visual_width" => {
+                        self.layout.sidebar_resize_handle_visual_width =
+                            value_as_f32(name, entry.value())?
+                    }
+                    other => {
+                        return Err(format!("{name}: unknown LibrarySidebar layout `{other}`"))
+                    }
+                },
+                "LibraryVirtualization" => match property {
+                    "overscan_rows" => {
+                        self.layout.library_overscan_rows = value_as_usize(name, entry.value())?
+                    }
+                    "line_scroll_pixels" => {
+                        self.layout.line_scroll_pixels = value_as_f32(name, entry.value())?
+                    }
+                    other => {
+                        return Err(format!(
+                            "{name}: unknown LibraryVirtualization layout `{other}`"
+                        ))
+                    }
+                },
+                "LibraryGrid" => match property {
+                    "columns" => {
+                        self.layout.card_grid_columns = value_as_usize(name, entry.value())?
+                    }
+                    "card_width" => {
+                        self.layout.library_grid_card_width = value_as_f32(name, entry.value())?
+                    }
+                    "row_height" => {
+                        self.layout.library_grid_row_height = value_as_f32(name, entry.value())?
+                    }
+                    "folder_row_height" => {
+                        self.layout.library_folder_grid_row_height =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "thumbnail_width" => {
+                        self.layout.library_card_thumbnail_width =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "card_title_width" => {
+                        self.layout.library_card_title_width = value_as_f32(name, entry.value())?
+                    }
+                    "card_content_width" => {
+                        self.layout.library_card_content_width = value_as_f32(name, entry.value())?
+                    }
+                    "card_info_height" => {
+                        self.layout.library_card_info_height = value_as_f32(name, entry.value())?
+                    }
+                    "card_media_max_height" => {
+                        self.layout.library_card_media_max_height =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "masonry_gap" => {
+                        self.layout.library_masonry_gap = value_as_f32(name, entry.value())?
+                    }
+                    "scrollbar_gutter" => {
+                        self.layout.library_scrollbar_gutter = value_as_f32(name, entry.value())?
+                    }
+                    other => return Err(format!("{name}: unknown LibraryGrid layout `{other}`")),
+                },
+                "LibraryList" => match property {
+                    "row_height" => {
+                        self.layout.library_list_row_height = value_as_f32(name, entry.value())?
+                    }
+                    "folder_row_height" => {
+                        self.layout.library_folder_list_row_height =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "thumbnail_width" => {
+                        self.layout.library_row_thumbnail_width = value_as_f32(name, entry.value())?
+                    }
+                    "progress_width" => {
+                        self.layout.library_row_progress_width = value_as_f32(name, entry.value())?
+                    }
+                    "title_width" => {
+                        self.layout.library_row_title_width = value_as_f32(name, entry.value())?
+                    }
+                    other => return Err(format!("{name}: unknown LibraryList layout `{other}`")),
+                },
+                "LibraryDrag" => match property {
+                    "preview_grid_x_offset" => {
+                        self.layout.library_drag_preview_grid_x_offset =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "preview_grid_y_offset" => {
+                        self.layout.library_drag_preview_grid_y_offset =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "preview_list_x_offset" => {
+                        self.layout.library_drag_preview_list_x_offset =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "preview_list_y_offset" => {
+                        self.layout.library_drag_preview_list_y_offset =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "placeholder_content_alpha" => {
+                        self.layout.library_drag_placeholder_content_alpha =
+                            value_as_f32(name, entry.value())?
+                    }
+                    other => return Err(format!("{name}: unknown LibraryDrag layout `{other}`")),
+                },
+                "SelectionToolbar" => match property {
+                    "bulk_tag_input_width" => {
+                        self.layout.bulk_tag_input_width = value_as_f32(name, entry.value())?
+                    }
+                    "bulk_tag_input_min_width" => {
+                        self.layout.bulk_tag_input_min_width = value_as_f32(name, entry.value())?
+                    }
+                    "title_input_width" => {
+                        self.layout.selection_title_input_width = value_as_f32(name, entry.value())?
+                    }
+                    "title_input_min_width" => {
+                        self.layout.selection_title_input_min_width =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "author_input_width" => {
+                        self.layout.selection_author_input_width =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "author_input_min_width" => {
+                        self.layout.selection_author_input_min_width =
+                            value_as_f32(name, entry.value())?
+                    }
+                    "context_row_height" => {
+                        self.layout.selection_context_row_height =
+                            value_as_f32(name, entry.value())?
+                    }
+                    other => {
+                        return Err(format!("{name}: unknown SelectionToolbar layout `{other}`"))
+                    }
+                },
+                "AppMenuBar" => match property {
+                    "height" => {
+                        self.layout.app_menu_bar_height = value_as_f32(name, entry.value())?
+                    }
+                    other => return Err(format!("{name}: unknown AppMenuBar layout `{other}`")),
+                },
+                "AppMenuPanel" => match property {
+                    "width" => {
+                        self.layout.app_menu_panel_width = value_as_f32(name, entry.value())?
+                    }
+                    "item_height" => {
+                        self.layout.app_menu_item_height = value_as_f32(name, entry.value())?
+                    }
+                    other => return Err(format!("{name}: unknown AppMenuPanel layout `{other}`")),
+                },
+                "JumpOverlay" => match property {
+                    "input_width" => {
+                        self.layout.jump_input_width = value_as_f32(name, entry.value())?
+                    }
+                    other => return Err(format!("{name}: unknown JumpOverlay layout `{other}`")),
+                },
+                other => return Err(format!("{name}: unknown app component `{other}`")),
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_app_component_labels_node(
+        &mut self,
+        name: &str,
+        component_name: &str,
+        node: &KdlNode,
+    ) -> Result<(), String> {
+        let children = node.children().ok_or_else(|| {
+            format!("{name}: labels block for `{component_name}` must have children")
+        })?;
+        for child in children.nodes() {
+            let key = node_string_arg(name, child, 0)?.to_owned();
+            let value = node_string_arg(name, child, 1)?.to_owned();
+            match component_name {
+                "AppMenu" => {
+                    self.labels.app_menu.insert(key, value);
+                }
+                "AppMenuActions" => {
+                    self.labels.app_menu_action.insert(key, value);
+                }
+                "SelectionToolbar" => {
+                    self.labels.selection_toolbar_action.insert(key, value);
+                }
+                "HelpPanel" => {
+                    self.labels.text.insert(key, value);
+                }
+                other => return Err(format!("{name}: `{other}` does not support labels")),
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_component_labels_node(
+        &mut self,
+        name: &str,
+        class: Class,
+        node: &KdlNode,
+    ) -> Result<(), String> {
+        let children = node
+            .children()
+            .ok_or_else(|| format!("{name}: labels block for `{class:?}` must have children"))?;
+        for child in children.nodes() {
+            match (class, child.name().value()) {
+                (Class::SidebarTab, "label") => {
+                    let key = node_string_arg(name, child, 0)?.to_owned();
+                    let value = node_string_arg(name, child, 1)?.to_owned();
+                    self.labels.library_sidebar_tab.insert(key, value);
+                }
+                (_, "label") => {
+                    let key = node_string_arg(name, child, 0)?.to_owned();
+                    let value = node_string_arg(name, child, 1)?.to_owned();
+                    self.labels.text.insert(format!("{class:?}.{key}"), value);
+                }
+                other => {
+                    return Err(format!(
+                        "{name}: unsupported label node `{}` for `{class:?}`",
+                        other.1
+                    ));
+                }
             }
         }
         Ok(())
@@ -206,6 +731,50 @@ impl RawStyleBook {
         for raw_theme in self.themes.values_mut() {
             set_primitive(&mut raw_theme.tokens.primitives, primitive, value)
                 .map_err(|error| format!("{name}: {error}"))?;
+        }
+        Ok(())
+    }
+
+    fn apply_layout_node(&mut self, name: &str, node: &KdlNode) -> Result<(), String> {
+        let children = node
+            .children()
+            .ok_or_else(|| format!("{name}: layout must have children"))?;
+        for child in children.nodes() {
+            match child.name().value() {
+                "metric" => {
+                    let token = node_string_arg(name, child, 0)?;
+                    let value = node_f32_arg(name, child, 1)?;
+                    set_layout_metric(&mut self.layout, token, value)
+                        .map_err(|error| format!("{name}: {error}"))?;
+                }
+                "count" => {
+                    let token = node_string_arg(name, child, 0)?;
+                    let value = node_usize_arg(name, child, 1)?;
+                    set_layout_count(&mut self.layout, token, value)
+                        .map_err(|error| format!("{name}: {error}"))?;
+                }
+                other => return Err(format!("{name}: unsupported layout property `{other}`")),
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_labels_node(&mut self, name: &str, node: &KdlNode) -> Result<(), String> {
+        let children = node
+            .children()
+            .ok_or_else(|| format!("{name}: labels must have children"))?;
+        for child in children.nodes() {
+            let section = match child.name().value() {
+                "app_menu" => LabelSection::AppMenu,
+                "app_menu_action" => LabelSection::AppMenuAction,
+                "selection_toolbar_action" => LabelSection::SelectionToolbarAction,
+                "library_sidebar_tab" => LabelSection::LibrarySidebarTab,
+                "text" => LabelSection::Text,
+                other => return Err(format!("{name}: unsupported label section `{other}`")),
+            };
+            let key = node_string_arg(name, child, 0)?.to_owned();
+            let value = node_string_arg(name, child, 1)?.to_owned();
+            label_map_mut(&mut self.labels, section).insert(key, value);
         }
         Ok(())
     }
@@ -249,7 +818,7 @@ fn parse_visual_style(
                 style.border_width = Some(value_as_f32(name, entry.value())?);
             }
             "radius" => {
-                style.radius = Some(value_as_f32(name, entry.value())?);
+                style.radius = Some(CornerRadius::uniform(value_as_f32(name, entry.value())?));
             }
             "theme" => {}
             other => {
@@ -257,7 +826,143 @@ fn parse_visual_style(
             }
         }
     }
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            match child.name().value() {
+                "colors" => parse_visual_colors(name, child, tokens, &mut style)?,
+                "border" => parse_visual_border(name, child, tokens, &mut style)?,
+                "rounding" | "radius" => {
+                    style.radius = Some(parse_corner_radius(name, child, style.radius)?);
+                }
+                other => {
+                    return Err(format!(
+                        "{name}: unsupported nested visual property `{other}`"
+                    ));
+                }
+            }
+        }
+    }
     Ok(style)
+}
+
+fn parse_visual_colors(
+    name: &str,
+    node: &KdlNode,
+    tokens: &ThemeTokens,
+    style: &mut VisualStyle,
+) -> Result<(), String> {
+    for entry in node.entries() {
+        let Some(property) = entry.name().map(|name| name.value()) else {
+            continue;
+        };
+        match property {
+            "background" => {
+                style.background = Some(parse_color_value(name, entry.value(), tokens)?)
+            }
+            "text" | "text_color" => {
+                style.text_color = Some(parse_color_value(name, entry.value(), tokens)?)
+            }
+            "border" | "border_color" => {
+                style.border_color = Some(parse_color_value(name, entry.value(), tokens)?)
+            }
+            other => return Err(format!("{name}: unsupported color property `{other}`")),
+        }
+    }
+    Ok(())
+}
+
+fn parse_visual_border(
+    name: &str,
+    node: &KdlNode,
+    tokens: &ThemeTokens,
+    style: &mut VisualStyle,
+) -> Result<(), String> {
+    for entry in node.entries() {
+        let Some(property) = entry.name().map(|name| name.value()) else {
+            continue;
+        };
+        match property {
+            "width" | "border_width" => {
+                style.border_width = Some(value_as_f32(name, entry.value())?);
+            }
+            "color" | "border" | "border_color" => {
+                style.border_color = Some(parse_color_value(name, entry.value(), tokens)?);
+            }
+            "radius" => {
+                style.radius = Some(CornerRadius::uniform(value_as_f32(name, entry.value())?));
+            }
+            other => return Err(format!("{name}: unsupported border property `{other}`")),
+        }
+    }
+    Ok(())
+}
+
+fn parse_corner_radius(
+    name: &str,
+    node: &KdlNode,
+    fallback: Option<CornerRadius>,
+) -> Result<CornerRadius, String> {
+    let mut radius = if let Some(value) = node.get("radius").or_else(|| node.get(0)) {
+        CornerRadius::uniform(value_as_f32(name, value)?)
+    } else {
+        fallback.unwrap_or_else(|| CornerRadius::uniform(0.0))
+    };
+
+    for entry in node.entries() {
+        let Some(property) = entry.name().map(|name| name.value()) else {
+            continue;
+        };
+        let value = value_as_f32(name, entry.value())?;
+        match property {
+            "radius" => radius = CornerRadius::uniform(value),
+            "top_left" | "top-left" => radius.top_left = value,
+            "top_right" | "top-right" => radius.top_right = value,
+            "bottom_right" | "bottom-right" => radius.bottom_right = value,
+            "bottom_left" | "bottom-left" => radius.bottom_left = value,
+            other => return Err(format!("{name}: unsupported radius property `{other}`")),
+        }
+    }
+    Ok(radius)
+}
+
+fn parse_box_spacing(name: &str, node: &KdlNode) -> Result<BoxSpacing, String> {
+    let values = node
+        .entries()
+        .iter()
+        .filter(|entry| entry.name().is_none())
+        .map(|entry| value_as_f32(name, entry.value()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    match values.as_slice() {
+        [all] => Ok(BoxSpacing::uniform(*all)),
+        [vertical, horizontal] => Ok(BoxSpacing::axes(*vertical, *horizontal)),
+        [top, right, bottom, left] => Ok(BoxSpacing::sides(*top, *right, *bottom, *left)),
+        _ => Err(format!(
+            "{name}: `{}` expects 1, 2, or 4 numeric arguments",
+            node.name().value()
+        )),
+    }
+}
+
+fn parse_component_text(name: &str, node: &KdlNode) -> Result<ComponentTextStyle, String> {
+    let mut text = ComponentTextStyle::EMPTY;
+    for entry in node.entries() {
+        let Some(property) = entry.name().map(|name| name.value()) else {
+            continue;
+        };
+        match property {
+            "size" => text.size = Some(value_as_u32(name, entry.value())?),
+            "weight" => {
+                let value = entry
+                    .value()
+                    .as_string()
+                    .ok_or_else(|| format!("{name}: expected font weight string"))?;
+                text.weight = Some(parse_font_weight(name, value)?);
+            }
+            other => return Err(format!("{name}: unsupported text property `{other}`")),
+        }
+    }
+    Ok(text)
 }
 
 fn parse_color_value(name: &str, value: &KdlValue, tokens: &ThemeTokens) -> Result<Color, String> {
@@ -371,6 +1076,19 @@ fn node_f32_arg(name: &str, node: &KdlNode, index: usize) -> Result<f32, String>
         })
 }
 
+fn node_usize_arg(name: &str, node: &KdlNode, index: usize) -> Result<usize, String> {
+    let value = node.get(index).ok_or_else(|| {
+        format!(
+            "{name}: node `{}` missing integer argument {index}",
+            node.name().value()
+        )
+    })?;
+    let KdlValue::Integer(value) = value else {
+        return Err(format!("{name}: expected integer value"));
+    };
+    usize::try_from(*value).map_err(|_| format!("{name}: expected non-negative integer"))
+}
+
 fn value_as_f32(name: &str, value: &KdlValue) -> Result<f32, String> {
     let number = match value {
         KdlValue::Integer(value) => *value as f32,
@@ -381,6 +1099,50 @@ fn value_as_f32(name: &str, value: &KdlValue) -> Result<f32, String> {
         return Err(format!("{name}: expected finite non-negative number"));
     }
     Ok(number)
+}
+
+fn value_as_u16(name: &str, value: &KdlValue) -> Result<u16, String> {
+    let KdlValue::Integer(value) = value else {
+        return Err(format!("{name}: expected integer value"));
+    };
+    u16::try_from(*value).map_err(|_| format!("{name}: expected integer from 0 to 65535"))
+}
+
+fn value_as_usize(name: &str, value: &KdlValue) -> Result<usize, String> {
+    let KdlValue::Integer(value) = value else {
+        return Err(format!("{name}: expected integer value"));
+    };
+    usize::try_from(*value).map_err(|_| format!("{name}: expected non-negative integer"))
+}
+
+fn value_as_u32(name: &str, value: &KdlValue) -> Result<u32, String> {
+    let KdlValue::Integer(value) = value else {
+        return Err(format!("{name}: expected integer value"));
+    };
+    u32::try_from(*value).map_err(|_| format!("{name}: expected non-negative integer"))
+}
+
+fn parse_font_weight(name: &str, value: &str) -> Result<iced::font::Weight, String> {
+    Ok(match value {
+        "regular" | "normal" => iced::font::Weight::Normal,
+        "medium" => iced::font::Weight::Medium,
+        "semibold" | "semi_bold" => iced::font::Weight::Semibold,
+        "bold" => iced::font::Weight::Bold,
+        other => return Err(format!("{name}: unsupported font weight `{other}`")),
+    })
+}
+
+fn label_map_mut(
+    labels: &mut AppLabelTokens,
+    section: LabelSection,
+) -> &mut HashMap<String, String> {
+    match section {
+        LabelSection::AppMenu => &mut labels.app_menu,
+        LabelSection::AppMenuAction => &mut labels.app_menu_action,
+        LabelSection::SelectionToolbarAction => &mut labels.selection_toolbar_action,
+        LabelSection::LibrarySidebarTab => &mut labels.library_sidebar_tab,
+        LabelSection::Text => &mut labels.text,
+    }
 }
 
 fn parse_class(value: &str) -> Option<Class> {
@@ -396,10 +1158,22 @@ fn parse_class(value: &str) -> Option<Class> {
         "Sidebar" => Class::Sidebar,
         "SidebarSection" => Class::SidebarSection,
         "SidebarRow" => Class::SidebarRow,
+        "SidebarTab" => Class::SidebarTab,
+        "FileTree" => Class::FileTree,
+        "FileTreeFoldButton" => Class::FileTreeFoldButton,
+        "SidebarToggleButton" => Class::SidebarToggleButton,
+        "SidebarDetailPanel" => Class::SidebarDetailPanel,
+        "SidebarDetailRow" => Class::SidebarDetailRow,
+        "SidebarActionButton" => Class::SidebarActionButton,
         "TocEntry" => Class::TocEntry,
         "LibraryCard" => Class::LibraryCard,
         "LibraryFolderCard" => Class::LibraryFolderCard,
         "LibraryRow" => Class::LibraryRow,
+        "LibraryControlBar" => Class::LibraryControlBar,
+        "LibrarySearchInput" => Class::LibrarySearchInput,
+        "LibrarySortDropdown" => Class::LibrarySortDropdown,
+        "LibraryViewToggle" => Class::LibraryViewToggle,
+        "LibraryImportButton" => Class::LibraryImportButton,
         "TagPill" => Class::TagPill,
         "SearchInput" => Class::SearchInput,
         "ProgressBar" => Class::ProgressBar,
@@ -457,6 +1231,66 @@ fn set_primitive(tokens: &mut PrimitiveTokens, token: &str, value: f32) -> Resul
         "page_shadow_offset_y" => tokens.page_shadow_offset_y = value,
         "progress_girth" => tokens.progress_girth = value,
         other => return Err(format!("unknown primitive `{other}`")),
+    }
+    Ok(())
+}
+
+fn set_layout_metric(tokens: &mut AppLayoutTokens, token: &str, value: f32) -> Result<(), String> {
+    match token {
+        "window_width" => tokens.window_width = value,
+        "window_height" => tokens.window_height = value,
+        "viewer_sidebar_width" => tokens.viewer_sidebar_width = value,
+        "library_sidebar_width" => tokens.library_sidebar_width = value,
+        "library_sidebar_min_width" => tokens.library_sidebar_min_width = value,
+        "library_sidebar_max_width" => tokens.library_sidebar_max_width = value,
+        "sidebar_resize_handle_width" => tokens.sidebar_resize_handle_width = value,
+        "sidebar_resize_handle_visual_width" => tokens.sidebar_resize_handle_visual_width = value,
+        "toolbar_height" => tokens.toolbar_height = value,
+        "library_grid_card_width" => tokens.library_grid_card_width = value,
+        "library_grid_row_height" => tokens.library_grid_row_height = value,
+        "library_folder_grid_row_height" => tokens.library_folder_grid_row_height = value,
+        "library_list_row_height" => tokens.library_list_row_height = value,
+        "library_folder_list_row_height" => tokens.library_folder_list_row_height = value,
+        "library_card_thumbnail_width" => tokens.library_card_thumbnail_width = value,
+        "library_row_thumbnail_width" => tokens.library_row_thumbnail_width = value,
+        "library_row_progress_width" => tokens.library_row_progress_width = value,
+        "line_scroll_pixels" => tokens.line_scroll_pixels = value,
+        "jump_input_width" => tokens.jump_input_width = value,
+        "library_card_content_width" => tokens.library_card_content_width = value,
+        "library_card_title_width" => tokens.library_card_title_width = value,
+        "library_card_info_height" => tokens.library_card_info_height = value,
+        "library_card_media_max_height" => tokens.library_card_media_max_height = value,
+        "library_masonry_gap" => tokens.library_masonry_gap = value,
+        "library_scrollbar_gutter" => tokens.library_scrollbar_gutter = value,
+        "library_row_title_width" => tokens.library_row_title_width = value,
+        "library_drag_preview_grid_x_offset" => tokens.library_drag_preview_grid_x_offset = value,
+        "library_drag_preview_grid_y_offset" => tokens.library_drag_preview_grid_y_offset = value,
+        "library_drag_preview_list_x_offset" => tokens.library_drag_preview_list_x_offset = value,
+        "library_drag_preview_list_y_offset" => tokens.library_drag_preview_list_y_offset = value,
+        "library_drag_placeholder_content_alpha" => {
+            tokens.library_drag_placeholder_content_alpha = value
+        }
+        "bulk_tag_input_width" => tokens.bulk_tag_input_width = value,
+        "bulk_tag_input_min_width" => tokens.bulk_tag_input_min_width = value,
+        "selection_title_input_width" => tokens.selection_title_input_width = value,
+        "selection_author_input_width" => tokens.selection_author_input_width = value,
+        "selection_title_input_min_width" => tokens.selection_title_input_min_width = value,
+        "selection_author_input_min_width" => tokens.selection_author_input_min_width = value,
+        "app_menu_bar_height" => tokens.app_menu_bar_height = value,
+        "selection_context_row_height" => tokens.selection_context_row_height = value,
+        "app_menu_panel_width" => tokens.app_menu_panel_width = value,
+        "app_menu_item_height" => tokens.app_menu_item_height = value,
+        "sidebar_tab_height" => tokens.sidebar_tab_height = value,
+        other => return Err(format!("unknown layout metric `{other}`")),
+    }
+    Ok(())
+}
+
+fn set_layout_count(tokens: &mut AppLayoutTokens, token: &str, value: usize) -> Result<(), String> {
+    match token {
+        "library_overscan_rows" => tokens.library_overscan_rows = value,
+        "card_grid_columns" => tokens.card_grid_columns = value,
+        other => return Err(format!("unknown layout count `{other}`")),
     }
     Ok(())
 }
@@ -567,6 +1401,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
         Class::MenuBar,
         Class::Sidebar,
         Class::SidebarSection,
+        Class::LibraryControlBar,
     ] {
         set_class_state(
             tokens,
@@ -577,7 +1412,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
                 text_color: Some(tokens.text_primary),
                 border_color: Some(tokens.border),
                 border_width: Some(1.0),
-                radius: Some(0.0),
+                radius: Some(CornerRadius::uniform(0.0)),
             },
         );
     }
@@ -597,6 +1432,8 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
         Class::LibraryRow,
         Class::EmptyState,
         Class::MenuPanel,
+        Class::SidebarDetailPanel,
+        Class::SidebarDetailRow,
         Class::JumpOverlay,
         Class::Tooltip,
         Class::AnnotationToolbar,
@@ -613,15 +1450,21 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
                 text_color: Some(tokens.text_primary),
                 border_color: Some(tokens.border),
                 border_width: Some(1.0),
-                radius: Some(6.0),
+                radius: Some(CornerRadius::uniform(6.0)),
             },
         );
     }
     for class in [
         Class::ToolbarButton,
+        Class::LibrarySortDropdown,
+        Class::LibraryViewToggle,
+        Class::LibraryImportButton,
+        Class::SidebarActionButton,
         Class::MenuButton,
         Class::MenuItem,
         Class::SidebarRow,
+        Class::SidebarToggleButton,
+        Class::FileTreeFoldButton,
         Class::TocEntry,
         Class::TagPill,
     ] {
@@ -634,7 +1477,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
                 text_color: Some(tokens.text_primary),
                 border_color: Some(tokens.border),
                 border_width: Some(1.0),
-                radius: Some(6.0),
+                radius: Some(CornerRadius::uniform(6.0)),
             },
         );
         set_class_state(

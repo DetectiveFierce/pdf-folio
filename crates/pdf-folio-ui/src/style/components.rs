@@ -179,12 +179,23 @@ pub fn search_input<'a, Message: Clone + 'a>(
     tokens: ThemeTokens,
     on_input: impl Fn(String) -> Message + 'a,
 ) -> iced::widget::TextInput<'a, Message> {
+    search_input_with_class(placeholder, value, tokens, Class::SearchInput, on_input)
+}
+
+/// Creates a search input for a specific semantic class.
+pub fn search_input_with_class<'a, Message: Clone + 'a>(
+    placeholder: &str,
+    value: &str,
+    tokens: ThemeTokens,
+    class: Class,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> iced::widget::TextInput<'a, Message> {
     text_input(placeholder, value)
         .on_input(on_input)
         .padding([super::tokens::Spacing::SM, super::tokens::Spacing::MD])
         .size(FontSize::MD)
         .font(ui_font(FontWeight::REGULAR))
-        .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+        .style(move |_, status| text_input_style(tokens, class, status))
 }
 
 /// Creates a progress bar.

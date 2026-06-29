@@ -3,7 +3,7 @@
 use iced::widget::{button, container, pick_list, progress_bar, scrollable, text_input};
 use iced::{overlay, Background, Border, Color, Shadow as IcedShadow, Vector};
 
-use super::tokens::{BorderWidth, Radius, ThemeTokens, VisualStyle};
+use super::tokens::{BorderWidth, CornerRadius, Radius, ThemeTokens, VisualStyle};
 
 /// Semantic style classes used by UI widgets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +30,20 @@ pub enum Class {
     SidebarSection,
     /// Sidebar row.
     SidebarRow,
+    /// Library sidebar tab button.
+    SidebarTab,
+    /// Library file/tag tree body.
+    FileTree,
+    /// Library file tree fold/expand button.
+    FileTreeFoldButton,
+    /// Library sidebar expand/collapse button.
+    SidebarToggleButton,
+    /// Library sidebar details panel.
+    SidebarDetailPanel,
+    /// Library sidebar detail row.
+    SidebarDetailRow,
+    /// Library sidebar action button.
+    SidebarActionButton,
     /// Table-of-contents entry.
     TocEntry,
     /// Library grid card.
@@ -38,6 +52,16 @@ pub enum Class {
     LibraryFolderCard,
     /// Library list row.
     LibraryRow,
+    /// Library search/sort/import control bar.
+    LibraryControlBar,
+    /// Library search input.
+    LibrarySearchInput,
+    /// Library sort dropdown.
+    LibrarySortDropdown,
+    /// Library grid/list view toggle.
+    LibraryViewToggle,
+    /// Library import-folder button.
+    LibraryImportButton,
     /// Tag pill.
     TagPill,
     /// Search input.
@@ -110,7 +134,7 @@ impl ComponentState {
 
 impl Class {
     /// Number of semantic classes represented in style files.
-    pub const COUNT: usize = 29;
+    pub const COUNT: usize = 41;
 
     /// Stable index for style arrays.
     pub const fn index(self) -> usize {
@@ -126,24 +150,36 @@ impl Class {
             Self::Sidebar => 8,
             Self::SidebarSection => 9,
             Self::SidebarRow => 10,
-            Self::TocEntry => 11,
-            Self::LibraryCard => 12,
-            Self::LibraryFolderCard => 13,
-            Self::LibraryRow => 14,
-            Self::TagPill => 15,
-            Self::SearchInput => 16,
-            Self::ProgressBar => 17,
-            Self::ErrorBanner => 18,
-            Self::ViewerCanvas => 19,
-            Self::PagePlaceholder => 20,
-            Self::JumpOverlay => 21,
-            Self::Tooltip => 22,
-            Self::AnnotationToolbar => 23,
-            Self::AnnotationPopover => 24,
-            Self::PresentationOverlay => 25,
-            Self::Minimap => 26,
-            Self::EmptyState => 27,
-            Self::DragInsertionMarker => 28,
+            Self::SidebarTab => 11,
+            Self::FileTree => 12,
+            Self::SidebarToggleButton => 13,
+            Self::SidebarDetailPanel => 14,
+            Self::SidebarDetailRow => 15,
+            Self::SidebarActionButton => 16,
+            Self::TocEntry => 17,
+            Self::LibraryCard => 18,
+            Self::LibraryFolderCard => 19,
+            Self::LibraryRow => 20,
+            Self::LibraryControlBar => 21,
+            Self::LibrarySearchInput => 22,
+            Self::LibrarySortDropdown => 23,
+            Self::LibraryViewToggle => 24,
+            Self::LibraryImportButton => 25,
+            Self::TagPill => 26,
+            Self::SearchInput => 27,
+            Self::ProgressBar => 28,
+            Self::ErrorBanner => 29,
+            Self::ViewerCanvas => 30,
+            Self::PagePlaceholder => 31,
+            Self::JumpOverlay => 32,
+            Self::Tooltip => 33,
+            Self::AnnotationToolbar => 34,
+            Self::AnnotationPopover => 35,
+            Self::PresentationOverlay => 36,
+            Self::Minimap => 37,
+            Self::EmptyState => 38,
+            Self::DragInsertionMarker => 39,
+            Self::FileTreeFoldButton => 40,
         }
     }
 }
@@ -281,7 +317,11 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
             BorderWidth::NONE,
             Radius::NONE,
         ),
-        Class::Toolbar | Class::MenuBar | Class::Sidebar | Class::SidebarSection => (
+        Class::Toolbar
+        | Class::MenuBar
+        | Class::Sidebar
+        | Class::SidebarSection
+        | Class::LibraryControlBar => (
             tokens.surface,
             tokens.text_primary,
             tokens.border,
@@ -307,7 +347,12 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
             BorderWidth::HAIRLINE,
             Radius::SM,
         ),
-        Class::LibraryCard | Class::LibraryFolderCard | Class::LibraryRow | Class::EmptyState => (
+        Class::LibraryCard
+        | Class::LibraryFolderCard
+        | Class::LibraryRow
+        | Class::SidebarDetailPanel
+        | Class::SidebarDetailRow
+        | Class::EmptyState => (
             tokens.surface_raised,
             tokens.text_primary,
             tokens.border,
@@ -345,10 +390,19 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         Class::ViewerCanvas
         | Class::ToolbarGroup
         | Class::ToolbarButton
+        | Class::LibrarySortDropdown
+        | Class::LibraryViewToggle
+        | Class::LibraryImportButton
+        | Class::SidebarToggleButton
+        | Class::SidebarActionButton
         | Class::MenuButton
         | Class::MenuItem
         | Class::SidebarRow
+        | Class::SidebarTab
+        | Class::FileTree
+        | Class::FileTreeFoldButton
         | Class::TocEntry
+        | Class::LibrarySearchInput
         | Class::SearchInput
         | Class::ProgressBar => (
             tokens.background,
@@ -378,8 +432,19 @@ pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -
     let base = match class {
         Class::LibraryCard | Class::LibraryFolderCard | Class::LibraryRow => tokens.surface_raised,
         Class::TagPill => mix_color(tokens.background, tokens.accent, 0.18),
-        Class::ToolbarButton | Class::MenuItem => tokens.surface_raised,
-        Class::MenuButton | Class::SidebarRow | Class::TocEntry => tokens.surface,
+        Class::ToolbarButton
+        | Class::LibrarySortDropdown
+        | Class::LibraryViewToggle
+        | Class::LibraryImportButton
+        | Class::SidebarActionButton
+        | Class::MenuItem => tokens.surface_raised,
+        Class::MenuButton
+        | Class::SidebarRow
+        | Class::SidebarTab
+        | Class::FileTree
+        | Class::FileTreeFoldButton
+        | Class::SidebarToggleButton
+        | Class::TocEntry => tokens.surface,
         _ => tokens.surface,
     };
 
@@ -431,7 +496,7 @@ pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -
 /// Returns an iced pick-list style for a semantic class.
 pub fn pick_list_style(
     tokens: ThemeTokens,
-    _class: Class,
+    class: Class,
     status: pick_list::Status,
 ) -> pick_list::Style {
     let is_active = matches!(
@@ -449,7 +514,7 @@ pub fn pick_list_style(
     } else {
         ComponentState::Normal
     };
-    let override_style = tokens.class_styles[Class::ToolbarButton.index()].resolve(state);
+    let override_style = tokens.class_styles[class.index()].resolve(state);
     pick_list::Style {
         text_color: tokens.text_primary,
         placeholder_color: tokens.text_secondary,
@@ -470,8 +535,12 @@ pub fn pick_list_style(
 
 /// Returns an iced dropdown menu style for themed popup menus.
 pub fn menu_style(tokens: ThemeTokens) -> overlay::menu::Style {
-    let override_style =
-        tokens.class_styles[Class::MenuPanel.index()].resolve(ComponentState::Normal);
+    menu_style_for_class(tokens, Class::MenuPanel)
+}
+
+/// Returns an iced dropdown menu style for a semantic class.
+pub fn menu_style_for_class(tokens: ThemeTokens, class: Class) -> overlay::menu::Style {
+    let override_style = tokens.class_styles[class.index()].resolve(ComponentState::Normal);
     let style = overlay::menu::Style {
         background: Background::Color(tokens.surface_raised),
         border: Border {
@@ -524,8 +593,10 @@ pub fn text_input_style(
         text_input::Status::Hovered | text_input::Status::Focused { is_hovered: true }
     );
     let background = match (class, is_focused || is_hovered) {
-        (Class::SearchInput, true) => mix_color(tokens.surface_raised, tokens.accent, 0.16),
-        (Class::SearchInput, false) => tokens.surface_raised,
+        (Class::SearchInput | Class::LibrarySearchInput, true) => {
+            mix_color(tokens.surface_raised, tokens.accent, 0.16)
+        }
+        (Class::SearchInput | Class::LibrarySearchInput, false) => tokens.surface_raised,
         (_, true) => mix_color(tokens.surface, tokens.accent, 0.16),
         (_, false) => tokens.surface,
     };
@@ -567,7 +638,10 @@ pub fn progress_bar_style(tokens: ThemeTokens, _class: Class) -> progress_bar::S
         border: Border {
             width: override_style.border_width.unwrap_or(BorderWidth::NONE),
             color: override_style.border_color.unwrap_or(tokens.border),
-            radius: override_style.radius.unwrap_or(2.0).into(),
+            radius: override_style
+                .radius
+                .unwrap_or_else(|| CornerRadius::uniform(2.0))
+                .into(),
         },
     }
 }

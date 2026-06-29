@@ -1,0 +1,76 @@
+component "AppWindow" {
+    layout width=960 height=1080
+}
+
+component "ViewerSidebar" {
+    layout width=228
+}
+
+component "AppMenuBar" {
+    layout height=32
+}
+
+component "AppMenuPanel" {
+    layout width=270 item_height=30
+}
+
+component "JumpOverlay" {
+    layout input_width=90
+}
+
+component "AppMenu" {
+    labels {
+        label "File" "File"
+        label "Edit" "Edit"
+        label "View" "View"
+        label "Document" "Document"
+        label "Library" "Library"
+        label "Tools" "Tools"
+        label "Help" "Help"
+    }
+}
+
+component "AppMenuActions" {
+    labels {
+        label "OpenFile" "Open PDF..."
+        label "ImportFolder" "Import Folder..."
+        label "BackToLibrary" "Back to Library"
+        label "RefreshLibrary" "Refresh Library"
+        label "SelectAllVisible" "Select All Visible PDFs"
+        label "ClearSelection" "Clear Selection"
+        label "SaveDetails" "Save Details"
+        label "ResetDetails" "Reset Details..."
+        label "AddTag" "Add Typed Tag"
+        label "RemoveTag" "Remove Typed Tag"
+        label "AddToFolder" "Add Selection to Current Folder"
+        label "RemoveFromFolder" "Remove Selection from Current Folder"
+        label "DeleteFromLibrary" "Delete From Library..."
+        label "ToggleLayoutGrid" "Switch to Grid"
+        label "ToggleLayoutList" "Switch to List"
+        label "ToggleThemeDark" "Switch to Dark Theme"
+        label "ToggleThemeLight" "Switch to Light Theme"
+        label "ReloadStyles" "Reload Styles"
+        label "ToggleTocHide" "Hide Table of Contents"
+        label "ToggleTocShow" "Show Table of Contents"
+        label "JumpToPage" "Jump to Page..."
+        label "ZoomIn" "Zoom In"
+        label "ZoomOut" "Zoom Out"
+        label "ResetZoom" "Reset Zoom"
+        label "CreateFolder" "New Folder..."
+        label "ResetMetadata" "Reset Display Metadata..."
+        label "SortTitles" "Apply Title Sort Cleanup"
+        label "RefreshMetadata" "Refresh PDF Metadata"
+        label "RebuildThumbnails" "Rebuild Thumbnails"
+        label "Reindex" "Reindex Full Text"
+    }
+}
+
+component "HelpPanel" {
+    labels {
+        label "help_product_name" "PDF-Folio"
+        label "help_product_detail" "Local PDF library and reader"
+        label "help_status_label" "Status"
+        label "help_status_detail" "No help actions available yet"
+        label "sort_selected" "Selected"
+    }
+}

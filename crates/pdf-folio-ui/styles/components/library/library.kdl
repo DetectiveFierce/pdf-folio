@@ -1,0 +1,127 @@
+component "LibraryVirtualization" {
+    layout overscan_rows=4 line_scroll_pixels=48
+}
+
+component "LibraryControlBar" {
+    normal background="#160F07" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
+    normal background="#F7F3EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
+}
+
+component "LibrarySearchInput" {
+    normal background="#1B1208" text="#DDD0BA" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
+    focused background="#23180C" text="#DDD0BA" border="#D4A853" theme="espresso"
+    hovered background="#23180C" text="#DDD0BA" border="#D4A85359" theme="espresso"
+
+    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    focused background="#FFFFFF" text="#261E14" border="#9C732B" theme="light"
+    hovered background="#FFFFFF" text="#261E14" border="#9C732B66" theme="light"
+}
+
+component "LibrarySortDropdown" {
+    normal background="#201409" text="#DDD0BA" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
+    hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
+    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+
+    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
+    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+}
+
+component "LibraryViewToggle" {
+    normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
+    hovered background="#2B1D0E" text="#DDD0BA" border="#D4A85359" theme="espresso"
+    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+
+    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
+    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+}
+
+component "LibraryImportButton" {
+    normal background="#24180B" text="#DDD0BA" border="#D4A85340" border_width=1 radius=6 theme="espresso"
+    hovered background="#30220F" text="#D4A853" border="#D4A85373" theme="espresso"
+    pressed background="#3A2912" text="#D4A853" border="#D4A853" theme="espresso"
+
+    normal background="#EFE3CF" text="#261E14" border="#9C732B4D" border_width=1 radius=6 theme="light"
+    hovered background="#E7D5B8" text="#9C732B" border="#9C732B80" theme="light"
+    pressed background="#DEC69C" text="#9C732B" border="#9C732B" theme="light"
+}
+
+component "LibraryCard" {
+    layout columns=2 width=210 row_height=397 content_width=182 title_width=182 info_height=120 media_max_height=277.2 thumbnail_width=128 masonry_gap=18 scrollbar_gutter=28
+
+    normal background="#23180C" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
+    hovered background="#2B1D0E" text="#DDD0BA" border="#C8B89A2E" theme="espresso"
+    selected background="#30230F" text="#DDD0BA" border="#D4A853" border_width=1.5 theme="espresso"
+    pressed background="#352511" border="#D4A853" theme="espresso"
+
+    normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
+    hovered background="#FCFAF5" text="#261E14" border="#C8B89A" theme="light"
+    selected background="#EFE3CF" text="#261E14" border="#9C732B" theme="light"
+    pressed background="#E8D8BD" border="#9C732B" theme="light"
+}
+
+component "LibraryFolderCard" {
+    layout row_height=86
+
+    normal background="#211609" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
+    hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
+    selected background="#30230F" text="#D4A853" border="#D4A853" theme="espresso"
+
+    normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
+    hovered background="#FCFAF5" text="#9C732B" border="#9C732B66" theme="light"
+    selected background="#EFE3CF" text="#9C732B" border="#9C732B" theme="light"
+}
+
+component "LibraryRow" {
+    layout row_height=78 folder_row_height=50 title_width=520 thumbnail_width=46 progress_width=120
+
+    normal background="#1B1208" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=6 theme="espresso"
+    hovered background="#23180C" text="#DDD0BA" border="#C8B89A2E" theme="espresso"
+    selected background="#30230F" text="#DDD0BA" border="#D4A853" border_width=1.5 theme="espresso"
+
+    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    hovered background="#F6F2EA" text="#261E14" border="#C8B89A" theme="light"
+    selected background="#EFE3CF" text="#261E14" border="#9C732B" theme="light"
+}
+
+component "TagPill" {
+    normal background="#1B1208" text="#8B6E52" border="#C8B89A1A" border_width=1 radius=10 theme="espresso"
+    hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
+    active background="#30230F" text="#D4A853" border="#D4A853" theme="espresso"
+
+    normal background="#F6F2EA" text="#745F46" border="#D8CEBC" border_width=1 radius=10 theme="light"
+    hovered background="#FCFAF5" text="#9C732B" border="#9C732B66" theme="light"
+    active background="#EFE3CF" text="#9C732B" border="#9C732B" theme="light"
+}
+
+component "EmptyState" {
+    normal background="#23180C" text="#8B6E52" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
+    normal background="#FCFAF5" text="#745F46" border="#D8CEBC" border_width=1 radius=8 theme="light"
+}
+
+component "DragInsertionMarker" {
+    layout preview_grid_x_offset=32 preview_grid_y_offset=28 preview_list_x_offset=28 preview_list_y_offset=24 placeholder_content_alpha=0.42
+
+    normal background="#D4A853" text="#1A1208" border="#D4A853" border_width=0 radius=4 theme="espresso"
+    normal background="#9C732B" text="#FCFAF5" border="#9C732B" border_width=0 radius=4 theme="light"
+}
+
+component "SelectionToolbar" {
+    layout bulk_tag_input_width=150 bulk_tag_input_min_width=90 title_input_width=260 title_input_min_width=120 author_input_width=190 author_input_min_width=96 context_row_height=46
+
+    labels {
+        label "AddTag" "Add tag"
+        label "RemoveTag" "Remove tag"
+        label "AddToFolder" "Add to folder"
+        label "RemoveFromFolder" "Remove from folder"
+        label "SaveDetails" "Save details"
+        label "ResetDetails" "Reset details"
+        label "SortTitles" "Sort titles"
+        label "RefreshMetadata" "Refresh metadata"
+        label "ResetMetadata" "Reset metadata"
+        label "RebuildThumbnails" "Rebuild thumbnails"
+        label "Reindex" "Reindex"
+        label "DeleteMetadata" "Delete metadata"
+    }
+}

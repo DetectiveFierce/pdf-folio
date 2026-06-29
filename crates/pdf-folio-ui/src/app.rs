@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use iced::futures::SinkExt;
@@ -16,9 +16,10 @@ use iced::widget::{
     text, text_input, tooltip, Svg,
 };
 use iced::widget::{operation, Id};
-use iced::{event, keyboard, ContentFit, Element, Event, Length, Point, Rectangle, Renderer, Size};
+use iced::{
+    event, keyboard, Color, ContentFit, Element, Event, Length, Point, Rectangle, Renderer, Size,
+};
 use iced::{Subscription, Task, Theme};
-use notify::{EventKind, RecursiveMode, Watcher};
 use pdf_folio_core::{Annotation, OutlineNode, PdfDoc, RenderedPage, TileCache, TileKey};
 use pdf_folio_library::{
     hash_file, scan_pdf_files, thumbnail_path, Db, EntryId, Folder, FolderId, ImportSummary,
@@ -30,20 +31,12 @@ use crate::messages::{
     AppMenu, AppMenuAction, ConfirmationAction, LibrarySidebarTab, Message, SelectionMenu,
     SelectionToolbarAction, Shortcut,
 };
-use crate::style::layout::{
-    JUMP_INPUT_WIDTH, LIBRARY_CARD_THUMBNAIL_WIDTH, LIBRARY_FOLDER_GRID_ROW_HEIGHT,
-    LIBRARY_GRID_ROW_HEIGHT, LIBRARY_LIST_ROW_HEIGHT, LIBRARY_ROW_PROGRESS_WIDTH,
-    LIBRARY_ROW_THUMBNAIL_WIDTH, LIBRARY_SIDEBAR_MAX_WIDTH, LIBRARY_SIDEBAR_MIN_WIDTH,
-    SIDEBAR_RESIZE_HANDLE_VISUAL_WIDTH, SIDEBAR_RESIZE_HANDLE_WIDTH, VIEWER_SIDEBAR_WIDTH,
-};
 use crate::style::{
-    container_style, display_font, empty_state, menu_style, mix_color, pick_list_style,
-    progress_bar, scrollable_style, search_input, section_heading, tag_pill, text_input_style,
-    toc_entry, toolbar_button, ui_font, viewer_primitives, Class, ComponentState, FontSize,
-    FontWeight, Spacing, StyleBook, ThemeTokens, CARD_GRID_COLUMNS, LIBRARY_GRID_CARD_WIDTH,
-    UI_FONT_FAMILY,
+    container_style, display_font, empty_state, menu_style_for_class, mix_color, pick_list_style,
+    progress_bar, scrollable_style, search_input_with_class, section_heading, tag_pill,
+    text_input_style, toc_entry, toolbar_button, ui_font, viewer_primitives, Class, ComponentState,
+    FontSize, FontWeight, LabelSection, Spacing, StyleBook, ThemeTokens, UI_FONT_FAMILY,
 };
-use crate::style::{LIBRARY_OVERSCAN_ROWS, LINE_SCROLL_PIXELS, WINDOW_SIZE};
 use crate::theme::AppTheme;
 
 const CHEVRON_LEFT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"##;
@@ -59,18 +52,6 @@ const GEIST_MONO_PROPO_SEMIBOLD: &[u8] =
     include_bytes!("../assets/fonts/GeistMonoNerdFontPropo-SemiBold.otf");
 const GEIST_MONO_PROPO_BOLD: &[u8] =
     include_bytes!("../assets/fonts/GeistMonoNerdFontPropo-Bold.otf");
-const LIBRARY_CARD_CONTENT_WIDTH: f32 = LIBRARY_GRID_CARD_WIDTH - Spacing::LG * 2.0;
-const LIBRARY_CARD_TITLE_WIDTH: f32 = LIBRARY_CARD_CONTENT_WIDTH;
-const LIBRARY_CARD_INFO_HEIGHT: f32 = 99.0;
-const LIBRARY_CARD_MEDIA_MAX_HEIGHT: f32 = LIBRARY_GRID_CARD_WIDTH * 1.32;
-const LIBRARY_MASONRY_GAP: f32 = 18.0;
-const LIBRARY_SCROLLBAR_GUTTER: f32 = 28.0;
-const LIBRARY_ROW_TITLE_WIDTH: f32 = 520.0;
-const LIBRARY_DRAG_PREVIEW_GRID_X_OFFSET: f32 = 32.0;
-const LIBRARY_DRAG_PREVIEW_GRID_Y_OFFSET: f32 = 28.0;
-const LIBRARY_DRAG_PREVIEW_LIST_X_OFFSET: f32 = 28.0;
-const LIBRARY_DRAG_PREVIEW_LIST_Y_OFFSET: f32 = 24.0;
-const LIBRARY_DRAG_PLACEHOLDER_CONTENT_ALPHA: f32 = 0.42;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
 const LIBRARY_DRAG_AUTOSCROLL_TICK_MS: u64 = 16;
 const LIBRARY_DRAG_AUTOSCROLL_EDGE_BAND: f32 = 96.0;
@@ -78,16 +59,6 @@ const LIBRARY_DRAG_AUTOSCROLL_MAX_SPEED: f32 = 980.0;
 const LIBRARY_DRAG_AUTOSCROLL_MIN_SPEED: f32 = 80.0;
 const LIBRARY_DRAG_AUTOSCROLL_MAX_DT: f32 = 1.0 / 20.0;
 const LIBRARY_DRAG_ACTIVATION_DISTANCE: f32 = 6.0;
-const BULK_TAG_INPUT_WIDTH: f32 = 150.0;
-const SELECTION_TITLE_INPUT_WIDTH: f32 = 260.0;
-const SELECTION_AUTHOR_INPUT_WIDTH: f32 = 190.0;
-const SELECTION_TITLE_INPUT_MIN_WIDTH: f32 = 120.0;
-const SELECTION_AUTHOR_INPUT_MIN_WIDTH: f32 = 96.0;
-const BULK_TAG_INPUT_MIN_WIDTH: f32 = 90.0;
-const APP_MENU_BAR_HEIGHT: f32 = 32.0;
-const SELECTION_CONTEXT_ROW_HEIGHT: f32 = 46.0;
-const APP_MENU_PANEL_WIDTH: f32 = 270.0;
-const APP_MENU_ITEM_HEIGHT: f32 = 30.0;
 const APP_MENU_LABELS: [AppMenu; 7] = [
     AppMenu::File,
     AppMenu::Edit,
@@ -383,6 +354,14 @@ enum LibraryEntryRenderMode {
 }
 
 impl PDFolioApp {
+    fn layout(&self) -> &crate::style::AppLayoutTokens {
+        self.style_book.layout()
+    }
+
+    fn labels(&self) -> &crate::style::AppLabelTokens {
+        self.style_book.labels()
+    }
+
     /// Creates application state using the default database location.
     ///
     /// # Errors
@@ -399,6 +378,7 @@ impl PDFolioApp {
                 (StyleBook::bundled(), Some(error))
             }
         };
+        let layout = style_book.layout();
         Ok(Self {
             mode: AppMode::Library,
             doc: None,
@@ -439,9 +419,10 @@ impl PDFolioApp {
             library_viewport_x: 0.0,
             library_viewport_y: 0.0,
             library_viewport_width: 960.0,
-            library_tag_sidebar_width: preferences
-                .sidebar_width
-                .clamp(LIBRARY_SIDEBAR_MIN_WIDTH, LIBRARY_SIDEBAR_MAX_WIDTH),
+            library_tag_sidebar_width: preferences.sidebar_width.clamp(
+                layout.library_sidebar_min_width,
+                layout.library_sidebar_max_width,
+            ),
             library_tag_sidebar_open: true,
             resizing_library_tag_sidebar: false,
             library_sidebar_tab: LibrarySidebarTab::Files,
@@ -879,10 +860,10 @@ impl PDFolioApp {
         let row_height = self.library_row_height();
         let first_row = (scroll_offset / row_height).floor().max(0.0) as usize;
         let visible_rows = (self.library_viewport_height / row_height).ceil().max(1.0) as usize;
-        let start_row = first_row.saturating_sub(LIBRARY_OVERSCAN_ROWS);
+        let start_row = first_row.saturating_sub(self.layout().library_overscan_rows);
         let end_row = first_row
             .saturating_add(visible_rows)
-            .saturating_add(LIBRARY_OVERSCAN_ROWS)
+            .saturating_add(self.layout().library_overscan_rows)
             .saturating_add(1);
 
         let start = (start_row * per_row).min(entries_len);
@@ -895,10 +876,11 @@ impl PDFolioApp {
         layout: &'a LibraryMasonryLayout,
         scroll_offset: f32,
     ) -> Vec<&'a LibraryMasonryItem> {
-        let top = scroll_offset.max(0.0) - LIBRARY_OVERSCAN_ROWS as f32 * self.library_row_height();
+        let top = scroll_offset.max(0.0)
+            - self.layout().library_overscan_rows as f32 * self.library_row_height();
         let bottom = scroll_offset.max(0.0)
             + self.library_viewport_height.max(1.0)
-            + LIBRARY_OVERSCAN_ROWS as f32 * self.library_row_height();
+            + self.layout().library_overscan_rows as f32 * self.library_row_height();
         let mut items = layout
             .columns
             .iter()
@@ -914,7 +896,7 @@ impl PDFolioApp {
             1
         } else {
             let sidebar_width = if self.library_tag_sidebar_open {
-                self.library_tag_sidebar_width + SIDEBAR_RESIZE_HANDLE_WIDTH
+                self.library_tag_sidebar_width + self.layout().sidebar_resize_handle_width
             } else {
                 0.0
             };
@@ -922,22 +904,23 @@ impl PDFolioApp {
             let available_width = self
                 .library_viewport_width
                 .max(window_main_width)
-                .max(WINDOW_SIZE[0] - sidebar_width)
+                .max(self.layout().window_size()[0] - sidebar_width)
                 - Spacing::LG * 2.0
-                - LIBRARY_SCROLLBAR_GUTTER;
-            let column_pitch = LIBRARY_GRID_CARD_WIDTH + LIBRARY_MASONRY_GAP;
-            ((available_width + LIBRARY_MASONRY_GAP) / column_pitch)
+                - self.layout().library_scrollbar_gutter;
+            let column_pitch =
+                self.layout().library_grid_card_width + self.layout().library_masonry_gap;
+            ((available_width + self.layout().library_masonry_gap) / column_pitch)
                 .floor()
-                .max(CARD_GRID_COLUMNS as f32)
+                .max(self.layout().card_grid_columns as f32)
                 .min(10.0) as usize
         }
     }
 
     fn library_row_height(&self) -> f32 {
         if self.compact_view_mode {
-            LIBRARY_LIST_ROW_HEIGHT
+            self.layout().library_list_row_height
         } else {
-            LIBRARY_GRID_ROW_HEIGHT
+            self.layout().library_grid_row_height
         }
     }
 
@@ -951,12 +934,12 @@ impl PDFolioApp {
             let top = column_heights[column];
             let height = self.library_card_estimated_height(&entry.id);
             columns[column].push(LibraryMasonryItem { index, top, height });
-            column_heights[column] = top + height + LIBRARY_MASONRY_GAP;
+            column_heights[column] = top + height + self.layout().library_masonry_gap;
         }
 
         let content_height = column_heights
             .into_iter()
-            .map(|height| (height - LIBRARY_MASONRY_GAP).max(0.0))
+            .map(|height| (height - self.layout().library_masonry_gap).max(0.0))
             .fold(0.0, f32::max);
 
         LibraryMasonryLayout {
@@ -982,13 +965,13 @@ impl PDFolioApp {
             .thumbnails
             .get(entry_id)
             .map(|thumbnail| {
-                let height = LIBRARY_GRID_CARD_WIDTH * f32::from(thumbnail.height)
+                let height = self.layout().library_grid_card_width * f32::from(thumbnail.height)
                     / f32::from(thumbnail.width.max(1));
-                height.min(LIBRARY_CARD_MEDIA_MAX_HEIGHT)
+                height.min(self.layout().library_card_media_max_height)
             })
-            .unwrap_or(LIBRARY_CARD_MEDIA_MAX_HEIGHT);
+            .unwrap_or(self.layout().library_card_media_max_height);
 
-        thumbnail_height + LIBRARY_CARD_INFO_HEIGHT
+        thumbnail_height + self.layout().library_card_info_height
     }
 
     fn can_drag_reorder_library(&self) -> bool {
@@ -1064,7 +1047,9 @@ impl PDFolioApp {
             row.saturating_mul(self.library_entries_per_row())
         } else {
             let per_row = self.library_entries_per_row().max(1);
-            let column_step = (LIBRARY_GRID_CARD_WIDTH + LIBRARY_MASONRY_GAP).max(1.0);
+            let column_step = (self.layout().library_grid_card_width
+                + self.layout().library_masonry_gap)
+                .max(1.0);
             let content_x = (cursor.x - self.library_viewport_x).max(0.0);
             let column = (content_x / column_step)
                 .floor()
@@ -1445,11 +1430,18 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
     .default_font(iced::Font::with_name(UI_FONT_FAMILY))
     .subscription(subscription)
     .scale_factor(|app| app.scale_factor)
-    .window_size(WINDOW_SIZE)
+    .window_size(initial_window_size())
     .centered()
     .run()?;
 
     Ok(())
+}
+
+fn initial_window_size() -> [f32; 2] {
+    StyleBook::load()
+        .unwrap_or_else(|_| StyleBook::bundled())
+        .layout()
+        .window_size()
 }
 
 fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
@@ -1723,8 +1715,10 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::TagSidebarResizeDragged(width) => {
             if app.resizing_library_tag_sidebar {
-                app.library_tag_sidebar_width =
-                    width.clamp(LIBRARY_SIDEBAR_MIN_WIDTH, LIBRARY_SIDEBAR_MAX_WIDTH);
+                app.library_tag_sidebar_width = width.clamp(
+                    app.layout().library_sidebar_min_width,
+                    app.layout().library_sidebar_max_width,
+                );
             }
         }
         Message::EndTagSidebarResize => {
@@ -2236,7 +2230,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.viewport_height = height.max(1.0);
             if app.mode == AppMode::Library {
                 let sidebar_width = if app.library_tag_sidebar_open {
-                    app.library_tag_sidebar_width + SIDEBAR_RESIZE_HANDLE_WIDTH
+                    app.library_tag_sidebar_width + app.layout().sidebar_resize_handle_width
                 } else {
                     0.0
                 };
@@ -2525,10 +2519,11 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     }
     let header = header
         .push(
-            search_input(
+            search_input_with_class(
                 "Search library",
                 &app.search_query,
                 tokens,
+                Class::LibrarySearchInput,
                 Message::SearchQueryChanged,
             )
             .width(Length::Fill),
@@ -2545,13 +2540,17 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             .padding([Spacing::SM, Spacing::MD])
             .text_size(FontSize::MD)
             .font(ui_font(FontWeight::MEDIUM))
-            .style(move |_, status| pick_list_style(tokens, Class::ToolbarButton, status))
-            .menu_style(move |_| menu_style(tokens)),
+            .style(move |_, status| pick_list_style(tokens, Class::LibrarySortDropdown, status))
+            .menu_style(move |_| menu_style_for_class(tokens, Class::LibrarySortDropdown)),
         )
         .push(library_layout_toggle_button(app, tokens))
-        .push(toolbar_button("Import folder", tokens).on_press(Message::ImportFolderDialog))
+        .push(library_new_folder_button(tokens).on_press(Message::OpenCreateFolderDialog))
         .spacing(Spacing::MD)
         .align_y(iced::Alignment::Center);
+    let header = container(header)
+        .width(Length::Fill)
+        .padding(Spacing::SM)
+        .style(move |_| container_style(tokens, Class::LibraryControlBar));
 
     let reorder_hint = if app.can_drag_reorder_library() {
         "Manual reorder enabled"
@@ -2578,9 +2577,9 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         ));
     } else if app.compact_view_mode {
         let mut rows = column![].spacing(Spacing::SM);
-        let top_spacer = window.start as f32 * LIBRARY_LIST_ROW_HEIGHT;
+        let top_spacer = window.start as f32 * app.layout().library_list_row_height;
         let bottom_spacer =
-            entries.len().saturating_sub(window.end) as f32 * LIBRARY_LIST_ROW_HEIGHT;
+            entries.len().saturating_sub(window.end) as f32 * app.layout().library_list_row_height;
         if top_spacer > 0.0 {
             rows = rows.push(container("").height(top_spacer));
         }
@@ -2607,20 +2606,20 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     } else {
         let layout = app.library_render_item_masonry_layout(&render_items);
         let mut grid = row![]
-            .spacing(LIBRARY_MASONRY_GAP)
+            .spacing(app.layout().library_masonry_gap)
             .height(layout.content_height);
         for column_items in &layout.columns {
             let mut stack = column![]
-                .width(LIBRARY_GRID_CARD_WIDTH)
+                .width(app.layout().library_grid_card_width)
                 .height(layout.content_height);
             let mut cursor_y = 0.0;
             for item_layout in column_items {
                 let bottom = item_layout.top + item_layout.height;
-                let visible_top =
-                    entry_scroll_offset - LIBRARY_OVERSCAN_ROWS as f32 * app.library_row_height();
+                let visible_top = entry_scroll_offset
+                    - app.layout().library_overscan_rows as f32 * app.library_row_height();
                 let visible_bottom = entry_scroll_offset
                     + app.library_viewport_height.max(1.0)
-                    + LIBRARY_OVERSCAN_ROWS as f32 * app.library_row_height();
+                    + app.layout().library_overscan_rows as f32 * app.library_row_height();
                 if bottom < visible_top || item_layout.top > visible_bottom {
                     continue;
                 }
@@ -2650,7 +2649,7 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             }
             grid = grid.push(stack);
         }
-        grid = grid.push(container("").width(LIBRARY_SCROLLBAR_GUTTER));
+        grid = grid.push(container("").width(app.layout().library_scrollbar_gutter));
         let scroll_content = if child_folders.is_empty() {
             column![grid]
         } else {
@@ -2935,7 +2934,7 @@ fn view_folder_cards<'a>(
 ) -> Element<'a, Message> {
     let mut rows = column![].spacing(Spacing::SM);
     for chunk in folders.chunks(folder_cards_per_row(app)) {
-        let mut card_row = row![].spacing(LIBRARY_MASONRY_GAP);
+        let mut card_row = row![].spacing(app.layout().library_masonry_gap);
         for folder in chunk {
             card_row = card_row.push(folder_grid_card(app, folder.clone(), tokens));
         }
@@ -2947,12 +2946,16 @@ fn view_folder_cards<'a>(
 fn folder_cards_per_row(app: &PDFolioApp) -> usize {
     let available_width = app
         .library_viewport_width
-        .max(app.viewport_width - app.library_tag_sidebar_width - SIDEBAR_RESIZE_HANDLE_WIDTH)
-        .max(WINDOW_SIZE[0])
+        .max(
+            app.viewport_width
+                - app.library_tag_sidebar_width
+                - app.layout().sidebar_resize_handle_width,
+        )
+        .max(app.layout().window_size()[0])
         - Spacing::LG * 2.0
-        - LIBRARY_SCROLLBAR_GUTTER;
-    let card_pitch = LIBRARY_GRID_CARD_WIDTH + LIBRARY_MASONRY_GAP;
-    ((available_width + LIBRARY_MASONRY_GAP) / card_pitch)
+        - app.layout().library_scrollbar_gutter;
+    let card_pitch = app.layout().library_grid_card_width + app.layout().library_masonry_gap;
+    ((available_width + app.layout().library_masonry_gap) / card_pitch)
         .floor()
         .max(1.0) as usize
 }
@@ -2963,7 +2966,7 @@ fn folder_cards_section_height(app: &PDFolioApp, folder_count: usize) -> f32 {
     }
 
     let rows = folder_count.div_ceil(folder_cards_per_row(app)).max(1);
-    rows as f32 * LIBRARY_FOLDER_GRID_ROW_HEIGHT
+    rows as f32 * app.layout().library_folder_grid_row_height
         + rows.saturating_sub(1) as f32 * Spacing::SM
         + Spacing::MD
 }
@@ -2981,7 +2984,7 @@ fn folder_grid_card<'a>(
         .filter(|child| child.parent_id.as_ref() == Some(&folder.id))
         .count();
     let meta = folder_meta_label(count, child_count);
-    let title = truncate_for_width(&folder.name, LIBRARY_CARD_THUMBNAIL_WIDTH, 0.0);
+    let title = truncate_for_width(&folder.name, app.layout().library_card_thumbnail_width, 0.0);
     let content = row![
         folder_icon(tokens),
         column![
@@ -3000,7 +3003,7 @@ fn folder_grid_card<'a>(
     ]
     .spacing(Spacing::MD)
     .padding(Spacing::MD)
-    .height(LIBRARY_FOLDER_GRID_ROW_HEIGHT)
+    .height(app.layout().library_folder_grid_row_height)
     .align_y(iced::Alignment::Center);
 
     button(
@@ -3008,7 +3011,7 @@ fn folder_grid_card<'a>(
             .width(Length::Fill)
             .style(move |_| container_style(tokens, Class::LibraryFolderCard)),
     )
-    .width(LIBRARY_GRID_CARD_WIDTH)
+    .width(app.layout().library_grid_card_width)
     .on_press(Message::FolderSelected(Some(folder_id)))
     .style(move |_, status| crate::style::button_style(tokens, Class::LibraryFolderCard, status))
     .into()
@@ -3167,14 +3170,14 @@ fn floating_library_drag_preview<'a>(
     };
 
     let x_offset = if app.compact_view_mode {
-        LIBRARY_DRAG_PREVIEW_LIST_X_OFFSET
+        app.layout().library_drag_preview_list_x_offset
     } else {
-        LIBRARY_DRAG_PREVIEW_GRID_X_OFFSET
+        app.layout().library_drag_preview_grid_x_offset
     };
     let y_offset = if app.compact_view_mode {
-        LIBRARY_DRAG_PREVIEW_LIST_Y_OFFSET
+        app.layout().library_drag_preview_list_y_offset
     } else {
-        LIBRARY_DRAG_PREVIEW_GRID_Y_OFFSET
+        app.layout().library_drag_preview_grid_y_offset
     };
 
     Some(
@@ -3217,9 +3220,9 @@ fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
         tokens.border
     };
     let handle_visual_width = if app.resizing_library_tag_sidebar {
-        SIDEBAR_RESIZE_HANDLE_WIDTH
+        app.layout().sidebar_resize_handle_width
     } else {
-        SIDEBAR_RESIZE_HANDLE_VISUAL_WIDTH
+        app.layout().sidebar_resize_handle_visual_width
     };
     let resize_handle = mouse_area(
         container(
@@ -3232,7 +3235,7 @@ fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
                     style
                 }),
         )
-        .width(SIDEBAR_RESIZE_HANDLE_WIDTH)
+        .width(app.layout().sidebar_resize_handle_width)
         .height(Length::Fill)
         .align_x(iced::alignment::Horizontal::Center),
     )
@@ -3248,77 +3251,187 @@ fn view_library_navigation_sidebar<'a>(
     sidebar_width: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let heading = row![
-        section_heading("Explorer", tokens).width(Length::Fill),
-        sidebar_chevron_button(
-            CHEVRON_LEFT_SVG,
-            "Collapse Sidebar",
-            Message::CollapseLibrarySidebar,
-            tokens,
-        ),
-    ]
-    .spacing(Spacing::XS)
-    .align_y(iced::Alignment::Center);
+    let heading = container(
+        row![
+            section_heading("Explorer", tokens).width(Length::Fill),
+            sidebar_chevron_button(
+                CHEVRON_LEFT_SVG,
+                "Collapse Sidebar",
+                Message::CollapseLibrarySidebar,
+                tokens,
+            ),
+        ]
+        .spacing(Spacing::XS)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding(Spacing::MD);
 
-    let tabs = row![
-        sidebar_tab_button(LibrarySidebarTab::Files, app.library_sidebar_tab, tokens),
-        sidebar_tab_button(LibrarySidebarTab::Tags, app.library_sidebar_tab, tokens),
-    ]
-    .spacing(Spacing::XS)
-    .width(Length::Fill);
+    let sidebar_tab_component = tokens.class_styles[Class::SidebarTab.index()];
+    let sidebar_tab_layout = sidebar_tab_component.layout;
+    let sidebar_tab_style = sidebar_tab_component.resolve(ComponentState::Normal);
+    let tab_area_background = sidebar_tab_style
+        .background
+        .unwrap_or_else(|| sidebar_tab_area_background(tokens));
+    let file_tree_component = tokens.class_styles[Class::FileTree.index()];
+    let file_tree_layout = file_tree_component.layout;
+    let file_tree_style = file_tree_component.resolve(ComponentState::Normal);
+    let content_background = file_tree_style
+        .background
+        .or_else(|| {
+            sidebar_tab_component
+                .resolve(ComponentState::Active)
+                .background
+        })
+        .unwrap_or_else(|| sidebar_tab_content_background(tokens));
+    let tabs = container(
+        row![
+            sidebar_tab_button(
+                LibrarySidebarTab::Files,
+                app.library_sidebar_tab,
+                tokens,
+                app.labels(),
+            ),
+            sidebar_tab_button(
+                LibrarySidebarTab::Tags,
+                app.library_sidebar_tab,
+                tokens,
+                app.labels(),
+            ),
+        ]
+        .spacing(sidebar_tab_layout.spacing.unwrap_or(Spacing::XS))
+        .width(Length::Fill),
+    )
+    .width(Length::Fill)
+    .padding(iced::Padding {
+        top: sidebar_tab_layout.margin_top(Spacing::XS),
+        right: sidebar_tab_layout.margin_right(Spacing::SM),
+        bottom: sidebar_tab_layout.margin_bottom(Spacing::XS),
+        left: sidebar_tab_layout.margin_left(Spacing::SM),
+    })
+    .style(move |_| {
+        let mut style = container_style(tokens, Class::Sidebar);
+        style.background = Some(iced::Background::Color(tab_area_background));
+        style.border.width = 0.0;
+        style
+    });
 
     let body = match app.library_sidebar_tab {
         LibrarySidebarTab::Files => view_file_tree_sidebar(app, sidebar_width, tokens),
         LibrarySidebarTab::Tags => view_tag_tree_sidebar(app, sidebar_width, tokens),
     };
 
-    let content = column![heading, tabs, body]
-        .spacing(Spacing::SM)
-        .padding(Spacing::MD);
-
-    scrollable(content)
+    let body_scroll = scrollable(body)
         .height(Length::Fill)
-        .style(move |_, status| scrollable_style(tokens, Class::Sidebar, status))
-        .into()
+        .style(move |_, status| scrollable_style(tokens, Class::Sidebar, status));
+
+    let padded_body = container(body_scroll)
+        .height(Length::Fill)
+        .padding(iced::Padding {
+            top: file_tree_layout.padding_top(0.0),
+            right: 0.0,
+            bottom: 0.0,
+            left: 0.0,
+        });
+
+    let tabbed_body = container(column![tabs, padded_body].spacing(0).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| {
+            let mut style = container_style(tokens, Class::FileTree);
+            if file_tree_style.background.is_none() {
+                style.background = Some(iced::Background::Color(content_background));
+            }
+            style
+        });
+
+    let content = column![heading, tabbed_body]
+        .spacing(Spacing::SM)
+        .height(Length::Fill);
+
+    container(content).height(Length::Fill).into()
 }
 
 fn sidebar_tab_button<'a>(
     tab: LibrarySidebarTab,
     active_tab: LibrarySidebarTab,
     tokens: ThemeTokens,
+    labels: &'a crate::style::AppLabelTokens,
 ) -> iced::widget::Button<'a, Message> {
     let active = tab == active_tab;
+    let component = tokens.class_styles[Class::SidebarTab.index()];
+    let layout = component.layout;
+    let text_style = component.text;
+    let normal_style = component.resolve(ComponentState::Normal);
+    let active_style = component.resolve(ComponentState::Active);
     button(
-        text(tab.label())
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::MEDIUM))
+        text(library_sidebar_tab_label(labels, tab))
+            .size(text_style.size.unwrap_or(FontSize::MD))
+            .font(ui_font(text_style.weight.unwrap_or(FontWeight::MEDIUM)))
             .color(if active {
-                tokens.text_primary
+                active_style.text_color.unwrap_or(tokens.text_primary)
             } else {
-                tokens.text_secondary
+                normal_style.text_color.unwrap_or(tokens.text_secondary)
             }),
     )
-    .height(30.0)
-    .width(Length::FillPortion(1))
-    .padding([Spacing::XS, Spacing::MD])
+    .height(layout.height.unwrap_or(30.0))
+    .width(Length::FillPortion(layout.width_portion.unwrap_or(1)))
+    .padding(iced::Padding {
+        top: layout.padding_top(Spacing::XS),
+        right: layout.padding_right(Spacing::MD),
+        bottom: layout.padding_bottom(Spacing::XS),
+        left: layout.padding_left(Spacing::MD),
+    })
     .style(move |_, status| {
-        let hovered = matches!(
-            status,
-            iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
-        );
-        let mut style = crate::style::button_style(tokens, Class::SidebarRow, status);
-        style.background = Some(iced::Background::Color(if active {
-            mix_color(tokens.surface, tokens.accent, 0.16)
-        } else if hovered {
-            mix_color(tokens.surface, tokens.accent, 0.08)
+        let mut style = crate::style::button_style(tokens, Class::SidebarTab, status);
+        let state = if active {
+            ComponentState::Active
         } else {
-            tokens.surface
-        }));
-        style.border.width = if active { 1.0 } else { 0.0 };
-        style.border.color = if active { tokens.focus } else { tokens.border };
+            match status {
+                iced::widget::button::Status::Active => ComponentState::Normal,
+                iced::widget::button::Status::Hovered => ComponentState::Hovered,
+                iced::widget::button::Status::Pressed => ComponentState::Pressed,
+                iced::widget::button::Status::Disabled => ComponentState::Disabled,
+            }
+        };
+        let state_style = component.resolve(state);
+        if let Some(background) = state_style.background {
+            style.background = Some(iced::Background::Color(background));
+        }
+        if let Some(text_color) = state_style.text_color {
+            style.text_color = text_color;
+        }
+        if let Some(border_color) = state_style.border_color {
+            style.border.color = border_color;
+        }
+        if let Some(border_width) = state_style.border_width {
+            style.border.width = border_width;
+        }
+        if let Some(radius) = state_style.radius {
+            style.border.radius = radius.into();
+        }
         style
     })
     .on_press(Message::LibrarySidebarTabChanged(tab))
+}
+
+fn sidebar_tab_area_background(tokens: ThemeTokens) -> Color {
+    if is_dark_surface(tokens.surface) {
+        mix_color(tokens.surface, Color::BLACK, 0.34)
+    } else {
+        mix_color(tokens.surface_raised, Color::BLACK, 0.09)
+    }
+}
+
+fn sidebar_tab_content_background(tokens: ThemeTokens) -> Color {
+    if is_dark_surface(tokens.surface) {
+        mix_color(tokens.surface, tokens.surface_raised, 0.62)
+    } else {
+        tokens.surface
+    }
+}
+
+fn is_dark_surface(color: Color) -> bool {
+    color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722 < 0.5
 }
 
 fn view_file_tree_sidebar<'a>(
@@ -3468,16 +3581,22 @@ fn view_selected_pdf_sidebar<'a>(
         sidebar_detail_row("File", path_label.to_owned(), details_width, tokens),
         sidebar_detail_row("Folders", folder_label, details_width, tokens),
         sidebar_detail_row("Tags", tags_label, details_width, tokens),
-        toolbar_button("Open PDF", tokens).on_press(Message::OpenLibraryEntry(entry.id.clone())),
-        toolbar_button("Clear selection", tokens).on_press(Message::ClearLibrarySelection),
+        sidebar_action_button("Open PDF", tokens)
+            .on_press(Message::OpenLibraryEntry(entry.id.clone())),
+        sidebar_action_button("Clear selection", tokens).on_press(Message::ClearLibrarySelection),
     ]
     .spacing(Spacing::SM)
     .padding(Spacing::MD);
 
-    scrollable(content)
-        .height(Length::Fill)
-        .style(move |_, status| scrollable_style(tokens, Class::Sidebar, status))
-        .into()
+    container(
+        scrollable(content)
+            .height(Length::Fill)
+            .style(move |_, status| scrollable_style(tokens, Class::Sidebar, status)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
+    .into()
 }
 
 fn view_multi_selection_sidebar<'a>(
@@ -3530,12 +3649,15 @@ fn view_multi_selection_sidebar<'a>(
             details_width,
             tokens,
         ),
-        toolbar_button("Clear selection", tokens).on_press(Message::ClearLibrarySelection),
+        sidebar_action_button("Clear selection", tokens).on_press(Message::ClearLibrarySelection),
     ]
     .spacing(Spacing::SM)
     .padding(Spacing::MD);
 
-    container(content).height(Length::Fill).into()
+    container(content)
+        .height(Length::Fill)
+        .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
+        .into()
 }
 
 fn sidebar_detail_row<'a>(
@@ -3544,18 +3666,23 @@ fn sidebar_detail_row<'a>(
     width: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    column![
-        text(label)
-            .size(FontSize::SM)
-            .font(ui_font(FontWeight::MEDIUM))
-            .color(tokens.text_secondary),
-        text(truncate_for_width(&value, width, 0.0))
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::REGULAR))
-            .color(tokens.text_primary)
-            .wrapping(Wrapping::None),
-    ]
-    .spacing(Spacing::XS)
+    container(
+        column![
+            text(label)
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(tokens.text_secondary),
+            text(truncate_for_width(&value, width, 0.0))
+                .size(FontSize::MD)
+                .font(ui_font(FontWeight::REGULAR))
+                .color(tokens.text_primary)
+                .wrapping(Wrapping::None),
+        ]
+        .spacing(Spacing::XS),
+    )
+    .width(Length::Fill)
+    .padding([Spacing::XS, Spacing::SM])
+    .style(move |_| container_style(tokens, Class::SidebarDetailRow))
     .into()
 }
 
@@ -3635,13 +3762,23 @@ fn file_tree_row<'a>(
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     let label = label.into();
+    let file_tree_style = tokens.class_styles[Class::FileTree.index()];
+    let fold_button_component = tokens.class_styles[Class::FileTreeFoldButton.index()];
+    let fold_button_layout = fold_button_component.layout;
+    let fold_button_normal_style = fold_button_component.resolve(ComponentState::Normal);
+    let fold_button_hovered_style = fold_button_component.resolve(ComponentState::Hovered);
+    let normal_style = file_tree_style.resolve(ComponentState::Normal);
+    let active_style = file_tree_style.resolve(ComponentState::Active);
+    let content_background = normal_style
+        .background
+        .unwrap_or_else(|| sidebar_tab_content_background(tokens));
     let indent = (depth as f32 * 12.0).min(72.0);
     let meta_width = if meta.is_some() { 52.0 } else { 0.0 };
     let label_width = (sidebar_width - indent - meta_width - 34.0).max(52.0);
     let text_color = if active {
-        tokens.text_primary
+        active_style.text_color.unwrap_or(tokens.text_primary)
     } else {
-        tokens.text_secondary
+        normal_style.text_color.unwrap_or(tokens.text_secondary)
     };
 
     let chevron: Element<'_, Message> = if has_children {
@@ -3652,8 +3789,15 @@ fn file_tree_row<'a>(
         }))
         .width(13.0)
         .height(13.0)
-        .style(move |_, _| iced::widget::svg::Style {
-            color: Some(tokens.text_secondary),
+        .style(move |_, status| iced::widget::svg::Style {
+            color: Some(match status {
+                iced::widget::svg::Status::Hovered => fold_button_hovered_style
+                    .text_color
+                    .unwrap_or(tokens.text_primary),
+                iced::widget::svg::Status::Idle => fold_button_normal_style
+                    .text_color
+                    .unwrap_or(tokens.text_secondary),
+            }),
         });
 
         button(
@@ -3662,23 +3806,11 @@ fn file_tree_row<'a>(
                 .height(Length::Fill)
                 .center(Length::Fill),
         )
-        .width(16.0)
-        .height(20.0)
-        .padding(0)
+        .width(fold_button_layout.width.unwrap_or(16.0))
+        .height(fold_button_layout.height.unwrap_or(20.0))
+        .padding(fold_button_layout.padding_top(0.0))
         .style(move |_, status| {
-            let hovered = matches!(
-                status,
-                iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
-            );
-            let mut style = crate::style::button_style(tokens, Class::SidebarRow, status);
-            style.background = Some(iced::Background::Color(if hovered {
-                mix_color(tokens.surface, tokens.accent, 0.08)
-            } else {
-                tokens.surface
-            }));
-            style.border.width = 0.0;
-            style.border.radius = 3.0.into();
-            style
+            crate::style::button_style(tokens, Class::FileTreeFoldButton, status)
         })
         .on_press(toggle_message)
         .into()
@@ -3714,28 +3846,51 @@ fn file_tree_row<'a>(
     }
 
     button(content)
-        .height(24.0)
+        .height(28.0)
         .width(Length::Fill)
-        .padding([2.0, Spacing::XS])
+        .padding([3.0, Spacing::SM])
         .style(move |_, status| {
             let hovered = matches!(
                 status,
                 iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
             );
-            let mut style = crate::style::button_style(tokens, Class::SidebarRow, status);
-            style.background = Some(iced::Background::Color(if active {
-                mix_color(tokens.surface, tokens.accent, 0.16)
+            let state = if active {
+                ComponentState::Active
             } else if hovered {
-                mix_color(tokens.surface, tokens.accent, 0.08)
+                ComponentState::Hovered
             } else {
-                tokens.surface
-            }));
-            style.border.width = 0.0;
-            style.border.radius = 3.0.into();
+                ComponentState::Normal
+            };
+            let mut style = crate::style::button_style(tokens, Class::FileTree, status);
+            apply_file_tree_state_style(&mut style, tokens, state, content_background);
             style
         })
         .on_press(message)
         .into()
+}
+
+fn apply_file_tree_state_style(
+    style: &mut button::Style,
+    tokens: ThemeTokens,
+    state: ComponentState,
+    fallback_background: Color,
+) {
+    let state_style = tokens.class_styles[Class::FileTree.index()].resolve(state);
+    style.background = Some(iced::Background::Color(
+        state_style.background.unwrap_or(fallback_background),
+    ));
+    if let Some(text_color) = state_style.text_color {
+        style.text_color = text_color;
+    }
+    if let Some(border_color) = state_style.border_color {
+        style.border.color = border_color;
+    }
+    if let Some(border_width) = state_style.border_width {
+        style.border.width = border_width;
+    }
+    if let Some(radius) = state_style.radius {
+        style.border.radius = radius.into();
+    }
 }
 
 fn sidebar_chevron_button<'a>(
@@ -3758,16 +3913,7 @@ fn sidebar_chevron_button<'a>(
     .width(28.0)
     .height(28.0)
     .padding(0)
-    .style(move |_, _| iced::widget::button::Style {
-        background: None,
-        text_color: tokens.text_primary,
-        border: iced::Border {
-            width: 0.0,
-            color: tokens.surface,
-            radius: 4.0.into(),
-        },
-        ..iced::widget::button::Style::default()
-    })
+    .style(move |_, status| crate::style::button_style(tokens, Class::SidebarToggleButton, status))
     .on_press(message);
 
     tooltip(
@@ -3783,6 +3929,20 @@ fn sidebar_chevron_button<'a>(
     )
     .delay(Duration::from_millis(600))
     .into()
+}
+
+fn sidebar_action_button<'a>(
+    label: impl Into<String>,
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
+    button(
+        text(label.into())
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_primary),
+    )
+    .padding([Spacing::SM, Spacing::LG])
+    .style(move |_, status| crate::style::button_style(tokens, Class::SidebarActionButton, status))
 }
 
 fn library_layout_toggle_button(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
@@ -3805,7 +3965,7 @@ fn library_layout_toggle_button(app: &PDFolioApp, tokens: ThemeTokens) -> Elemen
     .width(34.0)
     .height(34.0)
     .padding(0)
-    .style(move |_, status| crate::style::button_style(tokens, Class::ToolbarButton, status))
+    .style(move |_, status| crate::style::button_style(tokens, Class::LibraryViewToggle, status))
     .on_press(Message::ToggleViewMode);
 
     tooltip(
@@ -3823,6 +3983,17 @@ fn library_layout_toggle_button(app: &PDFolioApp, tokens: ThemeTokens) -> Elemen
     .into()
 }
 
+fn library_new_folder_button<'a>(tokens: ThemeTokens) -> iced::widget::Button<'a, Message> {
+    button(
+        text("New folder")
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_primary),
+    )
+    .padding([Spacing::SM, Spacing::LG])
+    .style(move |_, status| crate::style::button_style(tokens, Class::LibraryImportButton, status))
+}
+
 fn library_entry_card<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -3838,8 +4009,9 @@ fn library_entry_card<'a>(
         .or_else(|| entry.author.clone())
         .unwrap_or_else(|| String::from("Unknown author"));
     let opened = last_opened_label(&entry);
+    let metadata_label = library_card_metadata_label(&entry);
     let search_page = app.search_hit_pages.get(&entry_id).copied();
-    let content_alpha = library_entry_content_alpha(mode);
+    let content_alpha = library_entry_content_alpha(app, mode);
     let text_secondary = with_alpha(tokens.text_secondary, content_alpha);
     let accent = with_alpha(tokens.accent, content_alpha);
     let activity_label = search_page.map_or(opened, |page| {
@@ -3853,8 +4025,17 @@ fn library_entry_card<'a>(
     let progress_value = progress_fraction(&entry);
     let media = card_thumbnail_media(app, &entry_id, tokens, content_alpha);
     let mut info = column![
-        truncated_title(title, LIBRARY_CARD_TITLE_WIDTH, tokens, content_alpha),
+        truncated_title(
+            title,
+            app.layout().library_card_title_width,
+            tokens,
+            content_alpha
+        ),
         text(author)
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::REGULAR))
+            .color(text_secondary),
+        text(metadata_label)
             .size(FontSize::SM)
             .font(ui_font(FontWeight::REGULAR))
             .color(text_secondary),
@@ -3870,7 +4051,7 @@ fn library_entry_card<'a>(
     ]
     .spacing(Spacing::SM)
     .padding(Spacing::LG)
-    .height(LIBRARY_CARD_INFO_HEIGHT)
+    .height(app.layout().library_card_info_height)
     .width(Length::Fill);
 
     if mode == LibraryEntryRenderMode::Normal && app.tag_entry_id.as_ref() == Some(&entry_id) {
@@ -3882,9 +4063,9 @@ fn library_entry_card<'a>(
     }
     let body = column![media, info].spacing(0).width(Length::Fill);
     let width = if mode == LibraryEntryRenderMode::Floating {
-        Length::Fixed(LIBRARY_GRID_CARD_WIDTH)
+        Length::Fixed(app.layout().library_grid_card_width)
     } else {
-        Length::Fixed(LIBRARY_GRID_CARD_WIDTH)
+        Length::Fixed(app.layout().library_grid_card_width)
     };
     let surface = container(body)
         .width(width)
@@ -3924,11 +4105,16 @@ fn library_entry_row<'a>(
     let tags = entry.tags.clone();
     let progress_value = progress_fraction(&entry);
     let search_page = app.search_hit_pages.get(&entry_id).copied();
-    let content_alpha = library_entry_content_alpha(mode);
+    let content_alpha = library_entry_content_alpha(app, mode);
     let text_secondary = with_alpha(tokens.text_secondary, content_alpha);
     let accent = with_alpha(tokens.accent, content_alpha);
     let mut detail_column = column![
-        truncated_title(title, LIBRARY_ROW_TITLE_WIDTH, tokens, content_alpha),
+        truncated_title(
+            title,
+            app.layout().library_row_title_width,
+            tokens,
+            content_alpha
+        ),
         text(details)
             .size(FontSize::SM)
             .font(ui_font(FontWeight::REGULAR))
@@ -3954,13 +4140,13 @@ fn library_entry_row<'a>(
             app,
             &entry_id,
             tokens,
-            LIBRARY_ROW_THUMBNAIL_WIDTH,
+            app.layout().library_row_thumbnail_width,
             content_alpha
         ),
         detail_column,
         column![progress_bar(progress_value, tokens),]
             .spacing(Spacing::XS)
-            .width(LIBRARY_ROW_PROGRESS_WIDTH),
+            .width(app.layout().library_row_progress_width),
     ]
     .spacing(Spacing::MD)
     .padding(Spacing::SM)
@@ -4036,9 +4222,9 @@ fn library_entry_container_style(
     style
 }
 
-fn library_entry_content_alpha(mode: LibraryEntryRenderMode) -> f32 {
+fn library_entry_content_alpha(app: &PDFolioApp, mode: LibraryEntryRenderMode) -> f32 {
     if mode == LibraryEntryRenderMode::Placeholder {
-        LIBRARY_DRAG_PLACEHOLDER_CONTENT_ALPHA
+        app.layout().library_drag_placeholder_content_alpha
     } else {
         1.0
     }
@@ -4055,10 +4241,10 @@ fn card_thumbnail_media<'a>(
     tokens: ThemeTokens,
     alpha: f32,
 ) -> Element<'a, Message> {
-    let width = LIBRARY_GRID_CARD_WIDTH;
+    let width = app.layout().library_grid_card_width;
     if let Some(thumbnail) = app.thumbnails.get(entry_id) {
         let height = (width * f32::from(thumbnail.height) / f32::from(thumbnail.width.max(1)))
-            .min(LIBRARY_CARD_MEDIA_MAX_HEIGHT);
+            .min(app.layout().library_card_media_max_height);
         container(
             image(thumbnail.handle.clone())
                 .width(width)
@@ -4075,12 +4261,12 @@ fn card_thumbnail_media<'a>(
     } else {
         container(document_preview_lines(
             width,
-            LIBRARY_CARD_MEDIA_MAX_HEIGHT,
+            app.layout().library_card_media_max_height,
             tokens,
             alpha,
         ))
         .center(width)
-        .height(LIBRARY_CARD_MEDIA_MAX_HEIGHT)
+        .height(app.layout().library_card_media_max_height)
         .style(move |_| flush_media_style(tokens, alpha))
         .into()
     }
@@ -4237,15 +4423,16 @@ fn ghost_tags_row<'a>(tags: Vec<String>, tokens: ThemeTokens, alpha: f32) -> Ele
 
 fn view_app_menu_bar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens(&app.style_book);
+    let labels = app.labels();
     let mut menus = row![]
         .spacing(2.0)
         .padding([0.0, Spacing::MD])
-        .height(APP_MENU_BAR_HEIGHT)
+        .height(app.layout().app_menu_bar_height)
         .align_y(iced::Alignment::Center);
 
     for menu in APP_MENU_LABELS {
         let active = app.open_app_menu == Some(menu);
-        menus = menus.push(app_menu_button(menu, active, tokens));
+        menus = menus.push(app_menu_button(menu, active, tokens, labels));
     }
 
     let content: Element<'_, Message> =
@@ -4265,16 +4452,21 @@ fn view_app_menu_bar(app: &PDFolioApp) -> Element<'_, Message> {
 
 fn app_menu_bar_height(app: &PDFolioApp) -> f32 {
     if app.mode == AppMode::Library && !app.selected_library_entries.is_empty() {
-        APP_MENU_BAR_HEIGHT + SELECTION_CONTEXT_ROW_HEIGHT
+        app.layout().app_menu_bar_height + app.layout().selection_context_row_height
     } else {
-        APP_MENU_BAR_HEIGHT
+        app.layout().app_menu_bar_height
     }
 }
 
-fn app_menu_button<'a>(menu: AppMenu, active: bool, tokens: ThemeTokens) -> Element<'a, Message> {
+fn app_menu_button<'a>(
+    menu: AppMenu,
+    active: bool,
+    tokens: ThemeTokens,
+    labels: &'a crate::style::AppLabelTokens,
+) -> Element<'a, Message> {
     button(
         container(
-            text(menu.label())
+            text(app_menu_label(labels, menu))
                 .size(FontSize::MD)
                 .font(ui_font(FontWeight::MEDIUM))
                 .color(if active {
@@ -4349,38 +4541,43 @@ fn app_menu_panel<'a>(
     menu: AppMenu,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
+    let labels = app.labels();
     let mut panel = column![].spacing(2.0).padding(Spacing::XS);
     match menu {
         AppMenu::File => {
             panel = panel
                 .push(app_menu_item(
-                    "Open PDF...",
+                    app_menu_action_label(labels, "OpenFile", "Open PDF..."),
                     "Ctrl+O",
                     true,
                     AppMenuAction::OpenFile,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Import Folder...",
+                    app_menu_action_label(labels, "ImportFolder", "Import Folder..."),
                     "",
                     app.mode == AppMode::Library,
                     AppMenuAction::ImportFolder,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
-                    "Refresh Library",
+                    app_menu_action_label(labels, "RefreshLibrary", "Refresh Library"),
                     "F5",
                     app.mode == AppMode::Library,
                     AppMenuAction::RefreshLibrary,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Back to Library",
+                    app_menu_action_label(labels, "BackToLibrary", "Back to Library"),
                     "Esc",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::BackToLibrary,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ));
         }
         AppMenu::Edit => {
@@ -4389,170 +4586,196 @@ fn app_menu_panel<'a>(
             let has_bulk_tag = has_selection && !app.bulk_tag_input.trim().is_empty();
             panel = panel
                 .push(app_menu_item(
-                    "Select All Visible PDFs",
+                    app_menu_action_label(labels, "SelectAllVisible", "Select All Visible PDFs"),
                     "Ctrl+A",
                     app.mode == AppMode::Library,
                     AppMenuAction::SelectAllVisible,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Clear Selection",
+                    app_menu_action_label(labels, "ClearSelection", "Clear Selection"),
                     "Esc",
                     has_selection,
                     AppMenuAction::ClearSelection,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
-                    "Save Details",
+                    app_menu_action_label(labels, "SaveDetails", "Save Details"),
                     "Enter",
                     single_selection,
                     AppMenuAction::SaveDetails,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Reset Details...",
+                    app_menu_action_label(labels, "ResetDetails", "Reset Details..."),
                     "",
                     single_selection,
                     AppMenuAction::ResetDetails,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
-                    "Add Typed Tag",
+                    app_menu_action_label(labels, "AddTag", "Add Typed Tag"),
                     "",
                     has_bulk_tag,
                     AppMenuAction::AddTag,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Remove Typed Tag",
+                    app_menu_action_label(labels, "RemoveTag", "Remove Typed Tag"),
                     "",
                     has_bulk_tag,
                     AppMenuAction::RemoveTag,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Delete From Library...",
+                    app_menu_action_label(labels, "DeleteFromLibrary", "Delete From Library..."),
                     "Delete",
                     has_selection,
                     AppMenuAction::DeleteFromLibrary,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ));
         }
         AppMenu::View => {
             panel = panel
                 .push(app_menu_item(
                     if app.compact_view_mode {
-                        "Switch to Grid"
+                        app_menu_action_label(labels, "ToggleLayoutGrid", "Switch to Grid")
                     } else {
-                        "Switch to List"
+                        app_menu_action_label(labels, "ToggleLayoutList", "Switch to List")
                     },
                     "",
                     true,
                     AppMenuAction::ToggleLayout,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
                     match app.theme {
-                        AppTheme::Light => "Switch to Dark Theme",
-                        AppTheme::Dark => "Switch to Light Theme",
+                        AppTheme::Light => {
+                            app_menu_action_label(labels, "ToggleThemeDark", "Switch to Dark Theme")
+                        }
+                        AppTheme::Dark => app_menu_action_label(
+                            labels,
+                            "ToggleThemeLight",
+                            "Switch to Light Theme",
+                        ),
                     },
                     "",
                     true,
                     AppMenuAction::ToggleTheme,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Reload Styles",
+                    app_menu_action_label(labels, "ReloadStyles", "Reload Styles"),
                     "",
                     true,
                     AppMenuAction::ReloadStyles,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
                     if app.toc_open {
-                        "Hide Table of Contents"
+                        app_menu_action_label(labels, "ToggleTocHide", "Hide Table of Contents")
                     } else {
-                        "Show Table of Contents"
+                        app_menu_action_label(labels, "ToggleTocShow", "Show Table of Contents")
                     },
                     "",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::ToggleToc,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Jump to Page...",
+                    app_menu_action_label(labels, "JumpToPage", "Jump to Page..."),
                     "Ctrl+G",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::JumpToPage,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
-                    "Zoom In",
+                    app_menu_action_label(labels, "ZoomIn", "Zoom In"),
                     "Ctrl++",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::ZoomIn,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Zoom Out",
+                    app_menu_action_label(labels, "ZoomOut", "Zoom Out"),
                     "Ctrl+-",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::ZoomOut,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Reset Zoom",
+                    app_menu_action_label(labels, "ResetZoom", "Reset Zoom"),
                     "Ctrl+0",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::ResetZoom,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ));
         }
         AppMenu::Document => {
             panel = panel
                 .push(app_menu_item(
-                    "Jump to Page...",
+                    app_menu_action_label(labels, "JumpToPage", "Jump to Page..."),
                     "Ctrl+G",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::JumpToPage,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
                     if app.toc_open {
-                        "Hide Table of Contents"
+                        app_menu_action_label(labels, "ToggleTocHide", "Hide Table of Contents")
                     } else {
-                        "Show Table of Contents"
+                        app_menu_action_label(labels, "ToggleTocShow", "Show Table of Contents")
                     },
                     "",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::ToggleToc,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
-                    "Zoom In",
+                    app_menu_action_label(labels, "ZoomIn", "Zoom In"),
                     "Ctrl++",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::ZoomIn,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Zoom Out",
+                    app_menu_action_label(labels, "ZoomOut", "Zoom Out"),
                     "Ctrl+-",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::ZoomOut,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Reset Zoom",
+                    app_menu_action_label(labels, "ResetZoom", "Reset Zoom"),
                     "Ctrl+0",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::ResetZoom,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ));
         }
         AppMenu::Library => {
@@ -4560,53 +4783,63 @@ fn app_menu_panel<'a>(
             let has_active_folder = app.selected_folder.is_some();
             panel = panel
                 .push(app_menu_item(
-                    "Import Folder...",
+                    app_menu_action_label(labels, "ImportFolder", "Import Folder..."),
                     "",
                     app.mode == AppMode::Library,
                     AppMenuAction::ImportFolder,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Refresh Library",
+                    app_menu_action_label(labels, "RefreshLibrary", "Refresh Library"),
                     "F5",
                     app.mode == AppMode::Library,
                     AppMenuAction::RefreshLibrary,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "New Folder...",
+                    app_menu_action_label(labels, "CreateFolder", "New Folder..."),
                     "",
                     app.mode == AppMode::Library,
                     AppMenuAction::CreateFolder,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
-                    "Add Selection to Current Folder",
+                    app_menu_action_label(labels, "AddToFolder", "Add Selection to Current Folder"),
                     "",
                     has_selection && has_active_folder,
                     AppMenuAction::AddToFolder,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Remove Selection from Current Folder",
+                    app_menu_action_label(
+                        labels,
+                        "RemoveFromFolder",
+                        "Remove Selection from Current Folder",
+                    ),
                     "",
                     has_selection && has_active_folder,
                     AppMenuAction::RemoveFromFolder,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_separator(tokens));
             for sort_mode in LIBRARY_SORT_OPTIONS {
                 panel = panel.push(app_menu_item(
                     sort_mode.label(),
                     if app.library_sort_mode == sort_mode {
-                        "Selected"
+                        label_text(labels, "sort_selected", "Selected")
                     } else {
                         ""
                     },
                     app.mode == AppMode::Library,
                     AppMenuAction::SortLibrary(sort_mode),
                     tokens,
+                    app.layout().app_menu_item_height,
                 ));
             }
         }
@@ -4614,59 +4847,74 @@ fn app_menu_panel<'a>(
             let has_selection = !app.selected_library_entries.is_empty();
             panel = panel
                 .push(app_menu_item(
-                    "Apply Title Sort Cleanup",
+                    app_menu_action_label(labels, "SortTitles", "Apply Title Sort Cleanup"),
                     "",
                     has_selection,
                     AppMenuAction::SortTitles,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Refresh PDF Metadata",
+                    app_menu_action_label(labels, "RefreshMetadata", "Refresh PDF Metadata"),
                     "",
                     has_selection,
                     AppMenuAction::RefreshMetadata,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Reset Display Metadata...",
+                    app_menu_action_label(labels, "ResetMetadata", "Reset Display Metadata..."),
                     "",
                     has_selection,
                     AppMenuAction::ResetMetadata,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
-                    "Rebuild Thumbnails",
+                    app_menu_action_label(labels, "RebuildThumbnails", "Rebuild Thumbnails"),
                     "",
                     has_selection,
                     AppMenuAction::RebuildThumbnails,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    "Reindex Full Text",
+                    app_menu_action_label(labels, "Reindex", "Reindex Full Text"),
                     "",
                     has_selection,
                     AppMenuAction::Reindex,
                     tokens,
+                    app.layout().app_menu_item_height,
                 ));
         }
         AppMenu::Help => {
             panel = panel
                 .push(app_menu_static_item(
-                    "PDF-Folio",
-                    "Local PDF library and reader",
+                    label_text(labels, "help_product_name", "PDF-Folio"),
+                    label_text(
+                        labels,
+                        "help_product_detail",
+                        "Local PDF library and reader",
+                    ),
                     tokens,
+                    app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_static_item(
-                    "Status",
-                    "No help actions available yet",
+                    label_text(labels, "help_status_label", "Status"),
+                    label_text(
+                        labels,
+                        "help_status_detail",
+                        "No help actions available yet",
+                    ),
                     tokens,
+                    app.layout().app_menu_item_height,
                 ));
         }
     }
 
     container(panel)
-        .width(APP_MENU_PANEL_WIDTH)
+        .width(app.layout().app_menu_panel_width)
         .style(move |_| {
             let mut style = container_style(tokens, Class::MenuPanel);
             style.shadow = iced::Shadow {
@@ -4685,6 +4933,7 @@ fn app_menu_item<'a>(
     enabled: bool,
     action: AppMenuAction,
     tokens: ThemeTokens,
+    item_height: f32,
 ) -> Element<'a, Message> {
     let label_color = if enabled {
         tokens.text_primary
@@ -4714,7 +4963,7 @@ fn app_menu_item<'a>(
 
     if enabled {
         button(content)
-            .height(APP_MENU_ITEM_HEIGHT)
+            .height(item_height)
             .width(Length::Fill)
             .padding([Spacing::XS, Spacing::MD])
             .on_press(Message::AppMenuActionSelected(action))
@@ -4722,7 +4971,7 @@ fn app_menu_item<'a>(
             .into()
     } else {
         container(content)
-            .height(APP_MENU_ITEM_HEIGHT)
+            .height(item_height)
             .width(Length::Fill)
             .padding([Spacing::XS, Spacing::MD])
             .style(move |_| {
@@ -4738,6 +4987,7 @@ fn app_menu_static_item<'a>(
     label: &'a str,
     detail: &'a str,
     tokens: ThemeTokens,
+    _item_height: f32,
 ) -> Element<'a, Message> {
     container(
         column![
@@ -4776,7 +5026,7 @@ fn view_selection_context_row(app: &PDFolioApp, tokens: ThemeTokens) -> Element<
     let mut controls = row![]
         .spacing(Spacing::SM)
         .padding([Spacing::SM, Spacing::MD])
-        .height(SELECTION_CONTEXT_ROW_HEIGHT)
+        .height(app.layout().selection_context_row_height)
         .align_y(iced::Alignment::Center)
         .push(selected_label)
         .push(toolbar_button("Clear", tokens).on_press(Message::ClearLibrarySelection));
@@ -4906,7 +5156,7 @@ fn view_selection_menu_dropdown(app: &PDFolioApp, tokens: ThemeTokens) -> Elemen
     let Some(menu) = app.open_selection_menu else {
         return container("").into();
     };
-    pin(selection_menu_panel(menu, tokens))
+    pin(selection_menu_panel(app, menu, tokens))
         .x(selection_menu_x(app, menu))
         .y(app_menu_bar_height(app))
         .width(Length::Fill)
@@ -4929,7 +5179,12 @@ fn selection_menu_x(app: &PDFolioApp, menu: SelectionMenu) -> f32 {
     }
 }
 
-fn selection_menu_panel(menu: SelectionMenu, tokens: ThemeTokens) -> Element<'static, Message> {
+fn selection_menu_panel<'a>(
+    app: &'a PDFolioApp,
+    menu: SelectionMenu,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let labels = app.labels();
     let actions: &'static [SelectionToolbarAction] = match menu {
         SelectionMenu::More => &SINGLE_MORE_ACTIONS,
         SelectionMenu::Tags => &BULK_TAG_ACTIONS,
@@ -4939,11 +5194,16 @@ fn selection_menu_panel(menu: SelectionMenu, tokens: ThemeTokens) -> Element<'st
     };
     let mut panel = column![].spacing(2.0).padding(Spacing::XS);
     for action in actions {
-        panel = panel.push(selection_menu_item(*action, tokens));
+        panel = panel.push(selection_menu_item(
+            *action,
+            tokens,
+            labels,
+            app.layout().app_menu_item_height,
+        ));
     }
 
     container(panel)
-        .width(APP_MENU_PANEL_WIDTH)
+        .width(app.layout().app_menu_panel_width)
         .style(move |_| {
             let mut style = container_style(tokens, Class::MenuPanel);
             style.shadow = iced::Shadow {
@@ -4956,19 +5216,99 @@ fn selection_menu_panel(menu: SelectionMenu, tokens: ThemeTokens) -> Element<'st
         .into()
 }
 
+fn app_menu_label<'a>(labels: &'a crate::style::AppLabelTokens, menu: AppMenu) -> &'a str {
+    labels.get(LabelSection::AppMenu, app_menu_key(menu), menu.label())
+}
+
+fn app_menu_action_label<'a>(
+    labels: &'a crate::style::AppLabelTokens,
+    key: &str,
+    fallback: &'a str,
+) -> &'a str {
+    labels.get(LabelSection::AppMenuAction, key, fallback)
+}
+
+fn selection_toolbar_action_label<'a>(
+    labels: &'a crate::style::AppLabelTokens,
+    action: SelectionToolbarAction,
+) -> &'a str {
+    labels.get(
+        LabelSection::SelectionToolbarAction,
+        selection_toolbar_action_key(action),
+        action.label(),
+    )
+}
+
+fn library_sidebar_tab_label<'a>(
+    labels: &'a crate::style::AppLabelTokens,
+    tab: LibrarySidebarTab,
+) -> &'a str {
+    labels.get(
+        LabelSection::LibrarySidebarTab,
+        library_sidebar_tab_key(tab),
+        tab.label(),
+    )
+}
+
+fn label_text<'a>(
+    labels: &'a crate::style::AppLabelTokens,
+    key: &str,
+    fallback: &'a str,
+) -> &'a str {
+    labels.get(LabelSection::Text, key, fallback)
+}
+
+fn app_menu_key(menu: AppMenu) -> &'static str {
+    match menu {
+        AppMenu::File => "File",
+        AppMenu::Edit => "Edit",
+        AppMenu::View => "View",
+        AppMenu::Document => "Document",
+        AppMenu::Library => "Library",
+        AppMenu::Tools => "Tools",
+        AppMenu::Help => "Help",
+    }
+}
+
+fn library_sidebar_tab_key(tab: LibrarySidebarTab) -> &'static str {
+    match tab {
+        LibrarySidebarTab::Files => "Files",
+        LibrarySidebarTab::Tags => "Tags",
+    }
+}
+
+fn selection_toolbar_action_key(action: SelectionToolbarAction) -> &'static str {
+    match action {
+        SelectionToolbarAction::AddTag => "AddTag",
+        SelectionToolbarAction::RemoveTag => "RemoveTag",
+        SelectionToolbarAction::AddToFolder => "AddToFolder",
+        SelectionToolbarAction::RemoveFromFolder => "RemoveFromFolder",
+        SelectionToolbarAction::SaveDetails => "SaveDetails",
+        SelectionToolbarAction::ResetDetails => "ResetDetails",
+        SelectionToolbarAction::SortTitles => "SortTitles",
+        SelectionToolbarAction::RefreshMetadata => "RefreshMetadata",
+        SelectionToolbarAction::ResetMetadata => "ResetMetadata",
+        SelectionToolbarAction::RebuildThumbnails => "RebuildThumbnails",
+        SelectionToolbarAction::Reindex => "Reindex",
+        SelectionToolbarAction::DeleteMetadata => "DeleteMetadata",
+    }
+}
+
 fn selection_menu_item(
     action: SelectionToolbarAction,
     tokens: ThemeTokens,
-) -> Element<'static, Message> {
+    labels: &crate::style::AppLabelTokens,
+    item_height: f32,
+) -> Element<'_, Message> {
     button(
-        text(action.label())
+        text(selection_toolbar_action_label(labels, action))
             .size(FontSize::MD)
             .font(ui_font(FontWeight::REGULAR))
             .color(tokens.text_primary)
             .wrapping(Wrapping::None)
             .width(Length::Fill),
     )
-    .height(APP_MENU_ITEM_HEIGHT)
+    .height(item_height)
     .width(Length::Fill)
     .padding([Spacing::XS, Spacing::MD])
     .on_press(Message::SelectionToolbarActionSelected(action))
@@ -4995,8 +5335,8 @@ fn app_menu_separator<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
 fn selection_title_input_width(app: &PDFolioApp) -> f32 {
     responsive_selection_input_width(
         app,
-        SELECTION_TITLE_INPUT_MIN_WIDTH,
-        SELECTION_TITLE_INPUT_WIDTH,
+        app.layout().selection_title_input_min_width,
+        app.layout().selection_title_input_width,
         0.34,
     )
 }
@@ -5004,14 +5344,19 @@ fn selection_title_input_width(app: &PDFolioApp) -> f32 {
 fn selection_author_input_width(app: &PDFolioApp) -> f32 {
     responsive_selection_input_width(
         app,
-        SELECTION_AUTHOR_INPUT_MIN_WIDTH,
-        SELECTION_AUTHOR_INPUT_WIDTH,
+        app.layout().selection_author_input_min_width,
+        app.layout().selection_author_input_width,
         0.24,
     )
 }
 
 fn selection_tag_input_width(app: &PDFolioApp) -> f32 {
-    responsive_selection_input_width(app, BULK_TAG_INPUT_MIN_WIDTH, BULK_TAG_INPUT_WIDTH, 0.2)
+    responsive_selection_input_width(
+        app,
+        app.layout().bulk_tag_input_min_width,
+        app.layout().bulk_tag_input_width,
+        0.2,
+    )
 }
 
 fn responsive_selection_input_width(
@@ -5052,7 +5397,7 @@ fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
             .spacing(Spacing::SM)
             .padding(Spacing::MD),
     )
-    .width(VIEWER_SIDEBAR_WIDTH)
+    .width(app.layout().viewer_sidebar_width)
     .height(Length::Fill)
     .style(move |_| container_style(tokens, Class::Sidebar))
     .into()
@@ -5147,7 +5492,7 @@ fn view_jump_dialog(app: &PDFolioApp) -> Element<'_, Message> {
             .on_input(Message::JumpInputChanged)
             .on_submit(Message::SubmitJump)
             .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
-            .width(JUMP_INPUT_WIDTH),
+            .width(app.layout().jump_input_width),
         text(format!("of {max_page}"))
             .size(FontSize::MD)
             .color(tokens.text_secondary),
@@ -5921,6 +6266,27 @@ fn file_size_label(entry: &LibraryEntry) -> String {
     )
 }
 
+fn library_card_metadata_label(entry: &LibraryEntry) -> String {
+    format!(
+        "{}   •   {}",
+        library_card_page_count_label(entry),
+        file_size_label(entry)
+    )
+}
+
+fn library_card_page_count_label(entry: &LibraryEntry) -> String {
+    entry.page_count.map_or_else(
+        || String::from("Unknown pages"),
+        |pages| {
+            if pages == 1 {
+                String::from("1 page")
+            } else {
+                format!("{pages} pages")
+            }
+        },
+    )
+}
+
 fn format_file_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -6021,7 +6387,7 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
             return None;
         };
 
-        let (delta_x, delta_y) = scroll_delta_pixels(*delta);
+        let (delta_x, delta_y) = scroll_delta_pixels(*delta, self.app.layout().line_scroll_pixels);
 
         let cursor = cursor
             .position_in(bounds)
@@ -6227,83 +6593,62 @@ fn watch_style_directories_stream(
 ) -> impl iced::futures::Stream<Item = Message> {
     let paths = paths.clone();
     stream::channel(20, async move |mut output| {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let mut watcher =
-            match notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                let Ok(event) = event else {
-                    return;
-                };
-                let is_style_change = matches!(
-                    event.kind,
-                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-                ) && event.paths.iter().any(|path| {
-                    path.extension()
-                        .and_then(|extension| extension.to_str())
-                        .is_some_and(|extension| extension.eq_ignore_ascii_case("kdl"))
-                });
-                if is_style_change {
-                    let _ = sender.send(());
-                }
-            }) {
-                Ok(watcher) => watcher,
-                Err(error) => {
-                    let _ = output
-                        .send(Message::LibraryError(format!(
-                            "Could not watch styles: {error}"
-                        )))
-                        .await;
-                    return;
-                }
-            };
-
-        let mut watched_any = false;
-        for path in paths.iter().filter(|path| path.exists()) {
-            if let Err(error) = watcher.watch(path, RecursiveMode::Recursive) {
-                let _ = output
-                    .send(Message::LibraryError(format!(
-                        "Could not watch {}: {error}",
-                        path.display()
-                    )))
-                    .await;
-            } else {
-                watched_any = true;
-            }
-        }
-
-        if !watched_any {
+        if paths.iter().all(|path| !path.exists()) {
             return;
         }
 
-        let receiver = Arc::new(std::sync::Mutex::new(receiver));
+        let mut snapshot = style_files_snapshot(&paths);
         loop {
-            let blocking_receiver = Arc::clone(&receiver);
-            let event = tokio::task::spawn_blocking(move || {
-                blocking_receiver
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .recv()
-            })
-            .await;
-
-            let Ok(Ok(())) = event else {
-                break;
-            };
-
-            tokio::time::sleep(Duration::from_millis(180)).await;
-            while receiver
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .try_recv()
-                .is_ok()
-            {}
-
-            if output.send(Message::ReloadStyles).await.is_err() {
-                break;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let next_snapshot = style_files_snapshot(&paths);
+            if next_snapshot != snapshot {
+                snapshot = next_snapshot;
+                if output.send(Message::ReloadStyles).await.is_err() {
+                    break;
+                }
             }
         }
-
-        drop(watcher);
     })
+}
+
+fn style_files_snapshot(paths: &[PathBuf]) -> Vec<(PathBuf, Option<SystemTime>, u64)> {
+    let mut files = Vec::new();
+    for path in paths {
+        collect_style_files(path, &mut files);
+    }
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    files.dedup_by(|left, right| left.0 == right.0);
+    files
+}
+
+fn collect_style_files(
+    path: &std::path::Path,
+    files: &mut Vec<(PathBuf, Option<SystemTime>, u64)>,
+) {
+    if path.is_file() {
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("kdl"))
+        {
+            let metadata = std::fs::metadata(path).ok();
+            files.push((
+                path.to_path_buf(),
+                metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.modified().ok()),
+                metadata.as_ref().map_or(0, std::fs::Metadata::len),
+            ));
+        }
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        collect_style_files(&entry.path(), files);
+    }
 }
 
 fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<Item = Message> {
@@ -6357,9 +6702,9 @@ fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<
     })
 }
 
-fn scroll_delta_pixels(delta: mouse::ScrollDelta) -> (f32, f32) {
+fn scroll_delta_pixels(delta: mouse::ScrollDelta, line_scroll_pixels: f32) -> (f32, f32) {
     match delta {
-        mouse::ScrollDelta::Lines { x, y } => (x * LINE_SCROLL_PIXELS, y * LINE_SCROLL_PIXELS),
+        mouse::ScrollDelta::Lines { x, y } => (x * line_scroll_pixels, y * line_scroll_pixels),
         mouse::ScrollDelta::Pixels { x, y } => (x, y),
     }
 }

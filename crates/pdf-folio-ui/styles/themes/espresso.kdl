@@ -1,5 +1,5 @@
 theme "espresso" {
-    color "background" "#1A1006"
+    color "background" "#0F0A04"
     color "surface" "#0E0904"
     color "surface_raised" "#23180C"
     color "text_primary" "#DDD0BA"

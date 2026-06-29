@@ -1,5 +1,5 @@
 component "AppShell" {
-    normal background="#1A1006" text="#DDD0BA" border_width=0 radius=0 theme="espresso"
+    normal background="#0F0A04" text="#DDD0BA" border_width=0 radius=0 theme="espresso"
     normal background="#F1EFE9" text="#261E14" border_width=0 radius=0 theme="light"
 }
 
@@ -31,7 +31,7 @@ component "MenuPanel" {
 component "MenuItem" {
     normal background="#23180C" text="#DDD0BA" border="#00000000" border_width=0 radius=4 theme="espresso"
     hovered background="#2B1D0E" text="#D4A853" border="#D4A85340" border_width=1 theme="espresso"
-    disabled background="#1A1006" text="#7A6A58" border="#00000000" border_width=0 theme="espresso"
+    disabled background="#0F0A04" text="#7A6A58" border="#00000000" border_width=0 theme="espresso"
 
     normal background="#F6F2EA" text="#261E14" border="#00000000" border_width=0 radius=4 theme="light"
     hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" border_width=1 theme="light"
@@ -76,4 +76,24 @@ component "ErrorBanner" {
 component "ProgressBar" {
     normal background="#C8B89A1A" text="#D4A853" border="#00000000" border_width=0 radius=2 theme="espresso"
     normal background="#D8CEBC" text="#9C732B" border="#00000000" border_width=0 radius=2 theme="light"
+}
+
+component "TocEntry" {
+    normal background="#0E0904" text="#8B6E52" border="#00000000" border_width=0 radius=4 theme="espresso"
+    hovered background="#160F07" text="#DDD0BA" theme="espresso"
+    pressed background="#211609" text="#D4A853" theme="espresso"
+
+    normal background="#FCFAF5" text="#745F46" border="#00000000" border_width=0 radius=4 theme="light"
+    hovered background="#F6F2EA" text="#261E14" theme="light"
+    pressed background="#EAE0CF" text="#9C732B" theme="light"
+}
+
+component "PagePlaceholder" {
+    normal background="#211609" text="#8B6E52" border="#C8B89A1A" border_width=1 radius=6 theme="espresso"
+    normal background="#F6F2EA" text="#745F46" border="#D8CEBC" border_width=1 radius=6 theme="light"
+}
+
+component "ViewerCanvas" {
+    normal background="#170E05" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal background="#E8E2D8" text="#261E14" border="#00000000" border_width=0 radius=0 theme="light"
 }
