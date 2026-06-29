@@ -3,7 +3,7 @@
 use iced::widget::{button, container, pick_list, progress_bar, scrollable, text_input};
 use iced::{overlay, Background, Border, Color, Shadow as IcedShadow, Vector};
 
-use super::tokens::{BorderWidth, CornerRadius, Radius, ThemeTokens, VisualStyle};
+use super::tokens::{BorderWidth, CornerRadius, Radius, ThemeTokens, VisualBorder, VisualStyle};
 
 /// Semantic style classes used by UI widgets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -210,6 +210,41 @@ trait VisualOverride {
     fn with_visual_override(self, style: VisualStyle) -> Self;
 }
 
+fn apply_border_override(border: &mut Border, style: VisualStyle) {
+    if let Some(border_color) = style.border_color {
+        border.color = border_color;
+    }
+    if let Some(border_width) = style.border_width {
+        border.width = border_width;
+    }
+    if style.border.is_some() {
+        border.width = 0.0;
+    }
+}
+
+/// Returns a custom border for class styles that provide side-aware border data.
+pub fn side_border_for_style(style: VisualStyle) -> Option<VisualBorder> {
+    style.border.filter(visual_border_has_visible_side)
+}
+
+fn visual_border_has_visible_side(border: &VisualBorder) -> bool {
+    [border.top, border.right, border.bottom, border.left]
+        .into_iter()
+        .any(|side| {
+            side.width.is_some_and(|width| width > 0.0)
+                && side.color.is_some_and(|color| color.a > 0.0)
+        })
+}
+
+/// Returns a custom per-side border for a class in a component state.
+pub fn side_border_for_class(
+    tokens: ThemeTokens,
+    class: Class,
+    state: ComponentState,
+) -> Option<VisualBorder> {
+    side_border_for_style(tokens.class_styles[class.index()].resolve(state))
+}
+
 impl VisualOverride for container::Style {
     fn with_visual_override(mut self, style: VisualStyle) -> Self {
         if let Some(background) = style.background {
@@ -218,12 +253,7 @@ impl VisualOverride for container::Style {
         if let Some(text_color) = style.text_color {
             self.text_color = Some(text_color);
         }
-        if let Some(border_color) = style.border_color {
-            self.border.color = border_color;
-        }
-        if let Some(border_width) = style.border_width {
-            self.border.width = border_width;
-        }
+        apply_border_override(&mut self.border, style);
         if let Some(radius) = style.radius {
             self.border.radius = radius.into();
         }
@@ -239,12 +269,7 @@ impl VisualOverride for button::Style {
         if let Some(text_color) = style.text_color {
             self.text_color = text_color;
         }
-        if let Some(border_color) = style.border_color {
-            self.border.color = border_color;
-        }
-        if let Some(border_width) = style.border_width {
-            self.border.width = border_width;
-        }
+        apply_border_override(&mut self.border, style);
         if let Some(radius) = style.radius {
             self.border.radius = radius.into();
         }
@@ -260,12 +285,7 @@ impl VisualOverride for pick_list::Style {
         if let Some(text_color) = style.text_color {
             self.text_color = text_color;
         }
-        if let Some(border_color) = style.border_color {
-            self.border.color = border_color;
-        }
-        if let Some(border_width) = style.border_width {
-            self.border.width = border_width;
-        }
+        apply_border_override(&mut self.border, style);
         if let Some(radius) = style.radius {
             self.border.radius = radius.into();
         }
@@ -281,12 +301,7 @@ impl VisualOverride for text_input::Style {
         if let Some(text_color) = style.text_color {
             self.value = text_color;
         }
-        if let Some(border_color) = style.border_color {
-            self.border.color = border_color;
-        }
-        if let Some(border_width) = style.border_width {
-            self.border.width = border_width;
-        }
+        apply_border_override(&mut self.border, style);
         if let Some(radius) = style.radius {
             self.border.radius = radius.into();
         }
@@ -746,5 +761,16 @@ mod tests {
 
         assert_ne!(active.background, hovered.background);
         assert_ne!(hovered.background, pressed.background);
+    }
+
+    #[test]
+    fn visible_visual_borders_use_custom_border_path() {
+        let border = VisualBorder::uniform(7.0, Color::BLACK);
+        let style = VisualStyle {
+            border: Some(border),
+            ..VisualStyle::EMPTY
+        };
+
+        assert_eq!(side_border_for_style(style), Some(border));
     }
 }

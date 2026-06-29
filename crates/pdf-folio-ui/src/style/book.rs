@@ -10,8 +10,9 @@ use kdl::{KdlDocument, KdlNode, KdlValue};
 
 use super::classes::{mix_color, Class, ComponentState};
 use super::tokens::{
-    AppLabelTokens, AppLayoutTokens, BoxSpacing, ClassStyle, ComponentLayout, ComponentTextStyle,
-    CornerRadius, LabelSection, PrimitiveTokens, ThemeTokens, VisualStyle,
+    AppLabelTokens, AppLayoutTokens, BorderSide, BoxSpacing, ClassStyle, ComponentLayout,
+    ComponentTextStyle, CornerRadius, LabelSection, PrimitiveTokens, ThemeTokens, VisualBorder,
+    VisualStyle,
 };
 
 const BUNDLED_STYLE_FILES: [(&str, &str); 6] = [
@@ -812,10 +813,22 @@ fn parse_visual_style(
                 style.text_color = Some(parse_color_value(name, entry.value(), tokens)?)
             }
             "border" | "border_color" => {
-                style.border_color = Some(parse_color_value(name, entry.value(), tokens)?)
+                let color = parse_color_value(name, entry.value(), tokens)?;
+                style.border_color = Some(color);
+                style.border = Some(merge_uniform_border_property(
+                    style.border,
+                    style.border_width,
+                    Some(color),
+                ));
             }
             "border_width" => {
-                style.border_width = Some(value_as_f32(name, entry.value())?);
+                let width = value_as_f32(name, entry.value())?;
+                style.border_width = Some(width);
+                style.border = Some(merge_uniform_border_property(
+                    style.border,
+                    Some(width),
+                    style.border_color,
+                ));
             }
             "radius" => {
                 style.radius = Some(CornerRadius::uniform(value_as_f32(name, entry.value())?));
@@ -863,7 +876,13 @@ fn parse_visual_colors(
                 style.text_color = Some(parse_color_value(name, entry.value(), tokens)?)
             }
             "border" | "border_color" => {
-                style.border_color = Some(parse_color_value(name, entry.value(), tokens)?)
+                let color = parse_color_value(name, entry.value(), tokens)?;
+                style.border_color = Some(color);
+                style.border = Some(merge_uniform_border_property(
+                    style.border,
+                    style.border_width,
+                    Some(color),
+                ));
             }
             other => return Err(format!("{name}: unsupported color property `{other}`")),
         }
@@ -877,16 +896,24 @@ fn parse_visual_border(
     tokens: &ThemeTokens,
     style: &mut VisualStyle,
 ) -> Result<(), String> {
+    let mut border = style
+        .border
+        .unwrap_or_else(|| VisualBorder::from_legacy(style.border_width, style.border_color));
+
     for entry in node.entries() {
         let Some(property) = entry.name().map(|name| name.value()) else {
             continue;
         };
         match property {
             "width" | "border_width" => {
-                style.border_width = Some(value_as_f32(name, entry.value())?);
+                let width = value_as_f32(name, entry.value())?;
+                style.border_width = Some(width);
+                border = apply_border_width(border, width);
             }
             "color" | "border" | "border_color" => {
-                style.border_color = Some(parse_color_value(name, entry.value(), tokens)?);
+                let color = parse_color_value(name, entry.value(), tokens)?;
+                style.border_color = Some(color);
+                border = apply_border_color(border, color);
             }
             "radius" => {
                 style.radius = Some(CornerRadius::uniform(value_as_f32(name, entry.value())?));
@@ -894,7 +921,69 @@ fn parse_visual_border(
             other => return Err(format!("{name}: unsupported border property `{other}`")),
         }
     }
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            let side = parse_border_side(name, child, tokens)?;
+            match child.name().value() {
+                "top" => border.top = border.top.merged(side),
+                "right" => border.right = border.right.merged(side),
+                "bottom" => border.bottom = border.bottom.merged(side),
+                "left" => border.left = border.left.merged(side),
+                other => return Err(format!("{name}: unsupported border side `{other}`")),
+            }
+        }
+    }
+    style.border = Some(border);
+    if let Some((width, color)) = border.uniform_style() {
+        style.border_width = Some(width);
+        style.border_color = Some(color);
+    }
     Ok(())
+}
+
+fn parse_border_side(
+    name: &str,
+    node: &KdlNode,
+    tokens: &ThemeTokens,
+) -> Result<BorderSide, String> {
+    let mut side = BorderSide::EMPTY;
+    for entry in node.entries() {
+        let Some(property) = entry.name().map(|name| name.value()) else {
+            continue;
+        };
+        match property {
+            "width" | "border_width" => side.width = Some(value_as_f32(name, entry.value())?),
+            "color" | "border" | "border_color" => {
+                side.color = Some(parse_color_value(name, entry.value(), tokens)?);
+            }
+            other => {
+                return Err(format!(
+                    "{name}: unsupported border side property `{other}`"
+                ))
+            }
+        }
+    }
+    Ok(side)
+}
+
+const fn merge_uniform_border_property(
+    current: Option<VisualBorder>,
+    width: Option<f32>,
+    color: Option<Color>,
+) -> VisualBorder {
+    let overlay = VisualBorder::from_legacy(width, color);
+    match current {
+        Some(border) => border.merged(overlay),
+        None => overlay,
+    }
+}
+
+const fn apply_border_width(border: VisualBorder, width: f32) -> VisualBorder {
+    border.merged(VisualBorder::from_legacy(Some(width), None))
+}
+
+const fn apply_border_color(border: VisualBorder, color: Color) -> VisualBorder {
+    border.merged(VisualBorder::from_legacy(None, Some(color)))
 }
 
 fn parse_corner_radius(
@@ -1322,32 +1411,91 @@ fn style_source_dirs() -> Vec<PathBuf> {
 
 fn bundled_style_sources() -> Result<Vec<(String, String)>, String> {
     let bundled_dir = bundled_style_dir();
-    BUNDLED_STYLE_FILES
-        .iter()
-        .map(|(relative, fallback)| {
-            let path = bundled_dir.join(relative.strip_prefix("styles/").unwrap_or(relative));
-            if path.exists() {
-                let source = std::fs::read_to_string(&path)
-                    .map_err(|error| format!("{}: {error}", path.display()))?;
-                Ok((path.display().to_string(), source))
-            } else {
-                Ok(((*relative).to_owned(), (*fallback).to_owned()))
-            }
-        })
-        .collect()
+    let disk_files = style_files_in_dir(&bundled_dir);
+    let mut sources = Vec::new();
+
+    for (relative, fallback) in BUNDLED_STYLE_FILES {
+        let relative_path = relative.strip_prefix("styles/").unwrap_or(relative);
+        let path = bundled_dir.join(relative_path);
+        if path.exists() {
+            let source = std::fs::read_to_string(&path)
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+            sources.push((path.display().to_string(), source));
+        } else {
+            sources.push((relative.to_owned(), fallback.to_owned()));
+        }
+    }
+
+    for path in disk_files {
+        if bundled_style_relative_path(&bundled_dir, &path).is_some_and(|relative| {
+            BUNDLED_STYLE_FILES
+                .iter()
+                .any(|(bundled, _)| bundled.strip_prefix("styles/").unwrap_or(bundled) == relative)
+        }) {
+            continue;
+        }
+
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        sources.push((path.display().to_string(), source));
+    }
+
+    Ok(sources)
 }
 
 fn user_style_files(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut files = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "kdl"))
-        .collect::<Vec<_>>();
+    style_files_in_dir(dir)
+}
+
+fn style_files_in_dir(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_kdl_files(dir, &mut files);
     files.sort();
+    files.sort_by_key(|path| style_file_order_key(dir, path));
     files
+}
+
+fn collect_kdl_files(path: &Path, files: &mut Vec<PathBuf>) {
+    if path.is_file() {
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("kdl"))
+        {
+            files.push(path.to_path_buf());
+        }
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        collect_kdl_files(&entry.path(), files);
+    }
+}
+
+fn style_file_order_key(root: &Path, path: &Path) -> (u8, PathBuf) {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let first_component = relative
+        .components()
+        .next()
+        .and_then(|component| component.as_os_str().to_str());
+    let file_stem = relative.file_stem().and_then(|stem| stem.to_str());
+    let group = match (first_component, file_stem) {
+        (Some("themes"), _) | (_, Some("theme" | "themes")) => 0,
+        (Some("components"), _) | (_, Some("component" | "components")) => 1,
+        (Some("application.kdl"), _) | (_, Some("application")) => 2,
+        _ => 3,
+    };
+    (group, relative.to_path_buf())
+}
+
+fn bundled_style_relative_path<'a>(root: &'a Path, path: &'a Path) -> Option<String> {
+    path.strip_prefix(root)
+        .ok()
+        .and_then(|path| path.to_str())
+        .map(|path| path.replace(std::path::MAIN_SEPARATOR, "/"))
 }
 
 /// Built-in dark fallback used when style loading fails before app startup.
@@ -1412,6 +1560,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
                 text_color: Some(tokens.text_primary),
                 border_color: Some(tokens.border),
                 border_width: Some(1.0),
+                border: Some(VisualBorder::uniform(1.0, tokens.border)),
                 radius: Some(CornerRadius::uniform(0.0)),
             },
         );
@@ -1450,6 +1599,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
                 text_color: Some(tokens.text_primary),
                 border_color: Some(tokens.border),
                 border_width: Some(1.0),
+                border: Some(VisualBorder::uniform(1.0, tokens.border)),
                 radius: Some(CornerRadius::uniform(6.0)),
             },
         );
@@ -1477,6 +1627,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
                 text_color: Some(tokens.text_primary),
                 border_color: Some(tokens.border),
                 border_width: Some(1.0),
+                border: Some(VisualBorder::uniform(1.0, tokens.border)),
                 radius: Some(CornerRadius::uniform(6.0)),
             },
         );
@@ -1521,6 +1672,68 @@ mod tests {
         let style_book = StyleBook::bundled();
         let tokens = style_book.tokens("espresso");
         assert_eq!(tokens.accent, Color::from_rgb8(212, 168, 83));
+    }
+
+    #[test]
+    fn bundled_sources_include_every_bundled_kdl_file() {
+        let bundled_dir = bundled_style_dir();
+        let sources = bundled_style_sources().expect("bundled sources should load");
+        let source_names = sources
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+
+        for path in style_files_in_dir(&bundled_dir) {
+            let source_name = path.display().to_string();
+            assert!(
+                source_names.contains(&source_name.as_str()),
+                "{} should be included in bundled style sources",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_file_tree_active_border_uses_side_widths() {
+        let style_book = StyleBook::bundled();
+
+        let espresso = style_book.tokens("espresso").class_styles[Class::FileTree.index()]
+            .resolve(ComponentState::Active)
+            .border
+            .expect("active espresso file tree border should be set");
+        assert_eq!(espresso.left.width, Some(3.0));
+        assert!(espresso.uniform_style().is_none());
+
+        let light = style_book.tokens("light").class_styles[Class::FileTree.index()]
+            .resolve(ComponentState::Active)
+            .border
+            .expect("active light file tree border should be set");
+        assert_eq!(light.left.width, Some(20.0));
+        assert!(light.uniform_style().is_none());
+    }
+
+    #[test]
+    fn user_style_files_include_nested_kdl_files() {
+        let root =
+            std::env::temp_dir().join(format!("pdf-folio-style-test-{}", std::process::id()));
+        let nested = root.join("components").join("library");
+        std::fs::create_dir_all(&nested).expect("nested test style dir should be created");
+        let top_level = root.join("theme.kdl");
+        let nested_file = nested.join("sidebar.kdl");
+        std::fs::write(&top_level, "").expect("top-level test style should be written");
+        std::fs::write(&nested_file, "").expect("nested test style should be written");
+
+        let files = user_style_files(&root);
+
+        assert!(files.contains(&top_level));
+        assert!(files.contains(&nested_file));
+        assert!(
+            files.iter().position(|path| path == &top_level)
+                < files.iter().position(|path| path == &nested_file),
+            "theme overrides should be loaded before component overrides"
+        );
+
+        std::fs::remove_dir_all(&root).expect("test style dir should be removed");
     }
 
     #[test]
@@ -1575,5 +1788,72 @@ mod tests {
             tokens.class_styles[Class::ToolbarButton.index()].resolve(ComponentState::Normal);
         assert_eq!(style.background, Some(tokens.surface));
         assert!(style.text_color.is_some());
+    }
+
+    #[test]
+    fn border_shorthand_applies_to_all_sides() {
+        let style_book = StyleBook::from_sources(
+            vec![(
+                "style.kdl".to_owned(),
+                r##"
+                theme "espresso" {}
+                theme "light" {}
+                component "Toolbar" {
+                    normal {
+                        border width=0 color="#00000000"
+                    }
+                }
+                "##
+                .to_owned(),
+            )],
+            Vec::new(),
+        )
+        .expect("style book should compile");
+
+        let style = style_book.tokens("espresso").class_styles[Class::Toolbar.index()]
+            .resolve(ComponentState::Normal);
+        let border = style.border.expect("border should be set");
+        assert_eq!(border.uniform_style(), Some((0.0, Color::TRANSPARENT)));
+    }
+
+    #[test]
+    fn border_sides_can_override_width_and_color_independently() {
+        let style_book = StyleBook::from_sources(
+            vec![(
+                "style.kdl".to_owned(),
+                r##"
+                theme "espresso" {}
+                theme "light" {}
+                component "Toolbar" {
+                    normal {
+                        border width=1 color="#111111" {
+                            top width=2 color="#222222"
+                            right width=3 color="#333333"
+                            bottom width=4 color="#444444"
+                            left width=0 color="#00000000"
+                        }
+                    }
+                }
+                "##
+                .to_owned(),
+            )],
+            Vec::new(),
+        )
+        .expect("style book should compile");
+
+        let style = style_book.tokens("espresso").class_styles[Class::Toolbar.index()]
+            .resolve(ComponentState::Normal);
+        let border = style.border.expect("border should be set");
+        assert_eq!(border.top.width, Some(2.0));
+        assert_eq!(border.top.color, Some(Color::from_rgb8(0x22, 0x22, 0x22)));
+        assert_eq!(border.right.width, Some(3.0));
+        assert_eq!(border.right.color, Some(Color::from_rgb8(0x33, 0x33, 0x33)));
+        assert_eq!(border.bottom.width, Some(4.0));
+        assert_eq!(
+            border.bottom.color,
+            Some(Color::from_rgb8(0x44, 0x44, 0x44))
+        );
+        assert_eq!(border.left.width, Some(0.0));
+        assert_eq!(border.left.color, Some(Color::TRANSPARENT));
     }
 }

@@ -101,7 +101,9 @@ component "FileTree" {
     }
     active theme="espresso" {
         colors background="#4A3515" text="$text_primary" border="#00000000"
-        border width=0 color="#00000000"
+        border width=0 color="#00000000" {
+            left width=6 color="$accent"
+        }
         radius 0
     }
 
@@ -117,7 +119,9 @@ component "FileTree" {
     }
     active theme="light" {
         colors background="#E6D9C7" text="$text_primary" border="#00000000"
-        border width=0 color="#00000000"
+        border width=0 color="#00000000" {
+            left width=12 color="$accent"
+        }
         radius 3
     }
 }

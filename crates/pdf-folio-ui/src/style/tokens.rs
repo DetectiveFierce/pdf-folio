@@ -276,6 +276,8 @@ pub struct VisualStyle {
     pub border_color: Option<Color>,
     /// Border width override.
     pub border_width: Option<f32>,
+    /// Per-side border overrides.
+    pub border: Option<VisualBorder>,
     /// Radius override.
     pub radius: Option<CornerRadius>,
 }
@@ -287,6 +289,7 @@ impl VisualStyle {
         text_color: None,
         border_color: None,
         border_width: None,
+        border: None,
         radius: None,
     };
 
@@ -309,10 +312,122 @@ impl VisualStyle {
                 Some(value) => Some(value),
                 None => self.border_width,
             },
+            border: match (self.border, overlay.border) {
+                (Some(base), Some(overlay)) => Some(base.merged(overlay)),
+                (None, Some(overlay)) => Some(overlay),
+                (Some(base), None) => Some(base),
+                (None, None) => None,
+            },
             radius: match overlay.radius {
                 Some(value) => Some(value),
                 None => self.radius,
             },
+        }
+    }
+}
+
+/// Border styling for one side of a component.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BorderSide {
+    /// Side width in logical pixels.
+    pub width: Option<f32>,
+    /// Side color.
+    pub color: Option<Color>,
+}
+
+impl BorderSide {
+    /// Empty side override.
+    pub const EMPTY: Self = Self {
+        width: None,
+        color: None,
+    };
+
+    /// Creates a side with both width and color set.
+    pub const fn new(width: f32, color: Color) -> Self {
+        Self {
+            width: Some(width),
+            color: Some(color),
+        }
+    }
+
+    /// Merges another side override over this one.
+    pub const fn merged(self, overlay: Self) -> Self {
+        Self {
+            width: match overlay.width {
+                Some(value) => Some(value),
+                None => self.width,
+            },
+            color: match overlay.color {
+                Some(value) => Some(value),
+                None => self.color,
+            },
+        }
+    }
+}
+
+/// Border styling for each side of a component.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VisualBorder {
+    /// Top side.
+    pub top: BorderSide,
+    /// Right side.
+    pub right: BorderSide,
+    /// Bottom side.
+    pub bottom: BorderSide,
+    /// Left side.
+    pub left: BorderSide,
+}
+
+impl VisualBorder {
+    /// Empty border override.
+    pub const EMPTY: Self = Self {
+        top: BorderSide::EMPTY,
+        right: BorderSide::EMPTY,
+        bottom: BorderSide::EMPTY,
+        left: BorderSide::EMPTY,
+    };
+
+    /// Creates a border with the same style on each side.
+    pub const fn uniform(width: f32, color: Color) -> Self {
+        let side = BorderSide::new(width, color);
+        Self {
+            top: side,
+            right: side,
+            bottom: side,
+            left: side,
+        }
+    }
+
+    /// Creates a partial border from legacy uniform fields.
+    pub const fn from_legacy(width: Option<f32>, color: Option<Color>) -> Self {
+        let side = BorderSide { width, color };
+        Self {
+            top: side,
+            right: side,
+            bottom: side,
+            left: side,
+        }
+    }
+
+    /// Merges another border override over this one.
+    pub const fn merged(self, overlay: Self) -> Self {
+        Self {
+            top: self.top.merged(overlay.top),
+            right: self.right.merged(overlay.right),
+            bottom: self.bottom.merged(overlay.bottom),
+            left: self.left.merged(overlay.left),
+        }
+    }
+
+    /// Returns the border as a native iced border when all sides match.
+    pub fn uniform_style(self) -> Option<(f32, Color)> {
+        let width = self.top.width?;
+        let color = self.top.color?;
+        let side = BorderSide::new(width, color);
+        if self.right == side && self.bottom == side && self.left == side {
+            Some((width, color))
+        } else {
+            None
         }
     }
 }

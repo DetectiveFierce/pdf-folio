@@ -3,7 +3,11 @@
 use iced::widget::{button, container, progress_bar as iced_progress_bar, text, text_input};
 use iced::{Element, Length};
 
-use super::classes::{button_style, container_style, progress_bar_style, text_input_style, Class};
+use super::classes::{
+    button_style, container_style, progress_bar_style, side_border_for_class, text_input_style,
+    Class, ComponentState,
+};
+use super::side_border::side_border;
 use super::tokens::{
     ui_font, ContentAlignment, FontSize, FontWeight, Spacing, TextAlignment, ThemeTokens,
 };
@@ -161,15 +165,15 @@ pub fn empty_state<'a, Message: 'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    container(
+    let content = container(
         text(label.into())
             .size(FontSize::HEADING)
             .font(ui_font(FontWeight::MEDIUM)),
     )
     .center(Length::Fill)
     .height(Length::Fill)
-    .style(move |_| container_style(tokens, Class::EmptyState))
-    .into()
+    .style(move |_| container_style(tokens, Class::EmptyState));
+    with_normal_side_border(content, tokens, Class::EmptyState)
 }
 
 /// Creates a search input.
@@ -210,15 +214,15 @@ pub fn error_banner<'a, Message: 'a>(
     message: impl Into<String>,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    container(
+    let content = container(
         text(message.into())
             .size(FontSize::MD)
             .color(tokens.text_primary),
     )
     .padding(Spacing::MD)
     .width(Length::Fill)
-    .style(move |_| container_style(tokens, Class::ErrorBanner))
-    .into()
+    .style(move |_| container_style(tokens, Class::ErrorBanner));
+    with_normal_side_border(content, tokens, Class::ErrorBanner)
 }
 
 /// Creates an annotation toolbar surface from arbitrary content.
@@ -226,10 +230,10 @@ pub fn annotation_toolbar<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    container(content)
+    let content = container(content)
         .padding(Spacing::MD)
-        .style(move |_| container_style(tokens, Class::AnnotationToolbar))
-        .into()
+        .style(move |_| container_style(tokens, Class::AnnotationToolbar));
+    with_normal_side_border(content, tokens, Class::AnnotationToolbar)
 }
 
 /// Creates an annotation popover surface from arbitrary content.
@@ -237,8 +241,20 @@ pub fn annotation_popover<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    container(content)
+    let content = container(content)
         .padding(Spacing::MD)
-        .style(move |_| container_style(tokens, Class::AnnotationPopover))
-        .into()
+        .style(move |_| container_style(tokens, Class::AnnotationPopover));
+    with_normal_side_border(content, tokens, Class::AnnotationPopover)
+}
+
+fn with_normal_side_border<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    tokens: ThemeTokens,
+    class: Class,
+) -> Element<'a, Message> {
+    if let Some(border) = side_border_for_class(tokens, class, ComponentState::Normal) {
+        side_border(content, border)
+    } else {
+        content.into()
+    }
 }

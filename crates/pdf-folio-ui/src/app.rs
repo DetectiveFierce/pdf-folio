@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -20,6 +21,7 @@ use iced::{
     event, keyboard, Color, ContentFit, Element, Event, Length, Point, Rectangle, Renderer, Size,
 };
 use iced::{Subscription, Task, Theme};
+use notify::{EventKind, RecursiveMode, Watcher};
 use pdf_folio_core::{Annotation, OutlineNode, PdfDoc, RenderedPage, TileCache, TileKey};
 use pdf_folio_library::{
     hash_file, scan_pdf_files, thumbnail_path, Db, EntryId, Folder, FolderId, ImportSummary,
@@ -33,9 +35,10 @@ use crate::messages::{
 };
 use crate::style::{
     container_style, display_font, empty_state, menu_style_for_class, mix_color, pick_list_style,
-    progress_bar, scrollable_style, search_input_with_class, section_heading, tag_pill,
-    text_input_style, toc_entry, toolbar_button, ui_font, viewer_primitives, Class, ComponentState,
-    FontSize, FontWeight, LabelSection, Spacing, StyleBook, ThemeTokens, UI_FONT_FAMILY,
+    progress_bar, scrollable_style, search_input_with_class, section_heading, side_border,
+    side_border_for_class, tag_pill, text_input_style, toc_entry, toolbar_button, ui_font,
+    viewer_primitives, Class, ComponentState, FontSize, FontWeight, LabelSection, Spacing,
+    StyleBook, ThemeTokens, UI_FONT_FAMILY,
 };
 use crate::theme::AppTheme;
 
@@ -3845,7 +3848,7 @@ fn file_tree_row<'a>(
         );
     }
 
-    button(content)
+    let row_button = button(content)
         .height(28.0)
         .width(Length::Fill)
         .padding([3.0, Spacing::SM])
@@ -3865,8 +3868,18 @@ fn file_tree_row<'a>(
             apply_file_tree_state_style(&mut style, tokens, state, content_background);
             style
         })
-        .on_press(message)
-        .into()
+        .on_press(message);
+
+    if active {
+        if let Some(border) = side_border_for_class(tokens, Class::FileTree, ComponentState::Active)
+        {
+            side_border(row_button, border)
+        } else {
+            row_button.into()
+        }
+    } else {
+        row_button.into()
+    }
 }
 
 fn apply_file_tree_state_style(
@@ -3887,6 +3900,9 @@ fn apply_file_tree_state_style(
     }
     if let Some(border_width) = state_style.border_width {
         style.border.width = border_width;
+    }
+    if state_style.border.is_some() {
+        style.border.width = 0.0;
     }
     if let Some(radius) = state_style.radius {
         style.border.radius = radius.into();
@@ -6597,18 +6613,82 @@ fn watch_style_directories_stream(
             return;
         }
 
-        let mut snapshot = style_files_snapshot(&paths);
-        loop {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            let next_snapshot = style_files_snapshot(&paths);
-            if next_snapshot != snapshot {
-                snapshot = next_snapshot;
-                if output.send(Message::ReloadStyles).await.is_err() {
-                    break;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut watcher = match notify::recommended_watcher(
+            move |event: notify::Result<notify::Event>| {
+                let Ok(event) = event else {
+                    return;
+                };
+
+                if style_watch_event_should_reload(&event) {
+                    let _ = sender.send(());
+                }
+            },
+        ) {
+            Ok(watcher) => Some(watcher),
+            Err(error) => {
+                tracing::warn!(%error, "Could not create style filesystem watcher; falling back to polling");
+                None
+            }
+        };
+
+        if let Some(watcher) = watcher.as_mut() {
+            for path in paths.iter().filter(|path| path.exists()) {
+                if let Err(error) = watcher.watch(path, RecursiveMode::Recursive) {
+                    tracing::warn!(
+                        path = %path.display(),
+                        %error,
+                        "Could not watch style directory; polling will still detect changes"
+                    );
                 }
             }
         }
+
+        let receiver = Arc::new(std::sync::Mutex::new(receiver));
+        let mut snapshot = style_files_snapshot(&paths);
+        loop {
+            let receiver = Arc::clone(&receiver);
+            let event = tokio::task::spawn_blocking(move || {
+                receiver
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .recv_timeout(Duration::from_millis(500))
+            })
+            .await;
+
+            let next_snapshot = style_files_snapshot(&paths);
+            let notify_changed = matches!(event, Ok(Ok(())));
+            let poll_changed = next_snapshot != snapshot;
+
+            if notify_changed || poll_changed {
+                snapshot = next_snapshot;
+                tokio::time::sleep(Duration::from_millis(75)).await;
+                if output.send(Message::ReloadStyles).await.is_err() {
+                    break;
+                }
+            } else if matches!(event, Ok(Err(RecvTimeoutError::Disconnected)) | Err(_)) {
+                break;
+            }
+        }
     })
+}
+
+fn style_watch_event_should_reload(event: &notify::Event) -> bool {
+    if !matches!(
+        event.kind,
+        EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    ) {
+        return false;
+    }
+
+    event.paths.is_empty()
+        || event.paths.iter().any(|path| {
+            path.is_dir()
+                || path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("kdl"))
+        })
 }
 
 fn style_files_snapshot(paths: &[PathBuf]) -> Vec<(PathBuf, Option<SystemTime>, u64)> {
@@ -6766,5 +6846,49 @@ mod tests {
 
         assert_eq!(center, 0.0);
         assert!(top < 0.0);
+    }
+
+    #[test]
+    fn style_watch_event_reloads_for_kdl_changes() {
+        let event = notify::Event {
+            kind: EventKind::Modify(notify::event::ModifyKind::Data(
+                notify::event::DataChange::Content,
+            )),
+            paths: vec![PathBuf::from("styles/components/library/sidebar.kdl")],
+            attrs: notify::event::EventAttributes::new(),
+        };
+
+        assert!(style_watch_event_should_reload(&event));
+    }
+
+    #[test]
+    fn style_watch_event_reloads_for_directory_changes() {
+        let root =
+            std::env::temp_dir().join(format!("pdf-folio-style-watch-test-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("test style dir should be created");
+        let event = notify::Event {
+            kind: EventKind::Modify(notify::event::ModifyKind::Name(
+                notify::event::RenameMode::Both,
+            )),
+            paths: vec![root.clone()],
+            attrs: notify::event::EventAttributes::new(),
+        };
+
+        assert!(style_watch_event_should_reload(&event));
+
+        std::fs::remove_dir_all(root).expect("test style dir should be removed");
+    }
+
+    #[test]
+    fn style_watch_event_ignores_unrelated_paths() {
+        let event = notify::Event {
+            kind: EventKind::Modify(notify::event::ModifyKind::Data(
+                notify::event::DataChange::Content,
+            )),
+            paths: vec![PathBuf::from("README.md")],
+            attrs: notify::event::EventAttributes::new(),
+        };
+
+        assert!(!style_watch_event_should_reload(&event));
     }
 }
