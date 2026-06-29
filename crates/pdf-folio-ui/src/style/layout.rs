@@ -7,7 +7,7 @@ pub const VIEWER_SIDEBAR_WIDTH: f32 = 228.0;
 /// Sidebar width for library tag filters.
 pub const LIBRARY_SIDEBAR_WIDTH: f32 = 112.0;
 /// Minimum width for the resizable library tag sidebar.
-pub const LIBRARY_SIDEBAR_MIN_WIDTH: f32 = 80.0;
+pub const LIBRARY_SIDEBAR_MIN_WIDTH: f32 = 90.0;
 /// Maximum width for the resizable library tag sidebar.
 pub const LIBRARY_SIDEBAR_MAX_WIDTH: f32 = 340.0;
 /// Width of the draggable sidebar resize handle.
@@ -22,8 +22,12 @@ pub const LIBRARY_OVERSCAN_ROWS: usize = 4;
 pub const CARD_GRID_COLUMNS: usize = 3;
 /// Library card row height in grid mode.
 pub const LIBRARY_GRID_ROW_HEIGHT: f32 = 290.0;
+/// Folder card row height in grid mode; intentionally shorter than PDF cards.
+pub const LIBRARY_FOLDER_GRID_ROW_HEIGHT: f32 = 104.0;
 /// Library row height in list mode.
 pub const LIBRARY_LIST_ROW_HEIGHT: f32 = 92.0;
+/// Folder row height in list mode; intentionally shorter than PDF rows.
+pub const LIBRARY_FOLDER_LIST_ROW_HEIGHT: f32 = 58.0;
 /// Default thumbnail width in grid cards.
 pub const LIBRARY_CARD_THUMBNAIL_WIDTH: f32 = 132.0;
 /// Default thumbnail width in list rows.

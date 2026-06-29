@@ -12,6 +12,14 @@ pub enum Class {
     AppShell,
     /// Top toolbar.
     Toolbar,
+    /// Application menu bar.
+    MenuBar,
+    /// Top-level menu button.
+    MenuButton,
+    /// Dropdown menu panel.
+    MenuPanel,
+    /// Dropdown menu row.
+    MenuItem,
     /// Group of controls inside the toolbar.
     ToolbarGroup,
     /// Toolbar button.
@@ -26,6 +34,8 @@ pub enum Class {
     TocEntry,
     /// Library grid card.
     LibraryCard,
+    /// Library folder card.
+    LibraryFolderCard,
     /// Library list row.
     LibraryRow,
     /// Tag pill.
@@ -124,12 +134,19 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
             BorderWidth::NONE,
             Radius::NONE,
         ),
-        Class::Toolbar | Class::Sidebar | Class::SidebarSection => (
+        Class::Toolbar | Class::MenuBar | Class::Sidebar | Class::SidebarSection => (
             tokens.surface,
             tokens.text_primary,
             tokens.border,
             BorderWidth::HAIRLINE,
             Radius::NONE,
+        ),
+        Class::MenuPanel => (
+            tokens.surface_raised,
+            tokens.text_primary,
+            tokens.border,
+            BorderWidth::HAIRLINE,
+            Radius::SM,
         ),
         Class::JumpOverlay
         | Class::Tooltip
@@ -143,7 +160,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
             BorderWidth::HAIRLINE,
             Radius::SM,
         ),
-        Class::LibraryCard | Class::LibraryRow | Class::EmptyState => (
+        Class::LibraryCard | Class::LibraryFolderCard | Class::LibraryRow | Class::EmptyState => (
             tokens.surface,
             tokens.text_primary,
             tokens.border,
@@ -181,6 +198,8 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         Class::ViewerCanvas
         | Class::ToolbarGroup
         | Class::ToolbarButton
+        | Class::MenuButton
+        | Class::MenuItem
         | Class::SidebarRow
         | Class::TocEntry
         | Class::SearchInput
@@ -208,9 +227,13 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
 /// Returns an iced button style for a semantic class.
 pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -> button::Style {
     let base = match class {
-        Class::LibraryCard | Class::LibraryRow => tokens.surface,
+        Class::LibraryCard | Class::LibraryFolderCard | Class::LibraryRow => tokens.surface,
         Class::TagPill => mix_color(tokens.background, tokens.accent, 0.18),
-        Class::ToolbarButton | Class::SidebarRow | Class::TocEntry => tokens.surface_raised,
+        Class::ToolbarButton
+        | Class::MenuButton
+        | Class::MenuItem
+        | Class::SidebarRow
+        | Class::TocEntry => tokens.surface_raised,
         _ => tokens.surface,
     };
 

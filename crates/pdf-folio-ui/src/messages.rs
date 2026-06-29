@@ -7,9 +7,185 @@ use std::time::Instant;
 use iced::keyboard;
 use iced::Point;
 use pdf_folio_core::{Annotation, AnnotationId, PdfDoc, TileKey};
-use pdf_folio_library::{EntryId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent};
+use pdf_folio_library::{
+    EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
+};
 
 use crate::Settings;
+
+/// Top-level application menu groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppMenu {
+    /// File and import commands.
+    File,
+    /// Selection and metadata editing commands.
+    Edit,
+    /// Layout, theme, navigation, and zoom commands.
+    View,
+    /// Open-PDF reading commands.
+    Document,
+    /// Library organization and maintenance commands.
+    Library,
+    /// Long-running library maintenance commands.
+    Tools,
+    /// Product help and status commands.
+    Help,
+}
+
+impl AppMenu {
+    /// User-facing menu title.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::File => "File",
+            Self::Edit => "Edit",
+            Self::View => "View",
+            Self::Document => "Document",
+            Self::Library => "Library",
+            Self::Tools => "Tools",
+            Self::Help => "Help",
+        }
+    }
+}
+
+/// Concrete actions launched from the application menu bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppMenuAction {
+    /// Open a PDF from disk.
+    OpenFile,
+    /// Import PDFs from a folder.
+    ImportFolder,
+    /// Return from the viewer to the library.
+    BackToLibrary,
+    /// Reload the library from storage.
+    RefreshLibrary,
+    /// Select all visible PDFs.
+    SelectAllVisible,
+    /// Clear selected PDFs.
+    ClearSelection,
+    /// Save the current single-PDF metadata edit.
+    SaveDetails,
+    /// Reset the current single-PDF metadata edit.
+    ResetDetails,
+    /// Add the typed bulk tag.
+    AddTag,
+    /// Remove the typed bulk tag.
+    RemoveTag,
+    /// Add selection to the active folder.
+    AddToFolder,
+    /// Remove selection from the active folder.
+    RemoveFromFolder,
+    /// Delete selected PDFs from library metadata.
+    DeleteFromLibrary,
+    /// Toggle grid/list library layout.
+    ToggleLayout,
+    /// Toggle the light/dark theme.
+    ToggleTheme,
+    /// Toggle the viewer table-of-contents panel.
+    ToggleToc,
+    /// Open the jump-to-page dialog.
+    JumpToPage,
+    /// Increase viewer zoom.
+    ZoomIn,
+    /// Decrease viewer zoom.
+    ZoomOut,
+    /// Reset viewer zoom.
+    ResetZoom,
+    /// Change the library sort mode.
+    SortLibrary(LibrarySortMode),
+    /// Create a folder under the active folder.
+    CreateFolder,
+    /// Clear display metadata for selected PDFs.
+    ResetMetadata,
+    /// Apply title sort cleanup to selected PDFs.
+    SortTitles,
+    /// Refresh selected PDF metadata.
+    RefreshMetadata,
+    /// Rebuild selected PDF thumbnails.
+    RebuildThumbnails,
+    /// Reindex selected PDFs for full-text search.
+    Reindex,
+}
+
+/// Contextual menus shown inside the selected-PDF menu strip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionMenu {
+    /// Single-selection metadata actions.
+    More,
+    /// Bulk tag actions.
+    Tags,
+    /// Bulk folder membership actions.
+    Folders,
+    /// Bulk metadata actions.
+    Metadata,
+    /// Bulk maintenance actions.
+    Maintenance,
+}
+
+/// Confirmation-only actions that overwrite or delete user-visible library data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfirmationAction {
+    /// Clear display metadata overrides for the selected PDFs.
+    BulkResetDisplayMetadata,
+    /// Delete the selected PDFs from library metadata.
+    BulkDeleteFromLibrary,
+    /// Clear display metadata overrides for one PDF in the details panel.
+    ResetDetailsMetadata(EntryId),
+}
+
+/// Top selection-toolbar actions chosen from compact dropdown menus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionToolbarAction {
+    /// Add the typed tag to selected PDFs.
+    AddTag,
+    /// Remove the typed tag from selected PDFs.
+    RemoveTag,
+    /// Add selected PDFs to the active folder.
+    AddToFolder,
+    /// Remove selected PDFs from the active folder.
+    RemoveFromFolder,
+    /// Save the single selected PDF metadata edits.
+    SaveDetails,
+    /// Reset the single selected PDF metadata edits.
+    ResetDetails,
+    /// Recompute title sort keys.
+    SortTitles,
+    /// Refresh extracted PDF metadata.
+    RefreshMetadata,
+    /// Clear selected PDF display metadata overrides.
+    ResetMetadata,
+    /// Rebuild cover thumbnails.
+    RebuildThumbnails,
+    /// Reindex full text.
+    Reindex,
+    /// Delete selected PDFs from library metadata.
+    DeleteMetadata,
+}
+
+impl SelectionToolbarAction {
+    /// User-facing menu label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AddTag => "Add tag",
+            Self::RemoveTag => "Remove tag",
+            Self::AddToFolder => "Add to folder",
+            Self::RemoveFromFolder => "Remove from folder",
+            Self::SaveDetails => "Save details",
+            Self::ResetDetails => "Reset details",
+            Self::SortTitles => "Sort titles",
+            Self::RefreshMetadata => "Refresh metadata",
+            Self::ResetMetadata => "Reset metadata",
+            Self::RebuildThumbnails => "Rebuild thumbnails",
+            Self::Reindex => "Reindex",
+            Self::DeleteMetadata => "Delete metadata",
+        }
+    }
+}
+
+impl std::fmt::Display for SelectionToolbarAction {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
 
 /// Messages handled by the PDF-Folio application update loop.
 #[derive(Debug, Clone)]
@@ -94,6 +270,8 @@ pub enum Message {
     ExportAnnotations,
     /// Library entries loaded.
     LibraryLoaded(Vec<LibraryEntry>),
+    /// Library folders loaded.
+    LibraryFoldersLoaded(Vec<Folder>),
     /// Reload library entries from storage.
     LibraryRefresh,
     /// A library operation failed.
@@ -110,6 +288,10 @@ pub enum Message {
     OpenLibraryEntry(EntryId),
     /// A library entry was clicked.
     LibraryEntryClicked(EntryId),
+    /// Clear the current library PDF selection.
+    ClearLibrarySelection,
+    /// Select all currently visible library PDFs.
+    SelectAllVisibleLibraryEntries,
     /// Begin dragging a library entry for manual reordering.
     BeginLibraryEntryDrag(EntryId),
     /// Cursor moved while dragging a library entry.
@@ -155,6 +337,16 @@ pub enum Message {
     LibraryWatchEvent(LibraryWatchEvent),
     /// Tag filter changed.
     TagFilterChanged(Option<String>),
+    /// Selected library folder changed.
+    FolderSelected(Option<FolderId>),
+    /// Inline new folder name changed.
+    NewFolderNameChanged(String),
+    /// Open the new-folder dialog.
+    OpenCreateFolderDialog,
+    /// Create a folder in the selected folder.
+    CreateFolder,
+    /// A folder was created.
+    FolderCreated(FolderId),
     /// Start inline tag entry for an item.
     StartTagEntry(EntryId),
     /// Inline tag text changed.
@@ -167,6 +359,56 @@ pub enum Message {
     EntryUntagged { id: EntryId, tag: String },
     /// A library entry was deleted.
     EntryDeleted(EntryId),
+    /// Bulk tag text changed.
+    BulkTagInputChanged(String),
+    /// Add the bulk tag to all selected PDFs.
+    BulkAddTag,
+    /// Remove the bulk tag from all selected PDFs.
+    BulkRemoveTag,
+    /// Add selected PDFs to the current folder.
+    BulkAddToCurrentFolder,
+    /// Remove selected PDFs from the current folder.
+    BulkRemoveFromCurrentFolder,
+    /// Clear display metadata overrides for selected PDFs.
+    BulkResetDisplayMetadata,
+    /// Recompute title sort keys for selected PDFs.
+    BulkApplyTitleSortCleanup,
+    /// Refresh extracted metadata for selected PDFs from the source files.
+    BulkRefreshPdfMetadata,
+    /// Rebuild thumbnails for selected PDFs.
+    BulkRebuildThumbnails,
+    /// Reindex full text for selected PDFs.
+    BulkReindex,
+    /// Delete selected PDFs from library metadata only.
+    BulkDeleteFromLibrary,
+    /// A compact selection-toolbar menu action was chosen.
+    SelectionToolbarActionSelected(SelectionToolbarAction),
+    /// Request confirmation before a destructive or overwriting library action.
+    RequestConfirmation(ConfirmationAction),
+    /// Run the currently pending destructive or overwriting library action.
+    ConfirmPendingAction,
+    /// Dismiss the active confirmation dialog.
+    CancelConfirmation,
+    /// Details-panel title override changed.
+    DetailsTitleChanged(String),
+    /// Details-panel author override changed.
+    DetailsAuthorChanged(String),
+    /// Persist details-panel metadata overrides.
+    SaveDetailsMetadata,
+    /// Reset one details-panel entry to extracted PDF metadata.
+    ResetDetailsMetadata(EntryId),
+    /// Metadata edit finished.
+    MetadataEditFinished {
+        entry_id: EntryId,
+        label: String,
+        errors: Vec<String>,
+    },
+    /// A bulk operation finished.
+    BulkOperationFinished {
+        label: String,
+        updated: usize,
+        errors: Vec<String>,
+    },
     /// Reading progress changed.
     ProgressUpdated { entry_id: EntryId, page: u16 },
     /// Reading progress was saved.
@@ -177,6 +419,16 @@ pub enum Message {
     ShortcutPressed(Shortcut),
     /// Settings changed.
     SettingsChanged(Settings),
+    /// Open or switch the active top-level menu.
+    AppMenuOpened(AppMenu),
+    /// Close the active top-level menu.
+    AppMenuClosed,
+    /// Run an action selected from the top-level menu.
+    AppMenuActionSelected(AppMenuAction),
+    /// Open or switch the active selected-PDF contextual menu.
+    SelectionMenuOpened(SelectionMenu),
+    /// Close the active selected-PDF contextual menu.
+    SelectionMenuClosed,
 }
 
 /// Keyboard shortcuts handled by the Phase 1 viewer.
@@ -198,6 +450,12 @@ pub enum Shortcut {
     FineScroll(i16),
     /// Pan horizontally by a small number of logical pixels.
     HorizontalPan(i16),
+    /// Select all visible library entries.
+    SelectAll,
+    /// Open the selected library entry.
+    OpenSelected,
+    /// Delete selected library entries from metadata.
+    DeleteSelected,
     /// Open the jump-to-page overlay.
     Jump,
     /// Close overlays or panels.

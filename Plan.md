@@ -1011,60 +1011,200 @@ Library features added in this phase must use the Phase 4 style system. Library 
      programmatic scroll operations. Unit tests cover the edge-zone velocity math.
 
 4. **Multi-selection model**
-   - [ ] Add selection state to the library view
+   - [x] Add selection state to the library view
      - single click selects one PDF
      - Ctrl-click toggles selection
      - Shift-click selects a contiguous range
      - Ctrl+A selects all visible PDFs
      - Escape clears selection
-   - [ ] Support selection across grid and list views
-   - [ ] Keep selection stable when changing between grid/list layouts
-   - [ ] Decide and document behavior when filters/search change while items are selected
-   - [ ] Show selected count in the toolbar
-   - [ ] Add a bulk-action toolbar that appears only when one or more PDFs are selected
-   - [ ] Style selected, active, focused, and hovered states through the Phase 4 component-state system
+   - [x] Support selection across grid and list views
+   - [x] Keep selection stable when changing between grid/list layouts
+   - [x] Decide and document behavior when filters/search change while items are selected
+     - Selection is pruned to entries still visible under the active search/tag/folder filters.
+   - [x] Show selected count in the toolbar
+   - [x] Add a bulk-action toolbar that appears only when one or more PDFs are selected
+   - [x] Style selected, active, focused, and hovered states through the Phase 4 component-state system
 
 5. **Bulk editing and bulk actions**
-   - [ ] Bulk edit selected PDFs
+   - [x] Bulk edit selected PDFs
      - add tags
      - remove tags
      - add to folder
      - remove from folder
      - delete from library metadata only
      - optionally move files to trash after explicit confirmation
-   - [ ] Bulk metadata actions
+   - [x] Bulk metadata actions
      - clear custom title
      - clear custom author
+     - apply title sort cleanup
      - refresh metadata from PDF
      - rebuild thumbnails
      - reindex full text
-   - [ ] Show confirmation dialogs for destructive actions
+   - [x] Show confirmation dialogs for destructive actions
    - [ ] Show progress for long bulk operations
-   - [ ] Surface partial failures clearly, for example: "Updated 48 PDFs; 2 could not be changed."
+   - [x] Surface partial failures clearly, for example: "Updated 48 PDFs; 2 could not be changed."
    - [ ] Use shared `ProgressBar`, `ErrorBanner`, toolbar, dialog, and empty-state styling paths
+     - Bulk toolbar and confirmation dialog use shared styling; progress and dedicated error-banner
+       surfaces are still pending.
+
+   Implementation notes:
+   - Added 2026-06-28: grid/list selection, Ctrl-click toggle, Shift-click range selection,
+     Ctrl+A, Escape clear, Enter open selected single PDF, Delete metadata-only bulk delete,
+     selected count, selected card/row styling, and a bulk toolbar for tags, current-folder
+     membership, metadata reset, thumbnail rebuild, full-text reindex, and library metadata delete.
+     Destructive confirmation dialogs and detailed progress UI are still pending.
+   - Updated 2026-06-28: bulk metadata actions now include reset display metadata, title-sort
+     cleanup, selected-PDF metadata refresh, thumbnail rebuild, full-text reindex, and metadata-only
+     library delete. Metadata reset and metadata-only delete require an in-app confirmation dialog;
+     Delete also uses that dialog when triggered by the keyboard shortcut. Metadata-only delete now
+     removes matching Tantivy search documents. Refresh currently updates author attribution and
+     page count from the PDF because `PdfDoc` exposes author metadata but not title metadata yet.
+   - Updated 2026-06-28: selection actions now replace the top app toolbar that normally contains
+     Open/Grid/Light/PDF-Folio. Single-PDF selection shows title and author edit fields plus Save
+     and a More dropdown scoped to single-PDF metadata edits. Multi-selection shows tag input plus
+     grouped Tags, Folders, Metadata, and Maintenance dropdowns. Selection controls no longer occupy
+     the narrow library content column, and menu-bar labels are kept single-line.
+
+   Top application menu organization:
+
+   The layout follows common desktop and creative-tool menu conventions: File owns document/library
+   ingress and session lifecycle, Edit owns selection and metadata editing, View owns visibility,
+   layout, theme, and zoom, Document owns PDF-reading commands, Library owns collection and folder
+   organization, Tools owns batch maintenance, and Help owns documentation/status/about surfaces.
+   Future menu entries are shown in square brackets and should remain out of the runtime UI until
+   those actions are implemented.
+
+   ```text
+   File
+   ├─ Open PDF...
+   ├─ Import Folder...
+   ├─ Back to Library
+   ├─ [Open Recent]
+   ├─ [Close Document]
+   ├─ [Reveal Current PDF in Files]
+   ├─ [Export]
+   ├─ [Print]
+   └─ [Quit]
+
+   Edit
+   ├─ [Undo]
+   ├─ [Redo]
+   ├─ [Cut]
+   ├─ [Copy]
+   ├─ [Paste]
+   ├─ Select All Visible PDFs
+   ├─ Clear Selection
+   ├─ Save Details
+   ├─ Reset Details...
+   ├─ Add Typed Tag
+   ├─ Remove Typed Tag
+   ├─ Delete From Library...
+   ├─ [Find in Library]
+   ├─ [Copy Citation]
+   ├─ [Duplicate Metadata]
+   └─ [Preferences]
+
+   View
+   ├─ Switch to Grid / Switch to List
+   ├─ Switch to Light Theme / Switch to Dark Theme
+   ├─ [Show/Hide Library Sidebar]
+   ├─ Show/Hide Table of Contents
+   ├─ Jump to Page...
+   ├─ Zoom In
+   ├─ Zoom Out
+   ├─ Reset Zoom
+   ├─ [Presentation Mode]
+   ├─ [Fit Width]
+   ├─ [Fit Page]
+   ├─ [Rotate Clockwise]
+   └─ [Full Screen]
+
+   Document
+   ├─ Jump to Page...
+   ├─ Show/Hide Table of Contents
+   ├─ Zoom In
+   ├─ Zoom Out
+   ├─ Reset Zoom
+   ├─ [Find in Document]
+   ├─ [Add Highlight]
+   ├─ [Add Sticky Note]
+   ├─ [Draw Freehand]
+   ├─ [Export Annotated PDF]
+   └─ [Document Properties]
+
+   Library
+   ├─ New Folder...
+   ├─ Import Folder...
+   ├─ Refresh Library
+   ├─ Add Selection to Current Folder
+   ├─ Remove Selection from Current Folder
+   ├─ Sort: Manual
+   ├─ Sort: Title A-Z
+   ├─ Sort: Title Z-A
+   ├─ Sort: Author A-Z
+   ├─ Sort: Author Z-A
+   ├─ Sort: Recently Added
+   ├─ Sort: Recently Opened
+   ├─ Sort: Progress
+   ├─ Sort: Page Count
+   ├─ Sort: Missing
+   ├─ [Rename Folder]
+   ├─ [Delete Folder]
+   ├─ [Move Folder]
+   ├─ [Reveal Selected File]
+   ├─ [New Smart Collection]
+   └─ [Show Missing Files Only]
+
+   Tools
+   ├─ Apply Title Sort Cleanup
+   ├─ Refresh PDF Metadata
+   ├─ Reset Display Metadata...
+   ├─ Rebuild Thumbnails
+   ├─ Reindex Full Text
+   ├─ [Run Duplicate Detection]
+   ├─ [Repair Library Database]
+   ├─ [Optimize Search Index]
+   ├─ [Export Library Catalog]
+   └─ [Plugin Manager]
+
+   Help
+   ├─ PDF-Folio
+   ├─ Status
+   ├─ [Keyboard Shortcuts]
+   ├─ [User Guide]
+   ├─ [Report Issue]
+   └─ [About PDF-Folio]
+   ```
 
 6. **Edit PDF title and author**
-   - [ ] Add an entry details/editor panel
-   - [ ] Allow editing display title and display author
+   - [x] Add an entry details/editor panel
+   - [x] Allow editing display title and display author
    - [x] Preserve original extracted metadata separately from user overrides
    - [x] Add "Reset to PDF metadata" action
-     - Database API is complete; UI action still needs to be surfaced in the editor/details panel.
+     - UI action is surfaced in the details panel and asks for confirmation before clearing edits.
    - [x] Add "Apply title sort cleanup" helper for leading articles such as "The", "A", and "An"
-     - Database API is complete; UI action still needs to be surfaced in the editor/details panel.
+     - Database API is complete; bulk UI action is surfaced in the selected-PDF toolbar.
    - [x] Make title and author edits immediately visible in cards, rows, search results, and sort modes
-     - Display paths now prefer override fields when present; editor UI is still pending.
-   - [ ] Update Tantivy metadata fields after edits so search reflects user-visible title and author
+     - Display paths now prefer override fields when present; editor UI saves refresh the library view.
+   - [x] Update Tantivy metadata fields after edits so search reflects user-visible title and author
    - [x] Add validation for empty titles, extremely long fields, and invalid control characters
 
    Implementation notes:
    - Started 2026-06-28. Storage and display plumbing are in place: original `title`/`author`
      remain separate from `display_title`/`display_author`, and cards, rows, local search matching,
-     and sort modes prefer display metadata. The visible editor/details panel is not implemented yet.
+     and sort modes prefer display metadata.
+   - Updated 2026-06-28: selecting one PDF replaces the top app toolbar with display title and
+     display author fields, Save, Clear, and a More dropdown for reset/metadata/search maintenance.
+     Saves write display overrides, lock metadata, refresh the library, and reindex Tantivy for the
+     edited entry. Reset clears overrides, unlocks extracted metadata updates, refreshes the library,
+     and reindexes the entry using the extracted title/author.
 
 7. **Folders and folder management**
-   - [ ] Add a folder sidebar for library organization
+   - [x] Add a folder sidebar for library organization
+     - Initial UI supports folder selection, nested display, and inline folder creation.
    - [x] Support creating, renaming, deleting, and nesting folders
-     - Database API is complete; folder-management UI is still pending.
+     - Database API is complete; UI currently supports creation and nested navigation.
+       Rename/delete/move actions still need visible controls.
    - [ ] Support dragging PDFs into folders
    - [ ] Support dragging selected PDFs into folders as a bulk operation
    - [ ] Support dragging folders to reorder them in Manual folder order
@@ -1074,16 +1214,18 @@ Library features added in this phase must use the Phase 4 style system. Library 
      - folder cannot be moved into one of its descendants
      - deleting a folder does not delete PDFs unless explicitly requested through a separate destructive action
    - [ ] Show smart counts next to folders
+     - Initial UI shows direct PDF counts and child-folder counts.
      - total PDFs
      - unread/in-progress count where useful
      - missing-file count where useful
-   - [ ] Add folder empty states with clear import/add instructions
+   - [x] Add folder empty states with clear import/add instructions
    - [ ] Persist expanded/collapsed folder state across restarts
 
    Implementation notes:
    - Started 2026-06-28 at the database/API layer. Folder tree creation, rename, delete, nesting,
      moving, membership, and folder-entry queries are implemented and tested. The existing tag
-     sidebar has not yet been replaced or expanded into a folder organization sidebar.
+     sidebar has now been expanded into a folder organization sidebar with inline folder creation,
+     selected-folder persistence, folder cards above PDFs, and shorter folder-card sizing.
 
 8. **Collections, tags, and folders interaction**
    - [ ] Clarify the product model:
