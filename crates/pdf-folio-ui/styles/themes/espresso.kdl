@@ -1,0 +1,18 @@
+theme "espresso" {
+    color "background" "#1A1006"
+    color "surface" "#0E0904"
+    color "surface_raised" "#23180C"
+    color "text_primary" "#DDD0BA"
+    color "text_secondary" "#8B6E52"
+    color "accent" "#D4A853"
+    color "border" "#C8B89A2E"
+    color "error" "#D94040"
+    color "canvas" "#170E05"
+    color "placeholder" "#2B1D0E"
+    color "focus" "#D4A853"
+    color "shadow" "#0000009E"
+
+    primitive "page_shadow_offset_x" 2
+    primitive "page_shadow_offset_y" 3
+    primitive "progress_girth" 3
+}

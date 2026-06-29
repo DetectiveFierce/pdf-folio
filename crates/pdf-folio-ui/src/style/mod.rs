@@ -1,10 +1,12 @@
 //! Shared style system for PDF-Folio UI surfaces.
 
+pub mod book;
 pub mod classes;
 pub mod components;
 pub mod layout;
 pub mod tokens;
 
+pub use book::{fallback_dark_tokens, fallback_light_tokens, StyleBook};
 pub use classes::{
     button_style, container_style, menu_style, mix_color, pick_list_style, progress_bar_style,
     scrollable_style, text_input_style, viewer_primitives, Class, ComponentState, Shadow,
@@ -15,8 +17,11 @@ pub use components::{
     empty_state, error_banner, icon_button, library_card, library_row, progress_bar, search_input,
     section_heading, sidebar_button, tag_pill, toc_entry, toolbar_button,
 };
-pub use layout::{CARD_GRID_COLUMNS, LIBRARY_OVERSCAN_ROWS, LINE_SCROLL_PIXELS, WINDOW_SIZE};
+pub use layout::{
+    CARD_GRID_COLUMNS, LIBRARY_GRID_CARD_WIDTH, LIBRARY_OVERSCAN_ROWS, LINE_SCROLL_PIXELS,
+    WINDOW_SIZE,
+};
 pub use tokens::{
-    BorderWidth, ContentAlignment, FontSize, FontWeight, IconSize, Radius, Spacing, TextAlignment,
-    ThemeTokens,
+    display_font, ui_font, BorderWidth, ContentAlignment, FontSize, FontWeight, IconSize, Radius,
+    Spacing, TextAlignment, ThemeTokens, DISPLAY_FONT_FAMILY, UI_FONT_FAMILY,
 };

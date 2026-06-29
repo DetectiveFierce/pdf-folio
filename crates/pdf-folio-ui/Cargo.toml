@@ -8,6 +8,8 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 iced.workspace = true
+kdl.workspace = true
+notify.workspace = true
 pdf-folio-core = { path = "../pdf-folio-core" }
 pdf-folio-library = { path = "../pdf-folio-library" }
 rfd.workspace = true

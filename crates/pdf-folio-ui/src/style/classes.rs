@@ -3,7 +3,7 @@
 use iced::widget::{button, container, pick_list, progress_bar, scrollable, text_input};
 use iced::{overlay, Background, Border, Color, Shadow as IcedShadow, Vector};
 
-use super::tokens::{BorderWidth, Radius, ThemeTokens};
+use super::tokens::{BorderWidth, Radius, ThemeTokens, VisualStyle};
 
 /// Semantic style classes used by UI widgets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +89,65 @@ pub enum ComponentState {
     Error,
 }
 
+impl ComponentState {
+    /// Number of component states represented in style files.
+    pub const COUNT: usize = 8;
+
+    /// Stable index for style arrays.
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Normal => 0,
+            Self::Hovered => 1,
+            Self::Pressed => 2,
+            Self::Focused => 3,
+            Self::Disabled => 4,
+            Self::Selected => 5,
+            Self::Active => 6,
+            Self::Error => 7,
+        }
+    }
+}
+
+impl Class {
+    /// Number of semantic classes represented in style files.
+    pub const COUNT: usize = 29;
+
+    /// Stable index for style arrays.
+    pub const fn index(self) -> usize {
+        match self {
+            Self::AppShell => 0,
+            Self::Toolbar => 1,
+            Self::MenuBar => 2,
+            Self::MenuButton => 3,
+            Self::MenuPanel => 4,
+            Self::MenuItem => 5,
+            Self::ToolbarGroup => 6,
+            Self::ToolbarButton => 7,
+            Self::Sidebar => 8,
+            Self::SidebarSection => 9,
+            Self::SidebarRow => 10,
+            Self::TocEntry => 11,
+            Self::LibraryCard => 12,
+            Self::LibraryFolderCard => 13,
+            Self::LibraryRow => 14,
+            Self::TagPill => 15,
+            Self::SearchInput => 16,
+            Self::ProgressBar => 17,
+            Self::ErrorBanner => 18,
+            Self::ViewerCanvas => 19,
+            Self::PagePlaceholder => 20,
+            Self::JumpOverlay => 21,
+            Self::Tooltip => 22,
+            Self::AnnotationToolbar => 23,
+            Self::AnnotationPopover => 24,
+            Self::PresentationOverlay => 25,
+            Self::Minimap => 26,
+            Self::EmptyState => 27,
+            Self::DragInsertionMarker => 28,
+        }
+    }
+}
+
 /// Canvas shadow primitive.
 #[derive(Debug, Clone, Copy)]
 pub struct Shadow {
@@ -111,14 +170,102 @@ pub struct ViewerPrimitiveStyle {
     pub page_shadow: Shadow,
 }
 
+trait VisualOverride {
+    fn with_visual_override(self, style: VisualStyle) -> Self;
+}
+
+impl VisualOverride for container::Style {
+    fn with_visual_override(mut self, style: VisualStyle) -> Self {
+        if let Some(background) = style.background {
+            self.background = Some(Background::Color(background));
+        }
+        if let Some(text_color) = style.text_color {
+            self.text_color = Some(text_color);
+        }
+        if let Some(border_color) = style.border_color {
+            self.border.color = border_color;
+        }
+        if let Some(border_width) = style.border_width {
+            self.border.width = border_width;
+        }
+        if let Some(radius) = style.radius {
+            self.border.radius = radius.into();
+        }
+        self
+    }
+}
+
+impl VisualOverride for button::Style {
+    fn with_visual_override(mut self, style: VisualStyle) -> Self {
+        if let Some(background) = style.background {
+            self.background = Some(Background::Color(background));
+        }
+        if let Some(text_color) = style.text_color {
+            self.text_color = text_color;
+        }
+        if let Some(border_color) = style.border_color {
+            self.border.color = border_color;
+        }
+        if let Some(border_width) = style.border_width {
+            self.border.width = border_width;
+        }
+        if let Some(radius) = style.radius {
+            self.border.radius = radius.into();
+        }
+        self
+    }
+}
+
+impl VisualOverride for pick_list::Style {
+    fn with_visual_override(mut self, style: VisualStyle) -> Self {
+        if let Some(background) = style.background {
+            self.background = Background::Color(background);
+        }
+        if let Some(text_color) = style.text_color {
+            self.text_color = text_color;
+        }
+        if let Some(border_color) = style.border_color {
+            self.border.color = border_color;
+        }
+        if let Some(border_width) = style.border_width {
+            self.border.width = border_width;
+        }
+        if let Some(radius) = style.radius {
+            self.border.radius = radius.into();
+        }
+        self
+    }
+}
+
+impl VisualOverride for text_input::Style {
+    fn with_visual_override(mut self, style: VisualStyle) -> Self {
+        if let Some(background) = style.background {
+            self.background = Background::Color(background);
+        }
+        if let Some(text_color) = style.text_color {
+            self.value = text_color;
+        }
+        if let Some(border_color) = style.border_color {
+            self.border.color = border_color;
+        }
+        if let Some(border_width) = style.border_width {
+            self.border.width = border_width;
+        }
+        if let Some(radius) = style.radius {
+            self.border.radius = radius.into();
+        }
+        self
+    }
+}
+
 /// Returns viewer canvas drawing primitives for the active theme.
 pub fn viewer_primitives(tokens: ThemeTokens) -> ViewerPrimitiveStyle {
     ViewerPrimitiveStyle {
         canvas: tokens.canvas,
         placeholder: tokens.placeholder,
         page_shadow: Shadow {
-            offset_x: 2.0,
-            offset_y: 2.0,
+            offset_x: tokens.primitives.page_shadow_offset_x,
+            offset_y: tokens.primitives.page_shadow_offset_y,
             color: tokens.shadow,
         },
     }
@@ -161,7 +308,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
             Radius::SM,
         ),
         Class::LibraryCard | Class::LibraryFolderCard | Class::LibraryRow | Class::EmptyState => (
-            tokens.surface,
+            tokens.surface_raised,
             tokens.text_primary,
             tokens.border,
             BorderWidth::HAIRLINE,
@@ -212,6 +359,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         ),
     };
 
+    let override_style = tokens.class_styles[class.index()].resolve(ComponentState::Normal);
     container::Style {
         background: Some(Background::Color(background)),
         text_color: Some(text_color),
@@ -222,18 +370,16 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         },
         ..container::Style::default()
     }
+    .with_visual_override(override_style)
 }
 
 /// Returns an iced button style for a semantic class.
 pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -> button::Style {
     let base = match class {
-        Class::LibraryCard | Class::LibraryFolderCard | Class::LibraryRow => tokens.surface,
+        Class::LibraryCard | Class::LibraryFolderCard | Class::LibraryRow => tokens.surface_raised,
         Class::TagPill => mix_color(tokens.background, tokens.accent, 0.18),
-        Class::ToolbarButton
-        | Class::MenuButton
-        | Class::MenuItem
-        | Class::SidebarRow
-        | Class::TocEntry => tokens.surface_raised,
+        Class::ToolbarButton | Class::MenuItem => tokens.surface_raised,
+        Class::MenuButton | Class::SidebarRow | Class::TocEntry => tokens.surface,
         _ => tokens.surface,
     };
 
@@ -246,9 +392,9 @@ pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -
 
     let background = match state {
         ComponentState::Normal => base,
-        ComponentState::Hovered | ComponentState::Focused => mix_color(base, tokens.accent, 0.18),
+        ComponentState::Hovered | ComponentState::Focused => mix_color(base, tokens.accent, 0.14),
         ComponentState::Pressed | ComponentState::Selected | ComponentState::Active => {
-            mix_color(base, tokens.accent, 0.30)
+            mix_color(base, tokens.accent, 0.24)
         }
         ComponentState::Disabled => tokens.background,
         ComponentState::Error => mix_color(base, tokens.error, 0.24),
@@ -264,16 +410,22 @@ pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -
         tokens.text_primary
     };
 
+    let override_style = tokens.class_styles[class.index()].resolve(state);
     button::Style {
         background: Some(Background::Color(background)),
         text_color,
         border: Border {
             width: BorderWidth::HAIRLINE,
             color: border_color,
-            radius: Radius::SM.into(),
+            radius: if matches!(class, Class::LibraryCard | Class::LibraryFolderCard) {
+                Radius::MD.into()
+            } else {
+                Radius::SM.into()
+            },
         },
         ..button::Style::default()
     }
+    .with_visual_override(override_style)
 }
 
 /// Returns an iced pick-list style for a semantic class.
@@ -292,6 +444,12 @@ pub fn pick_list_style(
         tokens.surface_raised
     };
 
+    let state = if is_active {
+        ComponentState::Hovered
+    } else {
+        ComponentState::Normal
+    };
+    let override_style = tokens.class_styles[Class::ToolbarButton.index()].resolve(state);
     pick_list::Style {
         text_color: tokens.text_primary,
         placeholder_color: tokens.text_secondary,
@@ -307,11 +465,14 @@ pub fn pick_list_style(
             radius: Radius::SM.into(),
         },
     }
+    .with_visual_override(override_style)
 }
 
 /// Returns an iced dropdown menu style for themed popup menus.
 pub fn menu_style(tokens: ThemeTokens) -> overlay::menu::Style {
-    overlay::menu::Style {
+    let override_style =
+        tokens.class_styles[Class::MenuPanel.index()].resolve(ComponentState::Normal);
+    let style = overlay::menu::Style {
         background: Background::Color(tokens.surface_raised),
         border: Border {
             width: BorderWidth::HAIRLINE,
@@ -330,6 +491,24 @@ pub fn menu_style(tokens: ThemeTokens) -> overlay::menu::Style {
             offset: Vector::new(0.0, 4.0),
             blur_radius: 12.0,
         },
+    };
+    overlay::menu::Style {
+        background: override_style
+            .background
+            .map_or(style.background, Background::Color),
+        border: Border {
+            width: override_style.border_width.unwrap_or(style.border.width),
+            color: override_style.border_color.unwrap_or(style.border.color),
+            radius: override_style
+                .radius
+                .map_or(style.border.radius, Into::into),
+        },
+        text_color: override_style.text_color.unwrap_or(style.text_color),
+        selected_text_color: override_style
+            .text_color
+            .unwrap_or(style.selected_text_color),
+        selected_background: style.selected_background,
+        shadow: style.shadow,
     }
 }
 
@@ -351,6 +530,14 @@ pub fn text_input_style(
         (_, false) => tokens.surface,
     };
 
+    let state = if is_focused {
+        ComponentState::Focused
+    } else if is_hovered {
+        ComponentState::Hovered
+    } else {
+        ComponentState::Normal
+    };
+    let override_style = tokens.class_styles[class.index()].resolve(state);
     text_input::Style {
         background: Background::Color(background),
         border: Border {
@@ -360,24 +547,27 @@ pub fn text_input_style(
             } else {
                 tokens.border
             },
-            radius: 20.0.into(),
+            radius: 18.0.into(),
         },
         icon: tokens.text_secondary,
         placeholder: mix_color(tokens.background, tokens.text_secondary, 0.48),
         value: tokens.text_primary,
         selection: mix_color(tokens.surface_raised, tokens.accent, 0.44),
     }
+    .with_visual_override(override_style)
 }
 
 /// Returns an iced progress-bar style for a semantic class.
 pub fn progress_bar_style(tokens: ThemeTokens, _class: Class) -> progress_bar::Style {
+    let override_style =
+        tokens.class_styles[Class::ProgressBar.index()].resolve(ComponentState::Normal);
     progress_bar::Style {
-        background: Background::Color(tokens.surface_raised),
-        bar: Background::Color(tokens.accent),
+        background: Background::Color(override_style.background.unwrap_or(tokens.surface_raised)),
+        bar: Background::Color(override_style.text_color.unwrap_or(tokens.accent)),
         border: Border {
-            width: BorderWidth::NONE,
-            color: tokens.border,
-            radius: 2.0.into(),
+            width: override_style.border_width.unwrap_or(BorderWidth::NONE),
+            color: override_style.border_color.unwrap_or(tokens.border),
+            radius: override_style.radius.unwrap_or(2.0).into(),
         },
     }
 }
@@ -458,20 +648,7 @@ mod tests {
     use super::*;
 
     fn tokens() -> ThemeTokens {
-        ThemeTokens {
-            background: Color::from_rgb(0.0, 0.0, 0.0),
-            surface: Color::from_rgb(0.1, 0.1, 0.1),
-            surface_raised: Color::from_rgb(0.2, 0.2, 0.2),
-            text_primary: Color::WHITE,
-            text_secondary: Color::from_rgb(0.7, 0.7, 0.7),
-            accent: Color::from_rgb(0.2, 0.4, 0.8),
-            border: Color::from_rgb(0.3, 0.3, 0.3),
-            error: Color::from_rgb(0.8, 0.1, 0.1),
-            canvas: Color::from_rgb(0.05, 0.05, 0.05),
-            placeholder: Color::from_rgb(0.4, 0.4, 0.4),
-            focus: Color::from_rgb(0.2, 0.6, 1.0),
-            shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.3),
-        }
+        crate::style::fallback_dark_tokens()
     }
 
     #[test]

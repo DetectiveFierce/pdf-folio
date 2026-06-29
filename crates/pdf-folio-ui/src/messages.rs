@@ -11,6 +11,7 @@ use pdf_folio_library::{
     EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
 };
 
+use crate::style::StyleBook;
 use crate::Settings;
 
 /// Top-level application menu groups.
@@ -80,6 +81,8 @@ pub enum AppMenuAction {
     ToggleLayout,
     /// Toggle the light/dark theme.
     ToggleTheme,
+    /// Reload KDL style files.
+    ReloadStyles,
     /// Toggle the viewer table-of-contents panel.
     ToggleToc,
     /// Open the jump-to-page dialog.
@@ -187,6 +190,25 @@ impl std::fmt::Display for SelectionToolbarAction {
     }
 }
 
+/// Main navigation tabs inside the library sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibrarySidebarTab {
+    /// Folder hierarchy and all-library navigation.
+    Files,
+    /// Tag filtering navigation.
+    Tags,
+}
+
+impl LibrarySidebarTab {
+    /// User-facing tab label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Files => "Files",
+            Self::Tags => "Tags",
+        }
+    }
+}
+
 /// Messages handled by the PDF-Folio application update loop.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -222,6 +244,8 @@ pub enum Message {
         width: f32,
         height: f32,
     },
+    /// The application window size changed.
+    WindowResized { width: f32, height: f32 },
     /// Wheel input over the document viewport.
     ViewportWheelScrolled {
         delta_x: f32,
@@ -333,6 +357,12 @@ pub enum Message {
     TagSidebarResizeDragged(f32),
     /// Finish resizing the library tag sidebar.
     EndTagSidebarResize,
+    /// Switch the active library sidebar navigation tab.
+    LibrarySidebarTabChanged(LibrarySidebarTab),
+    /// Expand or collapse the library root node in the sidebar file tree.
+    ToggleLibraryTreeRoot,
+    /// Expand or collapse one folder node in the sidebar file tree.
+    ToggleLibraryTreeFolder(FolderId),
     /// A filesystem watcher event arrived.
     LibraryWatchEvent(LibraryWatchEvent),
     /// Tag filter changed.
@@ -415,6 +445,10 @@ pub enum Message {
     ProgressSaved,
     /// Toggle app theme.
     ThemeToggled,
+    /// Reload KDL style files.
+    ReloadStyles,
+    /// KDL style reload finished.
+    StylesReloaded(Result<Arc<StyleBook>, String>),
     /// A keyboard shortcut was pressed.
     ShortcutPressed(Shortcut),
     /// Settings changed.
@@ -442,6 +476,8 @@ pub enum Shortcut {
     Reset,
     /// Toggle dark/light theme.
     ToggleTheme,
+    /// Reload KDL styles.
+    ReloadStyles,
     /// Scroll down by one viewport.
     PageDown,
     /// Scroll up by one viewport.

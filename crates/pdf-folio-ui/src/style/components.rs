@@ -4,7 +4,9 @@ use iced::widget::{button, container, progress_bar as iced_progress_bar, text, t
 use iced::{Element, Length};
 
 use super::classes::{button_style, container_style, progress_bar_style, text_input_style, Class};
-use super::tokens::{ContentAlignment, FontSize, Spacing, TextAlignment, ThemeTokens};
+use super::tokens::{
+    ui_font, ContentAlignment, FontSize, FontWeight, Spacing, TextAlignment, ThemeTokens,
+};
 
 /// Creates text with semantic alignment control.
 pub fn aligned_text<'a>(
@@ -13,8 +15,20 @@ pub fn aligned_text<'a>(
     size: u32,
     alignment: TextAlignment,
 ) -> iced::widget::Text<'a> {
+    weighted_text(label, tokens, size, alignment, FontWeight::REGULAR)
+}
+
+/// Creates text with semantic alignment and font weight control.
+pub fn weighted_text<'a>(
+    label: impl Into<String>,
+    tokens: ThemeTokens,
+    size: u32,
+    alignment: TextAlignment,
+    weight: iced::font::Weight,
+) -> iced::widget::Text<'a> {
     text(label.into())
         .size(size)
+        .font(ui_font(weight))
         .color(tokens.text_primary)
         .align_x(alignment.horizontal())
 }
@@ -40,13 +54,14 @@ pub fn toolbar_button<'a, Message: 'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
-    button(aligned_text(
+    button(weighted_text(
         label,
         tokens,
         FontSize::MD,
         TextAlignment::Start,
+        FontWeight::MEDIUM,
     ))
-    .padding([Spacing::SM, Spacing::MD])
+    .padding([Spacing::SM, Spacing::LG])
     .style(move |_, status| button_style(tokens, Class::ToolbarButton, status))
 }
 
@@ -55,11 +70,12 @@ pub fn icon_button<'a, Message: 'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
-    button(aligned_text(
+    button(weighted_text(
         label,
         tokens,
         FontSize::MD,
         TextAlignment::Center,
+        FontWeight::MEDIUM,
     ))
     .padding([Spacing::SM, Spacing::MD])
     .style(move |_, status| button_style(tokens, Class::ToolbarButton, status))
@@ -70,12 +86,14 @@ pub fn sidebar_button<'a, Message: 'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
-    button(aligned_text(
+    button(weighted_text(
         label,
         tokens,
         FontSize::MD,
         TextAlignment::Start,
+        FontWeight::MEDIUM,
     ))
+    .padding([Spacing::SM, Spacing::MD])
     .width(Length::Fill)
     .style(move |_, status| button_style(tokens, Class::SidebarRow, status))
 }
@@ -115,13 +133,14 @@ pub fn tag_pill<'a, Message: 'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
-    button(aligned_text(
+    button(weighted_text(
         label,
         tokens,
         FontSize::SM,
         TextAlignment::Center,
+        FontWeight::MEDIUM,
     ))
-    .padding([Spacing::XS, Spacing::SM])
+    .padding([Spacing::XS, Spacing::MD])
     .style(move |_, status| button_style(tokens, Class::TagPill, status))
 }
 
@@ -130,7 +149,11 @@ pub fn section_heading<'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> iced::widget::Text<'a> {
-    aligned_text(label, tokens, FontSize::HEADING, TextAlignment::Start)
+    text(label.into())
+        .size(FontSize::SM)
+        .font(ui_font(FontWeight::MEDIUM))
+        .color(tokens.text_secondary)
+        .align_x(TextAlignment::Start.horizontal())
 }
 
 /// Creates an empty-state panel.
@@ -138,11 +161,15 @@ pub fn empty_state<'a, Message: 'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    container(text(label.into()).size(FontSize::HEADING))
-        .center(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_| container_style(tokens, Class::EmptyState))
-        .into()
+    container(
+        text(label.into())
+            .size(FontSize::HEADING)
+            .font(ui_font(FontWeight::MEDIUM)),
+    )
+    .center(Length::Fill)
+    .height(Length::Fill)
+    .style(move |_| container_style(tokens, Class::EmptyState))
+    .into()
 }
 
 /// Creates a search input.
@@ -154,14 +181,16 @@ pub fn search_input<'a, Message: Clone + 'a>(
 ) -> iced::widget::TextInput<'a, Message> {
     text_input(placeholder, value)
         .on_input(on_input)
-        .padding(super::tokens::Spacing::SM)
+        .padding([super::tokens::Spacing::SM, super::tokens::Spacing::MD])
+        .size(FontSize::MD)
+        .font(ui_font(FontWeight::REGULAR))
         .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
 }
 
 /// Creates a progress bar.
 pub fn progress_bar(value: f32, tokens: ThemeTokens) -> iced::widget::ProgressBar<'static> {
     iced_progress_bar(0.0..=1.0, value.clamp(0.0, 1.0))
-        .girth(3.0)
+        .girth(tokens.primitives.progress_girth)
         .style(move |_| progress_bar_style(tokens, Class::ProgressBar))
 }
 

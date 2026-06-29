@@ -1,0 +1,18 @@
+theme "light" {
+    color "background" "#F1EFE9"
+    color "surface" "#FCFAF5"
+    color "surface_raised" "#F6F2EA"
+    color "text_primary" "#261E14"
+    color "text_secondary" "#745F46"
+    color "accent" "#9C732B"
+    color "border" "#D8CEBC"
+    color "error" "#B03040"
+    color "canvas" "#E8E2D8"
+    color "placeholder" "#E0D8CA"
+    color "focus" "#9C732B"
+    color "shadow" "#00000029"
+
+    primitive "page_shadow_offset_x" 2
+    primitive "page_shadow_offset_y" 2
+    primitive "progress_girth" 3
+}
