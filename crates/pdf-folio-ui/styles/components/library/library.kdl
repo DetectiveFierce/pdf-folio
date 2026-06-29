@@ -47,8 +47,18 @@ component "LibraryImportButton" {
     pressed background="#DEC69C" text="#9C732B" border="#9C732B" theme="light"
 }
 
+component "LibraryGridZoomSlider" {
+    normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=999 theme="espresso"
+    hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
+    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+
+    normal background="#FCFAF5" text="#745F46" border="#D8CEBC" border_width=1 radius=999 theme="light"
+    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
+    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+}
+
 component "LibraryCard" {
-    layout columns=2 width=210 row_height=397 content_width=182 title_width=182 info_height=120 media_max_height=277.2 thumbnail_width=128 masonry_gap=18 scrollbar_gutter=28
+    layout columns=2 width=210 row_height=397 content_width=182 title_width=182 info_height=120 media_max_height=277.2 thumbnail_width=128 masonry_gap=18 scrollbar_gutter=10
 
     normal background="#23180C" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
     hovered background="#2B1D0E" text="#DDD0BA" border="#C8B89A2E" theme="espresso"
@@ -101,7 +111,7 @@ component "EmptyState" {
 }
 
 component "DragInsertionMarker" {
-    layout preview_grid_x_offset=32 preview_grid_y_offset=28 preview_list_x_offset=28 preview_list_y_offset=24 placeholder_content_alpha=0.42
+    layout preview_grid_x_offset=20 preview_grid_y_offset=16 preview_list_x_offset=18 preview_list_y_offset=14 placeholder_content_alpha=0.42
 
     normal background="#D4A853" text="#1A1208" border="#D4A853" border_width=0 radius=4 theme="espresso"
     normal background="#9C732B" text="#FCFAF5" border="#9C732B" border_width=0 radius=4 theme="light"

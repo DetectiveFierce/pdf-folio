@@ -11,6 +11,7 @@ use pdf_folio_library::{
     EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
 };
 
+use crate::app::ThumbnailSize;
 use crate::style::StyleBook;
 use crate::Settings;
 
@@ -232,6 +233,7 @@ pub enum Message {
     /// A thumbnail render finished.
     ThumbnailReady {
         entry_id: EntryId,
+        size: ThumbnailSize,
         data: Vec<u8>,
         width: u16,
         height: u16,
@@ -284,6 +286,8 @@ pub enum Message {
     ToggleViewMode,
     /// Change the library sort mode.
     LibrarySortChanged(LibrarySortMode),
+    /// Change the masonry grid card scale.
+    LibraryGridZoomChanged(f32),
     /// Library view preferences were persisted.
     LibraryPreferencesSaved,
     /// Add an annotation.
@@ -312,6 +316,10 @@ pub enum Message {
     OpenLibraryEntry(EntryId),
     /// A library entry was clicked.
     LibraryEntryClicked(EntryId),
+    /// A library entry hover target changed.
+    LibraryEntryHoverChanged(EntryId, bool),
+    /// Animation frame for active UI tweens.
+    AnimationFrame(Instant),
     /// Clear the current library PDF selection.
     ClearLibrarySelection,
     /// Select all currently visible library PDFs.

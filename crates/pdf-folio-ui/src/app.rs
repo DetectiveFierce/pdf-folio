@@ -13,12 +13,13 @@ use iced::stream;
 use iced::time;
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, canvas, column, container, image, mouse_area, pick_list, pin, row, scrollable, stack,
-    text, text_input, tooltip, Svg,
+    button, canvas, column, container, image, mouse_area, pick_list, pin, row, scrollable, slider,
+    stack, text, text_input, tooltip, Svg,
 };
 use iced::widget::{operation, Id};
 use iced::{
-    event, keyboard, Color, ContentFit, Element, Event, Length, Point, Rectangle, Renderer, Size,
+    animation, event, font, keyboard, Animation, Color, ContentFit, Element, Event, Font, Length,
+    Point, Rectangle, Renderer, Size,
 };
 use iced::{Subscription, Task, Theme};
 use notify::{EventKind, RecursiveMode, Watcher};
@@ -36,8 +37,8 @@ use crate::messages::{
 use crate::style::{
     container_style, display_font, empty_state, menu_style_for_class, mix_color, pick_list_style,
     progress_bar, scrollable_style, search_input_with_class, section_heading, side_border,
-    side_border_for_class, tag_pill, text_input_style, toc_entry, toolbar_button, ui_font,
-    viewer_primitives, Class, ComponentState, FontSize, FontWeight, LabelSection, Spacing,
+    side_border_for_class, slider_style, tag_pill, text_input_style, toc_entry, toolbar_button,
+    ui_font, viewer_primitives, Class, ComponentState, FontSize, FontWeight, LabelSection, Spacing,
     StyleBook, ThemeTokens, UI_FONT_FAMILY,
 };
 use crate::theme::AppTheme;
@@ -55,6 +56,9 @@ const GEIST_MONO_PROPO_SEMIBOLD: &[u8] =
     include_bytes!("../assets/fonts/GeistMonoNerdFontPropo-SemiBold.otf");
 const GEIST_MONO_PROPO_BOLD: &[u8] =
     include_bytes!("../assets/fonts/GeistMonoNerdFontPropo-Bold.otf");
+const FILE_TREE_FONT_FAMILY: &str = "GeistMono Nerd Font Propo";
+const FILE_TREE_LABEL_SIZE: u32 = FontSize::MD;
+const FILE_TREE_ROW_HEIGHT: f32 = 26.0;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
 const LIBRARY_DRAG_AUTOSCROLL_TICK_MS: u64 = 16;
 const LIBRARY_DRAG_AUTOSCROLL_EDGE_BAND: f32 = 96.0;
@@ -62,6 +66,14 @@ const LIBRARY_DRAG_AUTOSCROLL_MAX_SPEED: f32 = 980.0;
 const LIBRARY_DRAG_AUTOSCROLL_MIN_SPEED: f32 = 80.0;
 const LIBRARY_DRAG_AUTOSCROLL_MAX_DT: f32 = 1.0 / 20.0;
 const LIBRARY_DRAG_ACTIVATION_DISTANCE: f32 = 6.0;
+const LIBRARY_CARD_HOVER_TICK_MS: u64 = 16;
+const LIBRARY_CARD_HOVER_DURATION_MS: u64 = 180;
+const LIBRARY_CARD_HOVER_LIFT: f32 = 2.0;
+const LIBRARY_ROW_HOVER_LIFT: f32 = 1.0;
+const LIBRARY_GRID_ZOOM_MIN: f32 = 0.25;
+const LIBRARY_GRID_ZOOM_MAX: f32 = 12.0;
+const LIBRARY_GRID_ZOOM_STEP: f32 = 0.05;
+const LIBRARY_GRID_ZOOM_DENSE_COLUMN_CAP: usize = 28;
 const APP_MENU_LABELS: [AppMenu; 7] = [
     AppMenu::File,
     AppMenu::Edit,
@@ -206,6 +218,8 @@ pub struct PDFolioApp {
     pub expanded_outline_paths: HashSet<Vec<usize>>,
     /// Whether the placeholder view-mode toggle is in list mode.
     pub compact_view_mode: bool,
+    /// Card scale applied to the masonry library grid.
+    pub library_grid_zoom: f32,
     /// Whether the jump-to-page overlay is open.
     pub jump_dialog_open: bool,
     /// Current jump-to-page input text.
@@ -254,10 +268,10 @@ pub struct PDFolioApp {
     pub library_tree_root_expanded: bool,
     /// Folder nodes collapsed in the sidebar file tree.
     pub collapsed_library_tree_folders: HashSet<FolderId>,
-    /// Lazily loaded cover thumbnails keyed by entry id.
-    pub thumbnails: HashMap<EntryId, ThumbnailView>,
+    /// Lazily loaded cover thumbnails keyed by entry id and resolution tier.
+    pub thumbnails: HashMap<ThumbnailCacheKey, ThumbnailView>,
     /// Thumbnail loads/renders currently in flight.
-    pub pending_thumbnails: HashSet<EntryId>,
+    pub pending_thumbnails: HashSet<ThumbnailCacheKey>,
     /// Active tag filter.
     pub active_tag_filter: Option<String>,
     /// Entry currently showing inline tag input.
@@ -282,6 +296,10 @@ pub struct PDFolioApp {
     pub library_status: Option<String>,
     /// Last library entry click used to detect double-click opens.
     pub last_library_click: Option<(EntryId, Instant)>,
+    /// Hover tween state for library cards keyed by entry id.
+    pub library_card_hover_animations: HashMap<EntryId, Animation<bool>>,
+    /// Current time used to sample active library card tweens.
+    pub animation_now: Instant,
     /// Active library entry drag state.
     pub library_drag: Option<LibraryDragState>,
     /// Current visual theme.
@@ -309,6 +327,44 @@ pub struct ThumbnailView {
     pub height: u16,
     /// Iced image handle backed by RGBA pixels.
     pub handle: image::Handle,
+}
+
+/// Rendered cover thumbnail cache key.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ThumbnailCacheKey {
+    /// Library entry id.
+    pub entry_id: EntryId,
+    /// Thumbnail resolution tier.
+    pub size: ThumbnailSize,
+}
+
+/// Thumbnail resolution tiers stored on disk and selected by grid zoom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ThumbnailSize {
+    /// Dense grid thumbnail.
+    Small,
+    /// Normal grid and list thumbnail.
+    Default,
+    /// Large single/few-column grid thumbnail.
+    Large,
+}
+
+impl ThumbnailSize {
+    fn width_px(self) -> u16 {
+        match self {
+            Self::Small => 96,
+            Self::Default => 200,
+            Self::Large => 640,
+        }
+    }
+
+    fn cache_suffix(self) -> Option<&'static str> {
+        match self {
+            Self::Small => Some("small"),
+            Self::Default => None,
+            Self::Large => Some("large"),
+        }
+    }
 }
 
 /// Current manual-reorder drag state for the library view.
@@ -404,6 +460,9 @@ impl PDFolioApp {
             outline: Vec::new(),
             expanded_outline_paths: HashSet::new(),
             compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),
+            library_grid_zoom: preferences
+                .grid_zoom
+                .clamp(LIBRARY_GRID_ZOOM_MIN, LIBRARY_GRID_ZOOM_MAX),
             jump_dialog_open: false,
             jump_input: String::new(),
             annotations: Vec::new(),
@@ -445,6 +504,8 @@ impl PDFolioApp {
             pending_confirmation: None,
             library_status: None,
             last_library_click: None,
+            library_card_hover_animations: HashMap::new(),
+            animation_now: Instant::now(),
             library_drag: None,
             theme: AppTheme::Dark,
             style_book,
@@ -670,6 +731,127 @@ impl PDFolioApp {
             })
             .cloned()
             .collect()
+    }
+
+    fn library_grid_zoom(&self) -> f32 {
+        self.library_grid_zoom
+            .clamp(LIBRARY_GRID_ZOOM_MIN, self.library_grid_zoom_max())
+    }
+
+    fn library_grid_zoom_max(&self) -> f32 {
+        let width = self.library_available_grid_width();
+        (width / self.layout().library_grid_card_width)
+            .max(1.0)
+            .clamp(1.0, LIBRARY_GRID_ZOOM_MAX)
+    }
+
+    fn library_available_grid_width(&self) -> f32 {
+        let sidebar_width = if self.library_tag_sidebar_open {
+            self.library_tag_sidebar_width + self.layout().sidebar_resize_handle_width
+        } else {
+            0.0
+        };
+        let window_main_width = (self.viewport_width - sidebar_width).max(1.0);
+        self.library_viewport_width
+            .max(window_main_width)
+            .max(self.layout().window_size()[0] - sidebar_width)
+            - Spacing::LG * 2.0
+            - self.layout().library_scrollbar_gutter
+    }
+
+    fn recalculate_library_viewport_width(&mut self) {
+        let sidebar_width = if self.library_tag_sidebar_open {
+            self.library_tag_sidebar_width + self.layout().sidebar_resize_handle_width
+        } else {
+            0.0
+        };
+        self.library_viewport_width =
+            (self.viewport_width - sidebar_width - Spacing::LG * 2.0).max(1.0);
+    }
+
+    fn fit_library_grid_zoom_to_columns(&mut self, columns: usize) {
+        if self.compact_view_mode || columns == 0 {
+            return;
+        }
+        let columns = columns.min(LIBRARY_GRID_ZOOM_DENSE_COLUMN_CAP);
+        let available_width = self.library_available_grid_width().max(1.0);
+        let total_gap = columns.saturating_sub(1) as f32 * self.layout().library_masonry_gap;
+        let card_width = ((available_width - total_gap) / columns as f32).max(1.0);
+        self.library_grid_zoom = (card_width / self.layout().library_grid_card_width)
+            .clamp(LIBRARY_GRID_ZOOM_MIN, self.library_grid_zoom_max());
+    }
+
+    fn library_grid_card_width(&self) -> f32 {
+        self.layout().library_grid_card_width * self.library_grid_zoom()
+    }
+
+    fn library_card_info_height(&self) -> f32 {
+        (self.layout().library_card_info_height * self.library_grid_zoom()).clamp(88.0, 176.0)
+    }
+
+    fn library_card_media_max_height(&self) -> f32 {
+        self.layout().library_card_media_max_height * self.library_grid_zoom()
+    }
+
+    fn library_card_title_width(&self) -> f32 {
+        self.layout().library_card_title_width * self.library_grid_zoom()
+    }
+
+    fn library_card_text_scale(&self) -> f32 {
+        self.library_grid_zoom().clamp(0.55, 1.35)
+    }
+
+    fn library_card_font_size(&self, base_size: u32) -> u32 {
+        ((base_size as f32) * self.library_card_text_scale())
+            .round()
+            .clamp(8.0, 28.0) as u32
+    }
+
+    fn library_card_padding(&self) -> f32 {
+        (Spacing::LG * self.library_card_text_scale()).clamp(4.0, 24.0)
+    }
+
+    fn library_card_spacing(&self) -> f32 {
+        (Spacing::SM * self.library_card_text_scale()).clamp(2.0, Spacing::SM)
+    }
+
+    fn library_card_title_font_size(&self) -> u32 {
+        self.library_card_font_size(16)
+    }
+
+    fn thumbnail_size_for_grid_zoom(&self) -> ThumbnailSize {
+        let width = self.library_grid_card_width();
+        if width <= 140.0 {
+            ThumbnailSize::Small
+        } else if width >= 340.0 {
+            ThumbnailSize::Large
+        } else {
+            ThumbnailSize::Default
+        }
+    }
+
+    fn thumbnail_for_entry(
+        &self,
+        entry_id: &EntryId,
+        preferred_size: ThumbnailSize,
+    ) -> Option<&ThumbnailView> {
+        [
+            preferred_size,
+            ThumbnailSize::Default,
+            ThumbnailSize::Large,
+            ThumbnailSize::Small,
+        ]
+        .into_iter()
+        .find_map(|size| {
+            self.thumbnails.get(&ThumbnailCacheKey {
+                entry_id: entry_id.clone(),
+                size,
+            })
+        })
+    }
+
+    fn library_grid_zoom_label(&self) -> String {
+        format!("{:.0}%", self.library_grid_zoom() * 100.0)
     }
 
     fn child_folders(&self) -> Vec<Folder> {
@@ -898,32 +1080,20 @@ impl PDFolioApp {
         if self.compact_view_mode {
             1
         } else {
-            let sidebar_width = if self.library_tag_sidebar_open {
-                self.library_tag_sidebar_width + self.layout().sidebar_resize_handle_width
-            } else {
-                0.0
-            };
-            let window_main_width = (self.viewport_width - sidebar_width).max(1.0);
-            let available_width = self
-                .library_viewport_width
-                .max(window_main_width)
-                .max(self.layout().window_size()[0] - sidebar_width)
-                - Spacing::LG * 2.0
-                - self.layout().library_scrollbar_gutter;
-            let column_pitch =
-                self.layout().library_grid_card_width + self.layout().library_masonry_gap;
+            let available_width = self.library_available_grid_width();
+            let column_pitch = self.library_grid_card_width() + self.layout().library_masonry_gap;
             ((available_width + self.layout().library_masonry_gap) / column_pitch)
                 .floor()
-                .max(self.layout().card_grid_columns as f32)
-                .min(10.0) as usize
+                .max(1.0)
+                .min(LIBRARY_GRID_ZOOM_DENSE_COLUMN_CAP as f32) as usize
         }
     }
 
     fn library_row_height(&self) -> f32 {
         if self.compact_view_mode {
-            self.layout().library_list_row_height
+            self.layout().library_list_row_height + LIBRARY_ROW_HOVER_LIFT
         } else {
-            self.layout().library_grid_row_height
+            self.layout().library_grid_row_height * self.library_grid_zoom()
         }
     }
 
@@ -965,16 +1135,57 @@ impl PDFolioApp {
 
     fn library_card_estimated_height(&self, entry_id: &EntryId) -> f32 {
         let thumbnail_height = self
-            .thumbnails
-            .get(entry_id)
+            .thumbnail_for_entry(entry_id, self.thumbnail_size_for_grid_zoom())
             .map(|thumbnail| {
-                let height = self.layout().library_grid_card_width * f32::from(thumbnail.height)
+                let height = self.library_grid_card_width() * f32::from(thumbnail.height)
                     / f32::from(thumbnail.width.max(1));
-                height.min(self.layout().library_card_media_max_height)
+                height.min(self.library_card_media_max_height())
             })
-            .unwrap_or(self.layout().library_card_media_max_height);
+            .unwrap_or(self.library_card_media_max_height());
 
-        thumbnail_height + self.layout().library_card_info_height
+        thumbnail_height + self.library_card_info_height() + LIBRARY_CARD_HOVER_LIFT
+    }
+
+    fn library_card_hover_progress(&self, entry_id: &EntryId) -> f32 {
+        self.library_card_hover_animations
+            .get(entry_id)
+            .map(|animation| animation.interpolate(0.0, 1.0, self.animation_now))
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0)
+    }
+
+    fn set_library_card_hover(&mut self, entry_id: EntryId, hovered: bool) {
+        self.animation_now = Instant::now();
+        let animation = self
+            .library_card_hover_animations
+            .entry(entry_id)
+            .or_insert_with(Self::library_card_hover_animation);
+        animation.go_mut(hovered, self.animation_now);
+    }
+
+    fn tick_animations(&mut self, now: Instant) {
+        self.animation_now = now;
+        let visible_entry_ids = self
+            .visible_library_entries()
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect::<HashSet<_>>();
+        self.library_card_hover_animations
+            .retain(|entry_id, animation| {
+                animation.is_animating(now) || visible_entry_ids.contains(entry_id)
+            });
+    }
+
+    fn library_card_hover_animation() -> Animation<bool> {
+        Animation::new(false)
+            .duration(Duration::from_millis(LIBRARY_CARD_HOVER_DURATION_MS))
+            .easing(animation::Easing::EaseOutCubic)
+    }
+
+    fn library_card_hover_animation_active(&self) -> bool {
+        self.library_card_hover_animations
+            .values()
+            .any(|animation| animation.is_animating(self.animation_now))
     }
 
     fn can_drag_reorder_library(&self) -> bool {
@@ -1044,25 +1255,33 @@ impl PDFolioApp {
             return;
         };
 
+        let compact_entries = entries
+            .iter()
+            .filter(|entry| {
+                self.library_drag
+                    .as_ref()
+                    .is_none_or(|drag| entry.id != drag.entry_id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let compact_len = compact_entries.len();
         let content_y = (cursor.y - self.library_viewport_y + self.library_scroll_offset).max(0.0);
         let index = if self.compact_view_mode {
-            let row = (content_y / self.library_row_height()).floor().max(0.0) as usize;
+            let row = (content_y / self.library_row_height()).round().max(0.0) as usize;
             row.saturating_mul(self.library_entries_per_row())
         } else {
             let per_row = self.library_entries_per_row().max(1);
-            let column_step = (self.layout().library_grid_card_width
-                + self.layout().library_masonry_gap)
-                .max(1.0);
+            let column_step =
+                (self.library_grid_card_width() + self.layout().library_masonry_gap).max(1.0);
             let content_x = (cursor.x - self.library_viewport_x).max(0.0);
             let column = (content_x / column_step)
                 .floor()
                 .clamp(0.0, per_row.saturating_sub(1) as f32) as usize;
-            let layout = self.library_masonry_layout(&entries);
-            masonry_target_index(&layout, column, content_y)
-                .unwrap_or(entries_len.saturating_sub(1))
+            let layout = self.library_masonry_layout(&compact_entries);
+            masonry_target_index(&layout, column, content_y).unwrap_or(compact_len)
         };
 
-        let target_index = index.min(entries_len.saturating_sub(1));
+        let target_index = index.min(compact_len);
         if let Some(drag) = &mut self.library_drag {
             drag.target_index = target_index;
         }
@@ -1171,7 +1390,7 @@ impl PDFolioApp {
         }
 
         let mut entries = self.visible_library_entries();
-        if drag.source_index >= entries.len() || drag.target_index >= entries.len() {
+        if drag.source_index >= entries.len() || drag.target_index > entries.len() {
             return Task::none();
         }
 
@@ -1214,18 +1433,26 @@ impl PDFolioApp {
                 .filter_map(|item| entries.get(item.index).cloned())
                 .collect()
         };
+        let thumbnail_size = if self.compact_view_mode {
+            ThumbnailSize::Default
+        } else {
+            self.thumbnail_size_for_grid_zoom()
+        };
         for entry in visible_entries {
-            if self.thumbnails.contains_key(&entry.id)
-                || self.pending_thumbnails.contains(&entry.id)
-            {
+            let key = ThumbnailCacheKey {
+                entry_id: entry.id.clone(),
+                size: thumbnail_size,
+            };
+            if self.thumbnails.contains_key(&key) || self.pending_thumbnails.contains(&key) {
                 continue;
             }
-            self.pending_thumbnails.insert(entry.id.clone());
+            self.pending_thumbnails.insert(key);
             tasks.push(Task::perform(
-                load_or_render_thumbnail(entry),
+                load_or_render_thumbnail(entry, thumbnail_size),
                 |result| match result {
-                    Ok((entry_id, page)) => Message::ThumbnailReady {
+                    Ok((entry_id, size, page)) => Message::ThumbnailReady {
                         entry_id,
+                        size,
                         data: page.rgba,
                         width: page.width,
                         height: page.height,
@@ -1544,6 +1771,17 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library_drag = None;
             return Task::batch([save_library_preferences_task(app), app.refresh_library()]);
         }
+        Message::LibraryGridZoomChanged(zoom) => {
+            app.library_grid_zoom = zoom.clamp(LIBRARY_GRID_ZOOM_MIN, LIBRARY_GRID_ZOOM_MAX);
+            app.library_scroll_offset = app
+                .library_scroll_offset
+                .min(app.max_library_scroll_offset());
+            app.update_library_drag_target_from_cursor();
+            return Task::batch([
+                save_library_preferences_task(app),
+                app.request_visible_thumbnails(),
+            ]);
+        }
         Message::LibraryLoaded(entries) => {
             app.library_entries = entries;
             let visible_entries = app.visible_library_entries();
@@ -1635,6 +1873,12 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 return Task::done(Message::OpenLibraryEntry(entry_id));
             }
         }
+        Message::LibraryEntryHoverChanged(entry_id, hovered) => {
+            app.set_library_card_hover(entry_id, hovered);
+        }
+        Message::AnimationFrame(now) => {
+            app.tick_animations(now);
+        }
         Message::BeginLibraryEntryDrag(entry_id) => {
             app.begin_library_drag(entry_id);
         }
@@ -1707,11 +1951,19 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return app.request_visible_thumbnails();
         }
         Message::CollapseLibrarySidebar => {
+            let columns = app.library_entries_per_row();
             app.library_tag_sidebar_open = false;
             app.resizing_library_tag_sidebar = false;
+            app.recalculate_library_viewport_width();
+            app.fit_library_grid_zoom_to_columns(columns);
+            return app.request_visible_thumbnails();
         }
         Message::ExpandLibrarySidebar => {
+            let columns = app.library_entries_per_row();
             app.library_tag_sidebar_open = true;
+            app.recalculate_library_viewport_width();
+            app.fit_library_grid_zoom_to_columns(columns);
+            return app.request_visible_thumbnails();
         }
         Message::BeginTagSidebarResize => {
             app.resizing_library_tag_sidebar = true;
@@ -1722,6 +1974,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     app.layout().library_sidebar_min_width,
                     app.layout().library_sidebar_max_width,
                 );
+                app.recalculate_library_viewport_width();
             }
         }
         Message::EndTagSidebarResize => {
@@ -2088,8 +2341,9 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 return Task::none();
             }
             for entry in &entries {
-                app.thumbnails.remove(&entry.id);
-                app.pending_thumbnails.remove(&entry.id);
+                app.thumbnails.retain(|key, _| key.entry_id != entry.id);
+                app.pending_thumbnails
+                    .retain(|key| key.entry_id != entry.id);
             }
             app.library_status = Some(format!("Rebuilding {} thumbnails...", entries.len()));
             return bulk_thumbnail_task(entries);
@@ -2133,14 +2387,19 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ThumbnailReady {
             entry_id,
+            size,
             data,
             width,
             height,
         } => {
-            app.pending_thumbnails.remove(&entry_id);
+            let key = ThumbnailCacheKey {
+                entry_id: entry_id.clone(),
+                size,
+            };
+            app.pending_thumbnails.remove(&key);
             let handle = image::Handle::from_rgba(u32::from(width), u32::from(height), data);
             app.thumbnails.insert(
-                entry_id,
+                key,
                 ThumbnailView {
                     width,
                     height,
@@ -2232,13 +2491,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.viewport_width = width.max(1.0);
             app.viewport_height = height.max(1.0);
             if app.mode == AppMode::Library {
-                let sidebar_width = if app.library_tag_sidebar_open {
-                    app.library_tag_sidebar_width + app.layout().sidebar_resize_handle_width
-                } else {
-                    0.0
-                };
-                app.library_viewport_width =
-                    (app.viewport_width - sidebar_width - Spacing::LG * 2.0).max(1.0);
+                app.recalculate_library_viewport_width();
                 app.library_viewport_height =
                     (app.viewport_height - app_menu_bar_height(app) - Spacing::LG * 2.0).max(1.0);
                 return app.request_visible_thumbnails();
@@ -2580,9 +2833,9 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         ));
     } else if app.compact_view_mode {
         let mut rows = column![].spacing(Spacing::SM);
-        let top_spacer = window.start as f32 * app.layout().library_list_row_height;
+        let top_spacer = window.start as f32 * app.library_row_height();
         let bottom_spacer =
-            entries.len().saturating_sub(window.end) as f32 * app.layout().library_list_row_height;
+            entries.len().saturating_sub(window.end) as f32 * app.library_row_height();
         if top_spacer > 0.0 {
             rows = rows.push(container("").height(top_spacer));
         }
@@ -2613,7 +2866,7 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             .height(layout.content_height);
         for column_items in &layout.columns {
             let mut stack = column![]
-                .width(app.layout().library_grid_card_width)
+                .width(app.library_grid_card_width())
                 .height(layout.content_height);
             let mut cursor_y = 0.0;
             for item_layout in column_items {
@@ -2703,7 +2956,13 @@ fn view_library_breadcrumb_row<'a>(
     }
 
     row![
-        trail.width(Length::Fill),
+        row![
+            trail.width(Length::Shrink),
+            library_grid_zoom_control(app, tokens),
+        ]
+        .spacing(Spacing::MD)
+        .align_y(iced::Alignment::Center)
+        .width(Length::Fill),
         text(reorder_hint)
             .size(FontSize::SM)
             .font(ui_font(FontWeight::REGULAR))
@@ -2957,7 +3216,7 @@ fn folder_cards_per_row(app: &PDFolioApp) -> usize {
         .max(app.layout().window_size()[0])
         - Spacing::LG * 2.0
         - app.layout().library_scrollbar_gutter;
-    let card_pitch = app.layout().library_grid_card_width + app.layout().library_masonry_gap;
+    let card_pitch = app.library_grid_card_width() + app.layout().library_masonry_gap;
     ((available_width + app.layout().library_masonry_gap) / card_pitch)
         .floor()
         .max(1.0) as usize
@@ -2987,25 +3246,31 @@ fn folder_grid_card<'a>(
         .filter(|child| child.parent_id.as_ref() == Some(&folder.id))
         .count();
     let meta = folder_meta_label(count, child_count);
-    let title = truncate_for_width(&folder.name, app.layout().library_card_thumbnail_width, 0.0);
+    let folder_title_size = app.library_card_font_size(FontSize::CONTROL);
+    let folder_meta_size = app.library_card_font_size(FontSize::SM);
+    let folder_text_width = (app.library_grid_card_width() - 72.0).max(16.0);
+    let title =
+        truncate_for_width_with_font(&folder.name, folder_text_width, 0.0, folder_title_size);
+    let meta = truncate_for_width_with_font(&meta, folder_text_width, 0.0, folder_meta_size);
     let content = row![
         folder_icon(tokens),
         column![
             text(title)
-                .size(FontSize::CONTROL)
+                .size(folder_title_size)
                 .font(ui_font(FontWeight::SEMIBOLD))
                 .color(tokens.text_primary)
                 .wrapping(Wrapping::None),
             text(meta)
-                .size(FontSize::SM)
+                .size(folder_meta_size)
                 .font(ui_font(FontWeight::REGULAR))
-                .color(tokens.text_secondary),
+                .color(tokens.text_secondary)
+                .wrapping(Wrapping::None),
         ]
-        .spacing(Spacing::XS)
+        .spacing(app.library_card_spacing().min(Spacing::XS))
         .width(Length::Fill),
     ]
-    .spacing(Spacing::MD)
-    .padding(Spacing::MD)
+    .spacing(app.library_card_spacing().max(Spacing::XS))
+    .padding(app.library_card_padding().min(Spacing::MD))
     .height(app.layout().library_folder_grid_row_height)
     .align_y(iced::Alignment::Center);
 
@@ -3014,7 +3279,7 @@ fn folder_grid_card<'a>(
             .width(Length::Fill)
             .style(move |_| container_style(tokens, Class::LibraryFolderCard)),
     )
-    .width(app.layout().library_grid_card_width)
+    .width(app.library_grid_card_width())
     .on_press(Message::FolderSelected(Some(folder_id)))
     .style(move |_, status| crate::style::button_style(tokens, Class::LibraryFolderCard, status))
     .into()
@@ -3137,22 +3402,14 @@ fn masonry_target_index(
 ) -> Option<usize> {
     let column = layout.columns.get(column_index)?;
     if column.is_empty() {
-        return Some(
-            layout
-                .columns
-                .iter()
-                .flat_map(|column| column.iter())
-                .map(|item| item.index)
-                .max()
-                .unwrap_or(0),
-        );
+        return Some(layout.columns.iter().flatten().count());
     }
 
     column
         .iter()
         .find(|item| content_y < item.top + item.height / 2.0)
         .map(|item| item.index)
-        .or_else(|| column.last().map(|item| item.index))
+        .or_else(|| column.last().map(|item| item.index + 1))
 }
 
 fn floating_library_drag_preview<'a>(
@@ -3454,7 +3711,7 @@ fn view_file_tree_sidebar<'a>(
         sidebar_width,
         tokens,
     ),]
-    .spacing(Spacing::XS);
+    .spacing(0);
 
     if app.library_tree_root_expanded {
         tree = tree.push(folder_sidebar_rows(app, None, 1, sidebar_width, tokens));
@@ -3711,7 +3968,7 @@ fn folder_sidebar_rows<'a>(
     sidebar_width: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let mut rows = column![].spacing(Spacing::XS);
+    let mut rows = column![].spacing(0);
     let mut children: Vec<&Folder> = app
         .library_folders
         .iter()
@@ -3824,12 +4081,13 @@ fn file_tree_row<'a>(
     let mut content = row![
         container("").width(indent),
         chevron,
-        text(truncate_for_width(&label, label_width, 0.0))
-            .size(FontSize::MD)
-            .font(ui_font(if active {
+        text(file_tree_label(&label, label_width))
+            .size(FILE_TREE_LABEL_SIZE)
+            .line_height(1.12)
+            .font(file_tree_font(if active {
                 FontWeight::SEMIBOLD
             } else {
-                FontWeight::REGULAR
+                FontWeight::MEDIUM
             }))
             .color(text_color)
             .wrapping(Wrapping::None)
@@ -3849,7 +4107,7 @@ fn file_tree_row<'a>(
     }
 
     let row_button = button(content)
-        .height(28.0)
+        .height(FILE_TREE_ROW_HEIGHT)
         .width(Length::Fill)
         .padding([3.0, Spacing::SM])
         .style(move |_, status| {
@@ -3999,6 +4257,44 @@ fn library_layout_toggle_button(app: &PDFolioApp, tokens: ThemeTokens) -> Elemen
     .into()
 }
 
+fn library_grid_zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element<'a, Message> {
+    let control = row![
+        text("Grid")
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary),
+        slider(
+            LIBRARY_GRID_ZOOM_MIN..=app.library_grid_zoom_max(),
+            app.library_grid_zoom(),
+            Message::LibraryGridZoomChanged,
+        )
+        .step(LIBRARY_GRID_ZOOM_STEP)
+        .width(150.0)
+        .style(move |_, status| slider_style(tokens, Class::LibraryGridZoomSlider, status)),
+        text(app.library_grid_zoom_label())
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary)
+            .width(44.0),
+    ]
+    .spacing(Spacing::SM)
+    .align_y(iced::Alignment::Center);
+
+    tooltip(
+        control,
+        container(
+            text("Grid zoom")
+                .size(FontSize::SM)
+                .color(tokens.text_primary),
+        )
+        .padding(Spacing::SM)
+        .style(move |_| container_style(tokens, Class::Tooltip)),
+        tooltip::Position::Bottom,
+    )
+    .delay(Duration::from_millis(600))
+    .into()
+}
+
 fn library_new_folder_button<'a>(tokens: ThemeTokens) -> iced::widget::Button<'a, Message> {
     button(
         text("New folder")
@@ -4040,34 +4336,47 @@ fn library_entry_card<'a>(
     };
     let progress_value = progress_fraction(&entry);
     let media = card_thumbnail_media(app, &entry_id, tokens, content_alpha);
+    let title_font_size = app.library_card_title_font_size();
+    let metadata_font_size = app.library_card_font_size(FontSize::SM);
+    let text_width = app.library_card_title_width();
+    let author = truncate_for_width_with_font(&author, text_width, 0.0, metadata_font_size);
+    let metadata_label =
+        truncate_for_width_with_font(&metadata_label, text_width, 0.0, metadata_font_size);
+    let activity_label =
+        truncate_for_width_with_font(&activity_label, text_width, 0.0, metadata_font_size);
+    let hover_progress = if mode == LibraryEntryRenderMode::Normal {
+        app.library_card_hover_progress(&entry_id)
+    } else {
+        0.0
+    };
+    let top_lift_space = LIBRARY_CARD_HOVER_LIFT * (1.0 - hover_progress);
+    let bottom_lift_space = LIBRARY_CARD_HOVER_LIFT * hover_progress;
     let mut info = column![
-        truncated_title(
-            title,
-            app.layout().library_card_title_width,
-            tokens,
-            content_alpha
-        ),
+        truncated_title(title, text_width, tokens, content_alpha, title_font_size),
         text(author)
-            .size(FontSize::SM)
+            .size(metadata_font_size)
             .font(ui_font(FontWeight::REGULAR))
-            .color(text_secondary),
+            .color(text_secondary)
+            .wrapping(Wrapping::None),
         text(metadata_label)
-            .size(FontSize::SM)
+            .size(metadata_font_size)
             .font(ui_font(FontWeight::REGULAR))
-            .color(text_secondary),
+            .color(text_secondary)
+            .wrapping(Wrapping::None),
         text(activity_label)
-            .size(FontSize::SM)
+            .size(metadata_font_size)
             .font(ui_font(if search_page.is_some() {
                 FontWeight::MEDIUM
             } else {
                 FontWeight::REGULAR
             }))
-            .color(activity_color),
+            .color(activity_color)
+            .wrapping(Wrapping::None),
         progress_bar(progress_value, tokens),
     ]
-    .spacing(Spacing::SM)
-    .padding(Spacing::LG)
-    .height(app.layout().library_card_info_height)
+    .spacing(app.library_card_spacing())
+    .padding(app.library_card_padding())
+    .height(app.library_card_info_height())
     .width(Length::Fill);
 
     if mode == LibraryEntryRenderMode::Normal && app.tag_entry_id.as_ref() == Some(&entry_id) {
@@ -4079,19 +4388,27 @@ fn library_entry_card<'a>(
     }
     let body = column![media, info].spacing(0).width(Length::Fill);
     let width = if mode == LibraryEntryRenderMode::Floating {
-        Length::Fixed(app.layout().library_grid_card_width)
+        Length::Fixed(app.library_grid_card_width())
     } else {
-        Length::Fixed(app.layout().library_grid_card_width)
+        Length::Fixed(app.library_grid_card_width())
     };
-    let surface = container(body)
-        .width(width)
-        .clip(true)
-        .style(move |_| library_entry_container_style(tokens, Class::LibraryCard, mode, selected));
+    let surface = container(body).width(width).clip(true).style(move |_| {
+        library_entry_container_style(tokens, Class::LibraryCard, mode, selected, hover_progress)
+    });
+    let lifted_surface = column![
+        container("").height(top_lift_space),
+        surface,
+        container("").height(bottom_lift_space),
+    ]
+    .spacing(0)
+    .width(width);
 
     if mode != LibraryEntryRenderMode::Normal {
-        surface.into()
+        lifted_surface.into()
     } else {
-        let area = mouse_area(surface)
+        let area = mouse_area(lifted_surface)
+            .on_enter(Message::LibraryEntryHoverChanged(entry_id.clone(), true))
+            .on_exit(Message::LibraryEntryHoverChanged(entry_id.clone(), false))
             .on_press(Message::BeginLibraryEntryDrag(entry_id.clone()))
             .on_release(Message::EndLibraryEntryDrag);
         if app.library_drag.as_ref().is_some_and(|drag| drag.active) {
@@ -4122,6 +4439,13 @@ fn library_entry_row<'a>(
     let progress_value = progress_fraction(&entry);
     let search_page = app.search_hit_pages.get(&entry_id).copied();
     let content_alpha = library_entry_content_alpha(app, mode);
+    let hover_progress = if mode == LibraryEntryRenderMode::Normal {
+        app.library_card_hover_progress(&entry_id)
+    } else {
+        0.0
+    };
+    let top_lift_space = LIBRARY_ROW_HOVER_LIFT * (1.0 - hover_progress);
+    let bottom_lift_space = LIBRARY_ROW_HOVER_LIFT * hover_progress;
     let text_secondary = with_alpha(tokens.text_secondary, content_alpha);
     let accent = with_alpha(tokens.accent, content_alpha);
     let mut detail_column = column![
@@ -4129,7 +4453,8 @@ fn library_entry_row<'a>(
             title,
             app.layout().library_row_title_width,
             tokens,
-            content_alpha
+            content_alpha,
+            16
         ),
         text(details)
             .size(FontSize::SM)
@@ -4173,14 +4498,23 @@ fn library_entry_row<'a>(
     } else {
         Length::Fill
     };
-    let surface = container(row_content)
-        .width(width)
-        .style(move |_| library_entry_container_style(tokens, Class::LibraryRow, mode, selected));
+    let surface = container(row_content).width(width).style(move |_| {
+        library_entry_container_style(tokens, Class::LibraryRow, mode, selected, hover_progress)
+    });
+    let lifted_surface = column![
+        container("").height(top_lift_space),
+        surface,
+        container("").height(bottom_lift_space),
+    ]
+    .spacing(0)
+    .width(width);
 
     if mode != LibraryEntryRenderMode::Normal {
-        surface.into()
+        lifted_surface.into()
     } else {
-        let area = mouse_area(surface)
+        let area = mouse_area(lifted_surface)
+            .on_enter(Message::LibraryEntryHoverChanged(entry_id.clone(), true))
+            .on_exit(Message::LibraryEntryHoverChanged(entry_id.clone(), false))
             .on_press(Message::BeginLibraryEntryDrag(entry_id.clone()))
             .on_release(Message::EndLibraryEntryDrag);
         if app.library_drag.as_ref().is_some_and(|drag| drag.active) {
@@ -4196,14 +4530,44 @@ fn library_entry_container_style(
     class: Class,
     mode: LibraryEntryRenderMode,
     selected: bool,
+    hover_progress: f32,
 ) -> iced::widget::container::Style {
     let mut style = container_style(tokens, class);
     match mode {
         LibraryEntryRenderMode::Normal => {
+            let hover_progress = hover_progress.clamp(0.0, 1.0);
+            let normal_style = tokens.class_styles[class.index()].resolve(ComponentState::Normal);
+            let hovered_style = tokens.class_styles[class.index()].resolve(ComponentState::Hovered);
+            let normal_background = normal_style
+                .background
+                .or_else(|| {
+                    style.background.and_then(|background| match background {
+                        iced::Background::Color(color) => Some(color),
+                        _ => None,
+                    })
+                })
+                .unwrap_or(tokens.surface_raised);
+            let hovered_background = hovered_style
+                .background
+                .unwrap_or_else(|| mix_color(normal_background, tokens.accent, 0.14));
+            let normal_border = normal_style.border_color.unwrap_or(style.border.color);
+            let hovered_border = hovered_style
+                .border_color
+                .unwrap_or_else(|| mix_color(normal_border, tokens.accent, 0.42));
+
+            if !selected && hover_progress > 0.0 {
+                style.background = Some(iced::Background::Color(mix_color(
+                    normal_background,
+                    hovered_background,
+                    hover_progress,
+                )));
+                style.border.color = mix_color(normal_border, hovered_border, hover_progress);
+            }
+
             style.shadow = iced::Shadow {
-                color: with_alpha(tokens.shadow, 0.20),
-                offset: iced::Vector::new(0.0, 1.0),
-                blur_radius: 7.0,
+                color: with_alpha(tokens.shadow, 0.20 + 0.10 * hover_progress),
+                offset: iced::Vector::new(0.0, 1.0 + 4.0 * hover_progress),
+                blur_radius: 7.0 + 7.0 * hover_progress,
             };
             if selected {
                 let selected_style =
@@ -4217,6 +4581,11 @@ fn library_entry_container_style(
                 if let Some(border_width) = selected_style.border_width {
                     style.border.width = border_width;
                 }
+                style.shadow = iced::Shadow {
+                    color: with_alpha(tokens.shadow, 0.24 + 0.10 * hover_progress),
+                    offset: iced::Vector::new(0.0, 2.0 + 4.0 * hover_progress),
+                    blur_radius: 9.0 + 7.0 * hover_progress,
+                };
             }
         }
         LibraryEntryRenderMode::Placeholder => {
@@ -4257,10 +4626,10 @@ fn card_thumbnail_media<'a>(
     tokens: ThemeTokens,
     alpha: f32,
 ) -> Element<'a, Message> {
-    let width = app.layout().library_grid_card_width;
-    if let Some(thumbnail) = app.thumbnails.get(entry_id) {
+    let width = app.library_grid_card_width();
+    if let Some(thumbnail) = app.thumbnail_for_entry(entry_id, app.thumbnail_size_for_grid_zoom()) {
         let height = (width * f32::from(thumbnail.height) / f32::from(thumbnail.width.max(1)))
-            .min(app.layout().library_card_media_max_height);
+            .min(app.library_card_media_max_height());
         container(
             image(thumbnail.handle.clone())
                 .width(width)
@@ -4277,12 +4646,12 @@ fn card_thumbnail_media<'a>(
     } else {
         container(document_preview_lines(
             width,
-            app.layout().library_card_media_max_height,
+            app.library_card_media_max_height(),
             tokens,
             alpha,
         ))
         .center(width)
-        .height(app.layout().library_card_media_max_height)
+        .height(app.library_card_media_max_height())
         .style(move |_| flush_media_style(tokens, alpha))
         .into()
     }
@@ -4348,7 +4717,7 @@ fn thumbnail_element<'a>(
     alpha: f32,
 ) -> Element<'a, Message> {
     let max_height = width * 1.32;
-    if let Some(thumbnail) = app.thumbnails.get(entry_id) {
+    if let Some(thumbnail) = app.thumbnail_for_entry(entry_id, ThumbnailSize::Default) {
         let height = width * f32::from(thumbnail.height) / f32::from(thumbnail.width.max(1));
         let display_height = height.min(max_height);
         container(
@@ -5531,15 +5900,19 @@ async fn render_page(doc: Arc<PdfDoc>, key: TileKey) -> anyhow::Result<(TileKey,
     Ok((key, page))
 }
 
-async fn load_or_render_thumbnail(entry: LibraryEntry) -> anyhow::Result<(EntryId, RenderedPage)> {
+async fn load_or_render_thumbnail(
+    entry: LibraryEntry,
+    size: ThumbnailSize,
+) -> anyhow::Result<(EntryId, ThumbnailSize, RenderedPage)> {
     tokio::task::spawn_blocking(move || {
-        let path = thumbnail_path(&entry.id)?;
+        let path = thumbnail_variant_path(&entry.id, size)?;
         if path.exists() {
             let data = std::fs::read(&path)?;
-            let width = 200_u16;
+            let width = size.width_px();
             let height = (data.len() / (usize::from(width) * 4)).clamp(1, usize::from(u16::MAX));
             return Ok((
                 entry.id,
+                size,
                 RenderedPage {
                     width,
                     height: height as u16,
@@ -5549,11 +5922,19 @@ async fn load_or_render_thumbnail(entry: LibraryEntry) -> anyhow::Result<(EntryI
         }
 
         let doc = PdfDoc::open(&entry.path)?;
-        let page = doc.render_page(0, 200)?;
+        let page = doc.render_page(0, size.width_px())?;
         std::fs::write(path, &page.rgba)?;
-        Ok((entry.id, page))
+        Ok((entry.id, size, page))
     })
     .await?
+}
+
+fn thumbnail_variant_path(entry_id: &EntryId, size: ThumbnailSize) -> anyhow::Result<PathBuf> {
+    let default_path = thumbnail_path(entry_id)?;
+    let Some(suffix) = size.cache_suffix() else {
+        return Ok(default_path);
+    };
+    Ok(default_path.with_file_name(format!("{}.{}.rgba", entry_id.as_str(), suffix)))
 }
 
 fn open_document_task(path: PathBuf) -> Task<Message> {
@@ -5615,6 +5996,7 @@ fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
         },
         selected_folder: app.selected_folder.clone(),
         sidebar_width: app.library_tag_sidebar_width,
+        grid_zoom: app.library_grid_zoom(),
         visible_metadata_fields: vec![
             String::from("author"),
             String::from("page_count"),
@@ -5878,10 +6260,16 @@ fn bulk_thumbnail_task(entries: Vec<LibraryEntry>) -> Task<Message> {
 }
 
 fn rebuild_entry_thumbnail(entry: &LibraryEntry) -> anyhow::Result<()> {
-    let path = thumbnail_path(&entry.id)?;
     let doc = PdfDoc::open(&entry.path)?;
-    let page = doc.render_page(0, 200)?;
-    std::fs::write(path, &page.rgba)?;
+    for size in [
+        ThumbnailSize::Small,
+        ThumbnailSize::Default,
+        ThumbnailSize::Large,
+    ] {
+        let path = thumbnail_variant_path(&entry.id, size)?;
+        let page = doc.render_page(0, size.width_px())?;
+        std::fs::write(path, &page.rgba)?;
+    }
     Ok(())
 }
 
@@ -6229,12 +6617,13 @@ fn truncated_title<'a>(
     width: f32,
     tokens: ThemeTokens,
     alpha: f32,
+    font_size: u32,
 ) -> Element<'a, Message> {
-    let visible = truncate_for_width(&title, width, 0.0);
+    let visible = truncate_for_width_with_font(&title, width, 0.0, font_size);
     let is_truncated = visible != title;
     let text_color = with_alpha(tokens.text_primary, alpha);
     let label = text(visible)
-        .size(16)
+        .size(font_size)
         .font(display_font(FontWeight::MEDIUM))
         .color(text_color)
         .wrapping(Wrapping::None)
@@ -6246,9 +6635,14 @@ fn truncated_title<'a>(
 
     tooltip(
         label,
-        container(text(title).size(FontSize::SM).color(text_color))
-            .padding(Spacing::SM)
-            .style(move |_| container_style(tokens, Class::Tooltip)),
+        container(
+            text(title)
+                .size(FontSize::SM)
+                .color(text_color)
+                .wrapping(Wrapping::None),
+        )
+        .padding(Spacing::SM)
+        .style(move |_| container_style(tokens, Class::Tooltip)),
         tooltip::Position::Bottom,
     )
     .delay(Duration::from_millis(600))
@@ -6337,11 +6731,32 @@ fn progress_fraction(entry: &LibraryEntry) -> f32 {
 }
 
 fn truncate_for_width(label: &str, width: f32, reserved_width: f32) -> String {
-    const APPROX_CHAR_WIDTH: f32 = 7.5;
+    truncate_for_width_with_font(label, width, reserved_width, FontSize::SM)
+}
+
+fn file_tree_label(label: &str, width: f32) -> String {
+    truncate_for_width_with_font(label, width, 0.0, FILE_TREE_LABEL_SIZE)
+}
+
+fn file_tree_font(weight: iced::font::Weight) -> Font {
+    Font {
+        family: font::Family::Name(FILE_TREE_FONT_FAMILY),
+        weight,
+        ..Font::DEFAULT
+    }
+}
+
+fn truncate_for_width_with_font(
+    label: &str,
+    width: f32,
+    reserved_width: f32,
+    font_size: u32,
+) -> String {
     const ELLIPSIS: &str = "...";
 
-    let available = (width - reserved_width - (Spacing::MD * 2.0)).max(0.0);
-    let max_chars = (available / APPROX_CHAR_WIDTH).floor().max(0.0) as usize;
+    let available = (width - reserved_width).max(0.0);
+    let approx_char_width = (font_size as f32 * 0.42).max(4.8);
+    let max_chars = (available / approx_char_width).floor().max(0.0) as usize;
     let char_count = label.chars().count();
 
     if char_count <= max_chars {
@@ -6595,12 +7010,19 @@ fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         Subscription::none()
     };
 
+    let animations = if app.library_card_hover_animation_active() {
+        time::every(Duration::from_millis(LIBRARY_CARD_HOVER_TICK_MS)).map(Message::AnimationFrame)
+    } else {
+        Subscription::none()
+    };
+
     Subscription::batch([
         keyboard,
         watcher,
         style_watcher,
         sidebar_resize,
         library_drag,
+        animations,
     ])
 }
 
@@ -6846,6 +7268,46 @@ mod tests {
 
         assert_eq!(center, 0.0);
         assert!(top < 0.0);
+    }
+
+    #[test]
+    fn masonry_target_index_uses_card_midpoints_as_insertion_slots() {
+        let layout = LibraryMasonryLayout {
+            columns: vec![vec![
+                LibraryMasonryItem {
+                    index: 0,
+                    top: 0.0,
+                    height: 100.0,
+                },
+                LibraryMasonryItem {
+                    index: 2,
+                    top: 120.0,
+                    height: 100.0,
+                },
+            ]],
+            content_height: 220.0,
+        };
+
+        assert_eq!(masonry_target_index(&layout, 0, 49.0), Some(0));
+        assert_eq!(masonry_target_index(&layout, 0, 50.0), Some(2));
+        assert_eq!(masonry_target_index(&layout, 0, 220.0), Some(3));
+    }
+
+    #[test]
+    fn masonry_target_index_empty_column_appends_to_compact_items() {
+        let layout = LibraryMasonryLayout {
+            columns: vec![
+                vec![LibraryMasonryItem {
+                    index: 0,
+                    top: 0.0,
+                    height: 100.0,
+                }],
+                Vec::new(),
+            ],
+            content_height: 100.0,
+        };
+
+        assert_eq!(masonry_target_index(&layout, 1, 20.0), Some(1));
     }
 
     #[test]

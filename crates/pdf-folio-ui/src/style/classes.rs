@@ -1,6 +1,6 @@
 //! Reusable semantic style classes.
 
-use iced::widget::{button, container, pick_list, progress_bar, scrollable, text_input};
+use iced::widget::{button, container, pick_list, progress_bar, scrollable, slider, text_input};
 use iced::{overlay, Background, Border, Color, Shadow as IcedShadow, Vector};
 
 use super::tokens::{BorderWidth, CornerRadius, Radius, ThemeTokens, VisualBorder, VisualStyle};
@@ -62,6 +62,8 @@ pub enum Class {
     LibraryViewToggle,
     /// Library import-folder button.
     LibraryImportButton,
+    /// Library masonry grid zoom slider.
+    LibraryGridZoomSlider,
     /// Tag pill.
     TagPill,
     /// Search input.
@@ -134,7 +136,7 @@ impl ComponentState {
 
 impl Class {
     /// Number of semantic classes represented in style files.
-    pub const COUNT: usize = 41;
+    pub const COUNT: usize = 42;
 
     /// Stable index for style arrays.
     pub const fn index(self) -> usize {
@@ -165,21 +167,22 @@ impl Class {
             Self::LibrarySortDropdown => 23,
             Self::LibraryViewToggle => 24,
             Self::LibraryImportButton => 25,
-            Self::TagPill => 26,
-            Self::SearchInput => 27,
-            Self::ProgressBar => 28,
-            Self::ErrorBanner => 29,
-            Self::ViewerCanvas => 30,
-            Self::PagePlaceholder => 31,
-            Self::JumpOverlay => 32,
-            Self::Tooltip => 33,
-            Self::AnnotationToolbar => 34,
-            Self::AnnotationPopover => 35,
-            Self::PresentationOverlay => 36,
-            Self::Minimap => 37,
-            Self::EmptyState => 38,
-            Self::DragInsertionMarker => 39,
-            Self::FileTreeFoldButton => 40,
+            Self::LibraryGridZoomSlider => 26,
+            Self::TagPill => 27,
+            Self::SearchInput => 28,
+            Self::ProgressBar => 29,
+            Self::ErrorBanner => 30,
+            Self::ViewerCanvas => 31,
+            Self::PagePlaceholder => 32,
+            Self::JumpOverlay => 33,
+            Self::Tooltip => 34,
+            Self::AnnotationToolbar => 35,
+            Self::AnnotationPopover => 36,
+            Self::PresentationOverlay => 37,
+            Self::Minimap => 38,
+            Self::EmptyState => 39,
+            Self::DragInsertionMarker => 40,
+            Self::FileTreeFoldButton => 41,
         }
     }
 }
@@ -408,6 +411,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         | Class::LibrarySortDropdown
         | Class::LibraryViewToggle
         | Class::LibraryImportButton
+        | Class::LibraryGridZoomSlider
         | Class::SidebarToggleButton
         | Class::SidebarActionButton
         | Class::MenuButton
@@ -506,6 +510,43 @@ pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -
         ..button::Style::default()
     }
     .with_visual_override(override_style)
+}
+
+/// Returns an iced slider style for a semantic class.
+pub fn slider_style(tokens: ThemeTokens, class: Class, status: slider::Status) -> slider::Style {
+    let state = match status {
+        slider::Status::Active => ComponentState::Normal,
+        slider::Status::Hovered => ComponentState::Hovered,
+        slider::Status::Dragged => ComponentState::Pressed,
+    };
+    let style = tokens.class_styles[class.index()].resolve(state);
+    let rail_active = style.text_color.unwrap_or(tokens.accent);
+    let rail_rest = style
+        .background
+        .unwrap_or_else(|| mix_color(tokens.surface_raised, tokens.background, 0.36));
+    let border_color = style.border_color.unwrap_or(tokens.border);
+    let radius = style
+        .radius
+        .unwrap_or_else(|| CornerRadius::uniform(999.0))
+        .into();
+
+    slider::Style {
+        rail: slider::Rail {
+            backgrounds: (rail_active.into(), rail_rest.into()),
+            width: 4.0,
+            border: Border {
+                radius,
+                width: style.border_width.unwrap_or(BorderWidth::NONE),
+                color: border_color,
+            },
+        },
+        handle: slider::Handle {
+            shape: slider::HandleShape::Circle { radius: 7.0 },
+            background: rail_active.into(),
+            border_color,
+            border_width: style.border_width.unwrap_or(BorderWidth::HAIRLINE),
+        },
+    }
 }
 
 /// Returns an iced pick-list style for a semantic class.

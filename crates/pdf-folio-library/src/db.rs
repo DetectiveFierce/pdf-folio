@@ -185,6 +185,8 @@ pub struct LibraryPreferences {
     pub selected_folder: Option<FolderId>,
     /// Last sidebar width.
     pub sidebar_width: f32,
+    /// Card scale for the masonry grid view.
+    pub grid_zoom: f32,
     /// Metadata fields visible in cards/rows.
     pub visible_metadata_fields: Vec<String>,
 }
@@ -196,6 +198,7 @@ impl Default for LibraryPreferences {
             layout_mode: LibraryLayoutMode::Grid,
             selected_folder: None,
             sidebar_width: 112.0,
+            grid_zoom: 1.0,
             visible_metadata_fields: vec![
                 String::from("author"),
                 String::from("page_count"),
@@ -714,6 +717,9 @@ impl Db {
         if let Some(value) = self.preference_with_connection(&connection, "sidebar_width")? {
             preferences.sidebar_width = value.parse().unwrap_or(preferences.sidebar_width);
         }
+        if let Some(value) = self.preference_with_connection(&connection, "grid_zoom")? {
+            preferences.grid_zoom = value.parse().unwrap_or(preferences.grid_zoom);
+        }
         if let Some(value) =
             self.preference_with_connection(&connection, "visible_metadata_fields")?
         {
@@ -758,6 +764,11 @@ impl Db {
             &connection,
             "sidebar_width",
             &preferences.sidebar_width.to_string(),
+        )?;
+        self.set_preference_with_connection(
+            &connection,
+            "grid_zoom",
+            &preferences.grid_zoom.to_string(),
         )?;
         self.set_preference_with_connection(
             &connection,
@@ -1407,6 +1418,7 @@ mod tests {
             layout_mode: LibraryLayoutMode::List,
             selected_folder: Some(folder.clone()),
             sidebar_width: 220.0,
+            grid_zoom: 1.24,
             visible_metadata_fields: vec![String::from("author"), String::from("progress")],
         };
 
@@ -1417,6 +1429,7 @@ mod tests {
         assert_eq!(loaded.layout_mode, LibraryLayoutMode::List);
         assert_eq!(loaded.selected_folder, Some(folder));
         assert_eq!(loaded.sidebar_width, 220.0);
+        assert_eq!(loaded.grid_zoom, 1.24);
         assert_eq!(
             loaded.visible_metadata_fields,
             vec![String::from("author"), String::from("progress")]
