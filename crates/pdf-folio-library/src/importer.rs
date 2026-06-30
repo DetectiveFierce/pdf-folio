@@ -162,7 +162,32 @@ fn is_pdf_path(path: &Path) -> bool {
 fn title_from_path(path: &Path) -> Option<String> {
     path.file_stem()
         .and_then(|stem| stem.to_str())
-        .map(str::trim)
-        .filter(|title| !title.is_empty())
-        .map(ToOwned::to_owned)
+        .and_then(clean_import_title)
+}
+
+fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
+    let title = value
+        .as_ref()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if title.is_empty() || title.eq_ignore_ascii_case("untitled") {
+        None
+    } else {
+        Some(title.chars().take(512).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_from_path_uses_clean_filename_stem() {
+        assert_eq!(
+            title_from_path(Path::new("/tmp/  Quarterly   Report .pdf")),
+            Some(String::from("Quarterly Report"))
+        );
+        assert_eq!(title_from_path(Path::new("/tmp/Untitled.pdf")), None);
+    }
 }

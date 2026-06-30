@@ -171,6 +171,21 @@ impl PdfDoc {
         })
     }
 
+    /// Returns the document title metadata, if present and non-empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Pdfium cannot load the document.
+    pub fn metadata_title(&self) -> Result<Option<String>> {
+        self.with_document(|document| {
+            Ok(document
+                .metadata()
+                .get(PdfDocumentMetadataTagType::Title)
+                .map(|tag| tag.value().trim().to_owned())
+                .filter(|title| !title.is_empty()))
+        })
+    }
+
     fn with_document<T>(&self, f: impl for<'a> FnOnce(PdfDocument<'a>) -> Result<T>) -> Result<T> {
         let _guard = Self::pdfium_guard();
         let pdfium = Self::pdfium()?;

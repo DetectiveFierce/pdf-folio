@@ -1278,6 +1278,10 @@ fn parse_class(value: &str) -> Option<Class> {
         "Minimap" => Class::Minimap,
         "EmptyState" => Class::EmptyState,
         "DragInsertionMarker" => Class::DragInsertionMarker,
+        "SelectionCheckbox" => Class::SelectionCheckbox,
+        "MasterCheckbox" => Class::MasterCheckbox,
+        "DragStackGhost" => Class::DragStackGhost,
+        "FolderDropTarget" => Class::FolderDropTarget,
         _ => return None,
     })
 }
@@ -1590,6 +1594,10 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
         Class::AnnotationPopover,
         Class::PresentationOverlay,
         Class::Minimap,
+        Class::SelectionCheckbox,
+        Class::MasterCheckbox,
+        Class::DragStackGhost,
+        Class::FolderDropTarget,
     ] {
         set_class_state(
             tokens,
@@ -1703,14 +1711,14 @@ mod tests {
             .resolve(ComponentState::Active)
             .border
             .expect("active espresso file tree border should be set");
-        assert_eq!(espresso.left.width, Some(3.0));
+        assert_eq!(espresso.left.width, Some(6.0));
         assert!(espresso.uniform_style().is_none());
 
         let light = style_book.tokens("light").class_styles[Class::FileTree.index()]
             .resolve(ComponentState::Active)
             .border
             .expect("active light file tree border should be set");
-        assert_eq!(light.left.width, Some(20.0));
+        assert_eq!(light.left.width, Some(12.0));
         assert!(light.uniform_style().is_none());
     }
 

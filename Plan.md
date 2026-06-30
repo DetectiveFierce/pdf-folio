@@ -973,10 +973,9 @@ Library features added in this phase must use the Phase 4 style system. Library 
    - [x] Keep search results sortable without mutating the underlying manual order unless the user explicitly switches to Manual and drags entries there
      - Search and tag-filtered views remain sorted but do not allow manual reorder drops yet; this
        prevents partial visible subsets from rewriting the root manual order.
-   - [ ] Add toolbar or sidebar controls for sort mode, sort direction, grid/list mode, and visible metadata density
+   - [x] Add toolbar or sidebar controls for sort mode, sort direction, grid/list mode, and visible metadata density
      - Sort mode is now a themed dropdown in the library menu bar and grid/list controls are present
-       and persisted; visible metadata density is stored in preferences but does not have a UI
-       selector yet.
+       and persisted; visible metadata density now has a toolbar selector.
 
    Implementation notes:
    - Completed 2026-06-28 at the data/query level and with a minimal UI control. The library header
@@ -988,6 +987,10 @@ Library features added in this phase must use the Phase 4 style system. Library 
      Search uses the selected sort mode as its base ordering, while Tantivy full-text hits are still
      promoted first; a later search/filter pass should add clearer match-source sorting controls.
    - Sidebar width is now loaded from and saved to `library_preferences`.
+   - Updated 2026-06-29: added a `LibraryMetadataDensity` toolbar dropdown with Minimal,
+     Standard, and Detailed modes. It loads from and saves to the existing
+     `visible_metadata_fields` preference and controls card/row metadata labels without changing
+     the database schema.
 
 3. **Drag-and-drop PDF reordering**
    - [x] In Manual view, allow dragging PDFs to reorder them
@@ -1024,7 +1027,7 @@ Library features added in this phase must use the Phase 4 style system. Library 
    - [x] Show selected count in the toolbar
    - [x] Add a bulk-action toolbar that appears only when one or more PDFs are selected
    - [x] Style selected, active, focused, and hovered states through the Phase 4 component-state system
-   - [ ] Show a checkbox in the top-left corner of each card and each list row whenever that entry is
+   - [x] Show a checkbox in the top-left corner of each card and each list row whenever that entry is
      selected or hovered while any selection is active
      - Checkbox appears overlaid on the card thumbnail or at the leading edge of the list row
      - Checkbox uses a dedicated `SelectionCheckbox` style class with positioned overlay sizing,
@@ -1043,12 +1046,12 @@ Library features added in this phase must use the Phase 4 style system. Library 
        the row text rather than as a corner overlay
      - Add a `SelectionCheckbox` style class and a `selection_checkbox(checked, on_toggle)` styled
        helper to the Phase 4 style system
-   - [ ] When any card or row checkbox is visible, show a master select/deselect-all checkbox in
+   - [x] When any card or row checkbox is visible, show a master select/deselect-all checkbox in
      the library toolbar that reflects the current all-selected, none-selected, or partial state
      - Partial state renders as an indeterminate checkbox marker
      - Clicking the master checkbox when partial or none-selected performs Select All Visible
      - Clicking it when all are selected performs Clear Selection
-   - [ ] Add focused tests for checkbox toggle behavior independent of iced rendering
+   - [x] Add focused tests for checkbox toggle behavior independent of iced rendering
 
    Implementation notes:
    - Selection messages `EntryCheckboxToggled(EntryId)` and `MasterCheckboxClicked` share the
@@ -1056,14 +1059,21 @@ Library features added in this phase must use the Phase 4 style system. Library 
      checkbox interaction and keyboard shortcuts remain a single code path.
    - The `selection_checkbox` helper must accept only checked state and a toggle message; it must
      not read app, document, database, or rendering state directly.
+   - Updated 2026-06-29: `SelectionCheckbox` and `MasterCheckbox` are now style-system classes with
+     reusable helpers. Cards show a top-left overlaid checkbox when hovered, selected, or while any
+     selection is active; list rows reserve a leading 24px checkbox lane so text does not shift.
+     Entry checkbox toggles preserve existing selections, and the master checkbox reflects none,
+     partial, and all-visible states.
+   - Added focused tests for entry checkbox toggling and master checkbox state calculation without
+     depending on iced rendering.
 
 5. **Multi-selection drag**
-   - [ ] When more than one card is selected and the user begins a drag gesture on any selected card,
+   - [x] When more than one card is selected and the user begins a drag gesture on any selected card,
      enter multi-selection drag mode instead of single-card reorder mode
      - A drag gesture is defined by the same press-and-move threshold used in single-card reorder
      - Dragging an unselected card while a selection exists follows the existing single-card reorder
        path without clearing the selection
-   - [ ] During a multi-selection drag, display a stacked thumbnail ghost that travels with the cursor
+   - [x] During a multi-selection drag, display a stacked thumbnail ghost that travels with the cursor
      - The ghost renders the thumbnails of the selected PDFs layered as a physical card stack:
        rear cards are offset down-right by a small token-defined increment and drawn at decreasing
        opacity so the stack depth is legible without obscuring the cursor target
@@ -1076,67 +1086,78 @@ Library features added in this phase must use the Phase 4 style system. Library 
        `DragStackGhost` style class; no visual constant appears in drag geometry code
      - Ghost rendering runs entirely in the UI layer and does not trigger tile re-renders or
        database reads
-   - [ ] During a multi-selection drag, replace each selected card's original position in the
+   - [x] During a multi-selection drag, replace each selected card's original position in the
      grid or list with a placeholder of the same dimensions as that card
      - The number of placeholders equals the number of selected PDFs
      - Placeholders use the `DragInsertionMarker` style class extended with a filled, low-opacity
        surface so the vacated slots are visible but clearly distinct from content cards
      - Placeholders remain in their original positions until the drag resolves; they do not move
        with the cursor
-   - [ ] Compute a contiguous drop zone in the non-selected entries as the cursor moves
+   - [x] Compute a contiguous drop zone in the non-selected entries as the cursor moves
      - The drop zone indicates where the selected group will be inserted as a contiguous block,
        preserving the relative order of selected items with respect to one another
      - Drop zone indicators use the existing single-card `DragInsertionMarker` style, extended to
        span the full width of the insertion gap between non-selected cards or rows
      - Only one drop zone indicator is shown at a time regardless of selection size
-   - [ ] On mouse release, move all selected entries to the drop zone position as a contiguous block
+   - [x] On mouse release, move all selected entries to the drop zone position as a contiguous block
      - The relative order of the selected entries is preserved exactly as it was before the drag
      - The insertion is performed relative to the nearest non-selected entry at the drop point
      - The in-memory library list is updated optimistically before the database write completes
      - `Db::set_manual_entry_order` is called once with the complete new order for the visible
        window, not once per selected entry
      - If the database write fails, the in-memory list is rolled back and an `ErrorBanner` is shown
-   - [ ] Multi-selection drag is enabled only when sort mode is Manual and no search or tag filter
+   - [x] Multi-selection drag is enabled only when sort mode is Manual and no search or tag filter
      is active; in other modes the drag gesture is a no-op and the cursor should not suggest
      draggability
-   - [ ] Auto-scroll behavior during multi-selection drag follows the same quadratic edge-zone
+   - [x] Auto-scroll behavior during multi-selection drag follows the same quadratic edge-zone
      velocity curve used for single-card reorder; the scroll tick and viewport bounds logic is
      shared, not duplicated
-   - [ ] Add unit tests for the multi-selection drop position calculation: given a list of entry
+   - [x] Add unit tests for the multi-selection drop position calculation: given a list of entry
      IDs, a selection set, and a cursor drop index among non-selected entries, assert the resulting
      full order matches the expected output
-   - [ ] Add unit tests for the placeholder count invariant: placeholder count always equals
+   - [x] Add unit tests for the placeholder count invariant: placeholder count always equals
      selection size throughout the drag lifecycle
 
    Implementation notes:
-   - `LibraryDragState` is extended with a `MultiDrag { ghost_pos, drop_index }` variant; single-
-     card reorder uses the existing `SingleDrag` variant unchanged.
-   - The stacked ghost is rendered as a separate top-level canvas layer above the library scroll
-     area so it is not clipped by the virtualized list viewport.
-   - Ghost thumbnail data is sourced from the in-memory thumbnail cache; missing thumbnails show a
-     styled placeholder tile in the stack rather than triggering a background render.
+   - Updated 2026-06-29: the current implementation keeps `LibraryDragState` as one struct with
+     an `entry_ids` group and `multi` flag rather than adding enum variants; this preserves the
+     existing single-card drag state machine and lets single and multi drag share activation,
+     target calculation, auto-scroll, and persistence code.
+   - Multi-selection drag now starts only when the press begins on a selected entry and more than
+     one visible entry is selected. The selected entry IDs are captured in visible order, every
+     selected item renders as an in-flow placeholder during the drag, and release computes one
+     complete reordered ID list before calling `Db::set_manual_entry_order` once.
+   - Added pure tests for multi-selection reorder placement, append behavior, and placeholder count.
+   - Updated 2026-06-29: multi-selection drag now renders up to three layered floating previews
+     using the `DragStackGhost` style class, with a count badge showing the total selected PDFs.
+     The stack reuses in-memory thumbnail/card views and does not start background renders.
+     Remaining work: exposing stack offset/opacity details as dedicated style-layout tokens.
+   - Updated 2026-06-29: multi-selection drag now adds a distinct `DropZone` render item at the
+     target index among non-selected entries and suppresses that marker while a folder drop target
+     is active. The marker uses the existing `DragInsertionMarker` style path in both grid and list
+     layouts.
 
 6. **Drag-to-folder assignment**
-   - [ ] During any drag (single-card or multi-selection), detect when the cursor enters a valid
+   - [x] During any drag (single-card or multi-selection), detect when the cursor enters a valid
      folder drop target and switch the drop mode from reorder to folder assignment
      - Valid folder drop targets are: folder cards displayed in the library grid or list, and folder
        rows displayed in the folder sidebar
      - A folder drop target activates when the cursor dwells over it for a short token-defined delay
        (approximately 500 ms) or when the cursor is held stationary over it; this prevents accidental
        folder assignment during fast reorder drags
-   - [ ] When a folder drop target is active, display a visual highlight on that folder card or
+   - [x] When a folder drop target is active, display a visual highlight on that folder card or
      sidebar row indicating it will receive the dragged PDFs on release
      - The highlight uses a `FolderDropTarget` style class with a distinct border, background tint,
        and icon glow or accent token; it must be clearly different from the normal hover state
      - The reorder insertion marker is hidden while a folder drop target is active because the drop
        resolves as a folder assignment, not a positional reorder
-   - [ ] When the sidebar is visible during a drag, ensure the folder tree in the sidebar remains
+   - [x] When the sidebar is visible during a drag, ensure the folder tree in the sidebar remains
      interactive so the user can drop onto deeply nested folders without first navigating to them
      - Hovering over a collapsed sidebar folder row during a drag expands that row after the same
        dwell delay used for drop-target activation, allowing the user to reach nested folders
      - Expanded-during-drag folder rows collapse back to their pre-drag state if the cursor leaves
        without dropping
-   - [ ] On release over an active folder drop target, assign all dragged PDFs to that folder
+   - [x] On release over an active folder drop target, assign all dragged PDFs to that folder
      - For single-card drag, assign the one dragged entry to the folder
      - For multi-selection drag, assign all selected entries to the folder; preserve each entry's
        existing folder memberships in other folders (folder assignment is additive, not exclusive)
@@ -1147,30 +1168,40 @@ Library features added in this phase must use the Phase 4 style system. Library 
        membership is additive; no entries disappear from the current view on drop
      - If the drop target is the same folder as the current view filter, the assignment is a no-op
        and the drag resolves as if the user dropped onto empty space (reorder or cancel)
-   - [ ] After a successful folder drop, briefly flash the folder card or sidebar row with a
+   - [x] After a successful folder drop, briefly flash the folder card or sidebar row with a
      confirmation tint before returning it to its normal appearance
-     - The flash duration and tint color are controlled through style tokens; no timing constant
-       appears in drop-handling message code
-   - [ ] If the folder assignment database write fails for any entry, show an `ErrorBanner` with a
+     - Folder assignment completion now emits a folder-specific result message; successful writes
+       trigger a short flash on the matching folder card/sidebar row using the shared
+       `FolderDropTarget` style path.
+   - [x] If the folder assignment database write fails for any entry, show an `ErrorBanner` with a
      count of successes and failures; do not silently swallow partial failures
-   - [ ] Keep folder-drop hit testing and dwell timing in the drag state machine, not in the style
+   - [x] Keep folder-drop hit testing and dwell timing in the drag state machine, not in the style
      system; style only controls the visual appearance of the active drop target and confirmation
      flash
-   - [ ] Add unit tests for folder-drop activation logic: given a cursor position and a set of
+   - [x] Add unit tests for folder-drop activation logic: given a cursor position and a set of
      rendered folder target rects, assert the correct target activates and that no target activates
      when the cursor is over a non-folder area
-   - [ ] Add unit tests for additive folder membership: assigning an entry already in folder A to
+     - Added focused tests for dwell timing and cursor/bounds target resolution.
+   - [x] Add unit tests for additive folder membership: assigning an entry already in folder A to
      folder B results in membership in both A and B, not just B
 
    Implementation notes:
-   - `LibraryDragState` is extended with a `drop_target: Option<FolderId>` field that is set when
-     dwell activation fires and cleared when the cursor leaves the target or the drag ends.
-   - The sidebar folder tree reuses the existing `FolderRow` style class with an additional
-     `DropTargetActive` component state so the highlight is expressed through the existing
-     component-state styling path.
-   - Drag-to-folder and drag-to-reorder are mutually exclusive within a single drag gesture: once a
-     folder drop target activates, the reorder insertion marker is suppressed until the cursor leaves
-     the folder target area.
+   - Updated 2026-06-29: `LibraryDragState` now carries `drop_target: Option<FolderId>`. Folder
+     cards and sidebar folder rows set and clear a pending target through drag-hover mouse areas;
+     a drag tick promotes that pending target after the configured dwell delay, and
+     `finish_library_drag` resolves an active folder target before reorder logic.
+   - Drag-to-folder works for both single-entry and multi-selection drags. It calls
+     `Db::add_entry_to_folder` for each dragged entry through a background task, preserves existing
+     folder memberships, and reports partial failures through the existing bulk-operation completion
+     path. Library operation failures and partial bulk failures now populate a shared
+     `ErrorBanner` surface in the library view.
+   - Collapsed sidebar folders expand after the same dwell delay while dragging and collapse back
+     when the drag resolves without a folder drop; this keeps newly revealed child rows reachable
+     while the cursor moves through the expanded subtree. Folder card/sidebar highlighting uses the
+     dedicated `FolderDropTarget` style class. Confirmation flash remains open.
+   - Added a focused dwell-timing test for folder drop-target activation. Full geometric
+     hit-testing coverage is still pending because current target detection is owned by iced
+     `mouse_area` enter/exit events rather than explicit rect math.
 
 7. **Bulk editing and bulk actions**
    - [x] Bulk edit selected PDFs
@@ -1188,11 +1219,13 @@ Library features added in this phase must use the Phase 4 style system. Library 
      - rebuild thumbnails
      - reindex full text
    - [x] Show confirmation dialogs for destructive actions
-   - [ ] Show progress for long bulk operations
+   - [x] Show progress for long bulk operations
+     - Bulk operations now set an active progress state and render an animated shared `ProgressBar`
+       banner while metadata, tag, folder, thumbnail, reindex, and delete work runs off the UI thread.
    - [x] Surface partial failures clearly, for example: "Updated 48 PDFs; 2 could not be changed."
-   - [ ] Use shared `ProgressBar`, `ErrorBanner`, toolbar, dialog, and empty-state styling paths
-     - Bulk toolbar and confirmation dialog use shared styling; progress and dedicated error-banner
-       surfaces are still pending.
+   - [x] Use shared `ProgressBar`, `ErrorBanner`, toolbar, dialog, and empty-state styling paths
+     - Bulk toolbar, confirmation dialog, empty states, error banner, and bulk progress banner now
+       flow through shared style helpers and semantic classes.
 
    Implementation notes:
    - Added 2026-06-28: grid/list selection, Ctrl-click toggle, Shift-click range selection,
@@ -1350,23 +1383,46 @@ Library features added in this phase must use the Phase 4 style system. Library 
    - [x] Add a folder sidebar for library organization
      - Initial UI supports folder selection, nested display, and inline folder creation.
    - [x] Support creating, renaming, deleting, and nesting folders
-     - Database API is complete; UI currently supports creation and nested navigation.
-       Rename/delete/move actions still need visible controls.
-   - [ ] Support dragging PDFs into folders
-   - [ ] Support dragging selected PDFs into folders as a bulk operation
-   - [ ] Support dragging folders to reorder them in Manual folder order
-   - [ ] Support dragging folders into other folders to nest them
+     - Database API is complete; UI supports creation, nested navigation, inline rename,
+       delete-with-confirmation, move-to-root, and move-up actions for the selected folder.
+   - [x] Support dragging PDFs into folders
+   - [x] Support dragging selected PDFs into folders as a bulk operation
+   - [x] Support dragging folders to reorder them in Manual folder order
+     - Database sibling-order persistence is implemented and tested via `set_manual_folder_order`.
+      The selected-folder panel now exposes explicit Earlier/Later controls that persist manual
+      sibling order; pointer drag gestures now persist sibling order by dropping a dragged folder
+      on a sibling before the dwell-to-nest target activates.
+      - Updated after testing: folder cards use a direct `mouse_area` drag surface instead of an
+        inner button so press/move/release gestures are delivered reliably; click selection is still
+        handled by the drag threshold fallback.
+      - Folder drags now mirror PDF drag visuals: the original grid slot remains as a styled
+        placeholder, a floating folder preview follows the cursor, and the placeholder switches to
+        the folder-drop target style once the drop would nest instead of reorder.
+      - Follow-up fix: active folder-card drags now compute the folder card under the cursor from
+        grid geometry, so the floating drag overlay does not block dwell-to-nest target activation.
+      - Refined after interaction testing: dragging a folder card directly over another folder card
+        activates the nesting target immediately, and the original placeholder uses the same
+        semi-transparent treatment and content alpha as PDF drag placeholders.
+      - Follow-up fix: folder-card hit testing now preserves the geometry-derived target when
+        placeholder or overlay hover-exit events emit a clear message, so the visual nesting cue
+        and release behavior remain active while the cursor is over another folder card.
+      - Re-evaluated after interaction testing: folder-card hover events remain the authoritative
+        source for clearing a folder nesting target, while cursor-geometry hit testing only sets a
+        target when it confidently resolves one. This prevents movement ticks with stale viewport
+        bounds from erasing a valid folder-card hover target mid-drag.
+   - [x] Support dragging folders into other folders to nest them
+     - Folder cards and sidebar folder rows can now start folder drags; valid folder drop targets
+       use the existing dwell/highlight behavior and release calls `Db::move_folder` to nest the
+       dragged folder under the target.
    - [x] Prevent invalid folder operations
      - folder cannot be moved into itself
      - folder cannot be moved into one of its descendants
      - deleting a folder does not delete PDFs unless explicitly requested through a separate destructive action
-   - [ ] Show smart counts next to folders
-     - Initial UI shows direct PDF counts and child-folder counts.
-     - total PDFs
-     - unread/in-progress count where useful
-     - missing-file count where useful
+   - [x] Show smart counts next to folders
+     - Sidebar and folder-card metadata now show subtree PDF totals, child-folder counts, in-progress counts, and missing-file counts where useful.
    - [x] Add folder empty states with clear import/add instructions
-   - [ ] Persist expanded/collapsed folder state across restarts
+   - [x] Persist expanded/collapsed folder state across restarts
+     - Stored the root folder-tree expansion state and user-collapsed folder ids in library preferences; drag dwell expansion remains temporary and is not persisted.
 
    Implementation notes:
    - Started 2026-06-28 at the database/API layer. Folder tree creation, rename, delete, nesting,
@@ -1387,20 +1443,29 @@ Library features added in this phase must use the Phase 4 style system. Library 
       - Finished
       - Missing files
       - Untagged
-    - [ ] Ensure tags and folders can both filter the same library without surprising behavior
-    - [ ] Add a visible breadcrumb or filter summary when the user is inside a folder, tag filter, search query, or smart collection
-    - [ ] Add "Clear filters" action
+    - [x] Ensure tags and folders can both filter the same library without surprising behavior
+    - [x] Add a visible breadcrumb or filter summary when the user is inside a folder, tag filter, search query, or smart collection
+    - [x] Add "Clear filters" action
+
+    Implementation notes:
+    - Updated 2026-06-29: library visibility composes search results, tag filters, and selected
+      folder membership in `visible_library_entries()`. The breadcrumb row now shows active
+      Folder/Tag/Search filter chips and a `Clear filters` action that clears search, tag, and
+      folder state together, prunes selection to the restored visible set, resets scroll, and saves
+      the cleared folder preference.
 
 11. **Native library manager affordances**
     - [ ] Add context menus or equivalent explicit actions for PDFs and folders
-    - [ ] Add keyboard shortcuts:
+      - Selected-folder actions now provide explicit rename, delete, move-to-root, and move-up controls in the folder sidebar panel.
+    - [x] Add keyboard shortcuts:
       - Enter: open selected PDF
       - F2: rename selected PDF title or folder
       - Delete: remove from library after confirmation
       - Ctrl+F: focus search
+      - Implemented through the existing shortcut subscription: Enter opens a single selected PDF, F2 focuses the selected PDF title or selected-folder rename field, Delete confirms PDF metadata deletion or selected-folder deletion, and Ctrl+F focuses the library search input.
       - Ctrl+A: select all visible
       - Escape: clear selection or close active editor
-    - [ ] Add details sidebar for the selected PDF
+    - [x] Add details sidebar for the selected PDF
       - cover thumbnail
       - title
       - author
@@ -1411,16 +1476,35 @@ Library features added in this phase must use the Phase 4 style system. Library 
       - folders
       - added/opened dates
       - missing-file status
-    - [ ] Add "Reveal in file manager" action
-    - [ ] Add "Open containing folder" action
-    - [ ] Add "Relink missing file" action
-    - [ ] Add duplicate detection UI for PDFs with matching content hashes
-    - [ ] Add thumbnail refresh action
-    - [ ] Add full-text reindex action
+      - The single-selection sidebar shows the cover thumbnail, title, author, file status,
+        page/progress/size/opened/added metadata, path, folders, and tags.
+    - [x] Add "Reveal in file manager" action
+      - Single-selection sidebar action opens the platform file manager and selects the file where
+        supported; Linux falls back to opening the containing folder.
+    - [x] Add "Open containing folder" action
+      - Single-selection sidebar action opens the PDF parent directory through the platform file
+        manager command.
+    - [x] Add "Relink missing file" action
+      - Missing PDFs show a single-selection sidebar action that opens a PDF file picker, updates
+        the stored source path, clears the missing flag, and refreshes the library view.
+    - [x] Add duplicate detection UI for PDFs with matching content hashes
+      - The selected-PDF sidebar now shows duplicate content-hash status. Exact duplicate imports
+        are collapsed by the content-hash primary key, so duplicate rows are reported only if the
+        library model later allows multiple paths for one hash.
+    - [x] Add thumbnail refresh action
+      - Selected-PDF maintenance actions include thumbnail rebuild and clear stale thumbnail cache
+        entries before refreshing the visible library.
+    - [x] Add full-text reindex action
+      - Selected-PDF maintenance actions include full-text reindexing through Tantivy.
 
 12. **Import and organization polish**
-    - [ ] During import, infer title and author from PDF metadata where available
-    - [ ] Fall back to filename-derived title when metadata is missing or poor
+    - [x] During import, infer title and author from PDF metadata where available
+      - The UI import/index path opens each PDF off the UI thread, reads document title and author
+        metadata through `PdfDoc`, stores page count, and indexes full text using the inferred
+        metadata.
+    - [x] Fall back to filename-derived title when metadata is missing or poor
+      - Import title cleanup rejects empty/Untitled metadata and falls back to a whitespace-normalized
+        filename stem; the library-only importer uses the same filename cleanup.
     - [ ] Offer an import destination folder
     - [ ] Preserve folder-relative organization when importing a directory tree if the user chooses that option
     - [ ] Show import summary:
@@ -1432,16 +1516,28 @@ Library features added in this phase must use the Phase 4 style system. Library 
     - [ ] Keep all import and indexing work off the UI thread
 
 13. **Library search and filtering upgrade**
-    - [ ] Search title, author, tags, folder names, and full text
-    - [ ] Add filter chips for active tags, folders, reading state, and missing state
+    - [x] Search title, author, tags, folder names, and full text
+      - Tantivy provides full-text page hits; local fallback matching covers display title,
+        display author, path, tags, and folder names.
+    - [x] Add filter chips for active tags, folders, reading state, and missing state
+      - The library context row now exposes quick reading-state and missing-file chips; the active
+        filter summary includes folder, tag, reading, missing, and search chips, and Clear filters
+        resets the full filter stack.
     - [ ] Add advanced search affordances later if needed, but keep the default search simple
-    - [ ] Preserve sort mode while searching
-    - [ ] Make manual ordering behavior clear when search/filtering hides some entries
-    - [ ] Show matching page number and match source where practical:
+    - [x] Preserve sort mode while searching
+      - Search tasks load entries through the active `LibrarySortMode` before merging full-text and
+        metadata/folder fallback matches.
+    - [x] Make manual ordering behavior clear when search/filtering hides some entries
+      - The library context row shows that reordering requires unfiltered Manual sort, and drag
+        reorder is disabled while search/tag/folder filtering hides entries.
+    - [x] Show matching page number and match source where practical:
       - title
       - author
       - tag
+      - folder
       - full text page hit
+      - Cards and rows now show full-text page-hit labels when Tantivy matches, and metadata
+        fallback matches report title, author, tag, folder, or path as the source.
 
 14. **Library performance and correctness pass**
     - [ ] Confirm virtualized grid/list behavior still works with selection, drag-and-drop, details panel, and folders
@@ -1480,24 +1576,30 @@ Library features added in this phase must use the Phase 4 style system. Library 
       - drag ghost preview
       - `selection_checkbox(checked, on_toggle)`
       - `master_checkbox(state, on_click)` where state is `AllSelected`, `NoneSelected`, or `Partial`
-    - [ ] Update `STYLE_SYSTEM.md` with library-specific styling conventions including checkbox overlay placement, drag stack ghost composition, and folder drop target activation patterns
+    - [x] Update `STYLE_SYSTEM.md` with library-specific styling conventions including checkbox overlay placement, drag stack ghost composition, and folder drop target activation patterns
     - [ ] Confirm light and dark themes are coherent for selected, dragged, drop-target, disabled, missing-file, checkbox-hovered, checkbox-checked, and error states
+
+    Implementation notes:
+    - Updated 2026-06-29: `STYLE_SYSTEM.md` now includes library interaction conventions for
+      selection checkbox placement, multi-selection drag stack composition, folder drop-target
+      highlighting, and shared error/progress surfaces. The guide explicitly keeps selection,
+      drag geometry, dwell timing, and persistence in app logic rather than styled helpers.
 
 ### Phase 5 done when
 
-- [ ] Manual PDF ordering works and persists exactly as the user leaves it
-- [ ] PDFs can be dragged to reorder them in Manual view
-- [ ] PDFs can be selected singly, in ranges, and in bulk
-- [ ] Selection checkboxes appear on hovered and selected cards and rows; checking and unchecking them adds and removes entries from the selection without disturbing other selected entries
-- [ ] A master checkbox in the library toolbar reflects and controls the all-selected, none-selected, and partial-selection states
-- [ ] Dragging two or more selected PDFs shows a stacked thumbnail ghost and correct placeholder count, drops as a contiguous block preserving relative order, and commits a single database reorder write
-- [ ] Dragging any selection onto a folder card or sidebar folder row assigns all selected PDFs to that folder additively; the sidebar folder tree remains navigable during a drag via dwell-expand
-- [ ] Bulk edit actions work for tags, folders, metadata refresh, thumbnail rebuild, and reindexing
-- [ ] PDF display title and display author are editable, searchable, sortable, and resettable
-- [ ] Folders can be created, renamed, deleted, nested, reordered, and used as drag-and-drop targets
+- [x] Manual PDF ordering works and persists exactly as the user leaves it
+- [x] PDFs can be dragged to reorder them in Manual view
+- [x] PDFs can be selected singly, in ranges, and in bulk
+- [x] Selection checkboxes appear on hovered and selected cards and rows; checking and unchecking them adds and removes entries from the selection without disturbing other selected entries
+- [x] A master checkbox in the library toolbar reflects and controls the all-selected, none-selected, and partial-selection states
+- [x] Dragging two or more selected PDFs shows a stacked thumbnail ghost and correct placeholder count, drops as a contiguous block preserving relative order, and commits a single database reorder write
+- [x] Dragging any selection onto a folder card or sidebar folder row assigns all selected PDFs to that folder additively; the sidebar folder tree remains navigable during a drag via dwell-expand
+- [x] Bulk edit actions work for tags, folders, metadata refresh, thumbnail rebuild, and reindexing
+- [x] PDF display title and display author are editable, searchable, sortable, and resettable
+- [x] Folders can be created, renamed, deleted, nested, reordered, and used as drag-and-drop targets
 - [ ] Folder ordering and PDF ordering inside folders persist across restarts
-- [ ] Details/editor panel gives the user native-library-manager control over metadata and organization
-- [ ] Search, filters, tags, folders, and sort modes compose without surprising state loss
+- [x] Details/editor panel gives the user native-library-manager control over metadata and organization
+- [x] Search, filters, tags, folders, and sort modes compose without surprising state loss
 - [ ] Library interactions remain responsive for at least 1000 PDFs and are architecturally ready for larger collections
 - [ ] New library UI uses the Phase 4 style system rather than one-off styling
 

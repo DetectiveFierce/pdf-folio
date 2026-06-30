@@ -117,6 +117,42 @@ component "DragInsertionMarker" {
     normal background="#9C732B" text="#FCFAF5" border="#9C732B" border_width=0 radius=4 theme="light"
 }
 
+component "SelectionCheckbox" {
+    normal background="#160F07CC" text="#DDD0BA" border="#D4A85366" border_width=1 radius=5 theme="espresso"
+    hovered background="#24180B" text="#D4A853" border="#D4A853" theme="espresso"
+    pressed background="#30220F" text="#D4A853" border="#D4A853" theme="espresso"
+
+    normal background="#FCFAF5DD" text="#261E14" border="#9C732B66" border_width=1 radius=5 theme="light"
+    hovered background="#EFE3CF" text="#9C732B" border="#9C732B" theme="light"
+    pressed background="#DEC69C" text="#9C732B" border="#9C732B" theme="light"
+}
+
+component "MasterCheckbox" {
+    normal background="#201409" text="#DDD0BA" border="#C8B89A66" border_width=1 radius=5 theme="espresso"
+    hovered background="#2B1D0E" text="#D4A853" border="#D4A853" theme="espresso"
+    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+
+    normal background="#FCFAF5" text="#261E14" border="#9C732B66" border_width=1 radius=5 theme="light"
+    hovered background="#EFE3CF" text="#9C732B" border="#9C732B" theme="light"
+    pressed background="#DEC69C" text="#9C732B" border="#9C732B" theme="light"
+}
+
+component "DragStackGhost" {
+    normal background="#24180BCC" text="#DDD0BA" border="#D4A853" border_width=1 radius=8 theme="espresso"
+    active background="#30230FE6" text="#D4A853" border="#D4A853" border_width=1.5 radius=8 theme="espresso"
+
+    normal background="#FCFAF5DD" text="#261E14" border="#9C732B" border_width=1 radius=8 theme="light"
+    active background="#EFE3CFE6" text="#9C732B" border="#9C732B" border_width=1.5 radius=8 theme="light"
+}
+
+component "FolderDropTarget" {
+    normal background="#30230F" text="#D4A853" border="#D4A853" border_width=2 radius=8 theme="espresso"
+    active background="#3A2912" text="#D4A853" border="#D4A853" border_width=2 radius=8 theme="espresso"
+
+    normal background="#EFE3CF" text="#9C732B" border="#9C732B" border_width=2 radius=8 theme="light"
+    active background="#E7D5B8" text="#9C732B" border="#9C732B" border_width=2 radius=8 theme="light"
+}
+
 component "SelectionToolbar" {
     layout bulk_tag_input_width=150 bulk_tag_input_min_width=90 title_input_width=260 title_input_min_width=120 author_input_width=190 author_input_min_width=96 context_row_height=46
 

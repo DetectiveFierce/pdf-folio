@@ -1,7 +1,7 @@
 //! Top-level application state and launch entrypoint.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -35,11 +35,12 @@ use crate::messages::{
     SelectionToolbarAction, Shortcut,
 };
 use crate::style::{
-    container_style, display_font, empty_state, menu_style_for_class, mix_color, pick_list_style,
-    progress_bar, scrollable_style, search_input_with_class, section_heading, side_border,
+    container_style, display_font, empty_state, error_banner, master_checkbox,
+    menu_style_for_class, mix_color, pick_list_style, progress_bar, scrollable_style,
+    search_input_with_class, section_heading, selection_checkbox, side_border,
     side_border_for_class, slider_style, tag_pill, text_input_style, toc_entry, toolbar_button,
-    ui_font, viewer_primitives, Class, ComponentState, FontSize, FontWeight, LabelSection, Spacing,
-    StyleBook, ThemeTokens, UI_FONT_FAMILY,
+    ui_font, viewer_primitives, Class, ComponentState, FontSize, FontWeight, LabelSection,
+    MasterCheckboxState, Spacing, StyleBook, ThemeTokens, UI_FONT_FAMILY,
 };
 use crate::theme::AppTheme;
 
@@ -60,12 +61,17 @@ const FILE_TREE_FONT_FAMILY: &str = "GeistMono Nerd Font Propo";
 const FILE_TREE_LABEL_SIZE: u32 = FontSize::MD;
 const FILE_TREE_ROW_HEIGHT: f32 = 26.0;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
+const LIBRARY_SEARCH_INPUT_ID: &str = "library-search-input";
+const LIBRARY_FOLDER_RENAME_INPUT_ID: &str = "library-folder-rename-input";
+const LIBRARY_DETAILS_TITLE_INPUT_ID: &str = "library-details-title-input";
 const LIBRARY_DRAG_AUTOSCROLL_TICK_MS: u64 = 16;
 const LIBRARY_DRAG_AUTOSCROLL_EDGE_BAND: f32 = 96.0;
 const LIBRARY_DRAG_AUTOSCROLL_MAX_SPEED: f32 = 980.0;
 const LIBRARY_DRAG_AUTOSCROLL_MIN_SPEED: f32 = 80.0;
 const LIBRARY_DRAG_AUTOSCROLL_MAX_DT: f32 = 1.0 / 20.0;
 const LIBRARY_DRAG_ACTIVATION_DISTANCE: f32 = 6.0;
+const LIBRARY_FOLDER_DROP_DWELL_MS: u64 = 500;
+const LIBRARY_FOLDER_DROP_FLASH_MS: u64 = 900;
 const LIBRARY_CARD_HOVER_TICK_MS: u64 = 16;
 const LIBRARY_CARD_HOVER_DURATION_MS: u64 = 180;
 const LIBRARY_CARD_HOVER_LIFT: f32 = 2.0;
@@ -94,6 +100,16 @@ const LIBRARY_SORT_OPTIONS: [LibrarySortMode; 10] = [
     LibrarySortMode::ReadingProgress,
     LibrarySortMode::PageCount,
     LibrarySortMode::MissingFiles,
+];
+const LIBRARY_METADATA_DENSITY_OPTIONS: [LibraryMetadataDensity; 3] = [
+    LibraryMetadataDensity::Minimal,
+    LibraryMetadataDensity::Standard,
+    LibraryMetadataDensity::Detailed,
+];
+const LIBRARY_READING_FILTER_OPTIONS: [LibraryReadingFilter; 3] = [
+    LibraryReadingFilter::Unread,
+    LibraryReadingFilter::Reading,
+    LibraryReadingFilter::Finished,
 ];
 const BULK_TAG_ACTIONS: [SelectionToolbarAction; 2] = [
     SelectionToolbarAction::AddTag,
@@ -125,6 +141,84 @@ pub enum AppMode {
     Library,
     /// PDF viewer view.
     Viewer,
+}
+
+/// Density of metadata shown in library cards and rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryMetadataDensity {
+    /// Show title and author with minimal supporting metadata.
+    Minimal,
+    /// Show common reading metadata.
+    Standard,
+    /// Show reading metadata plus file details.
+    Detailed,
+}
+
+impl LibraryMetadataDensity {
+    fn from_visible_fields(fields: &[String]) -> Self {
+        let has_file_size = fields.iter().any(|field| field == "file_size");
+        let has_page_count = fields.iter().any(|field| field == "page_count");
+        if has_file_size {
+            Self::Detailed
+        } else if has_page_count {
+            Self::Standard
+        } else {
+            Self::Minimal
+        }
+    }
+
+    fn visible_fields(self) -> Vec<String> {
+        match self {
+            Self::Minimal => vec![String::from("author")],
+            Self::Standard => vec![String::from("author"), String::from("page_count")],
+            Self::Detailed => vec![
+                String::from("author"),
+                String::from("page_count"),
+                String::from("file_size"),
+            ],
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Minimal => "Minimal",
+            Self::Standard => "Standard",
+            Self::Detailed => "Detailed",
+        }
+    }
+}
+
+impl std::fmt::Display for LibraryMetadataDensity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
+/// Reading-progress filter applied to the library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryReadingFilter {
+    /// Entries with no saved progress.
+    Unread,
+    /// Entries with saved progress before the final known page.
+    Reading,
+    /// Entries whose saved progress reaches the final known page.
+    Finished,
+}
+
+impl LibraryReadingFilter {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Unread => "Unread",
+            Self::Reading => "Reading",
+            Self::Finished => "Finished",
+        }
+    }
+}
+
+impl std::fmt::Display for LibraryReadingFilter {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
 }
 
 /// User-configurable application settings.
@@ -220,6 +314,8 @@ pub struct PDFolioApp {
     pub compact_view_mode: bool,
     /// Card scale applied to the masonry library grid.
     pub library_grid_zoom: f32,
+    /// Metadata density applied to library cards and rows.
+    pub library_metadata_density: LibraryMetadataDensity,
     /// Whether the jump-to-page overlay is open.
     pub jump_dialog_open: bool,
     /// Current jump-to-page input text.
@@ -238,6 +334,8 @@ pub struct PDFolioApp {
     pub new_folder_name: String,
     /// Whether the new-folder dialog is open.
     pub create_folder_dialog_open: bool,
+    /// Inline selected-folder rename input text.
+    pub folder_rename_input: String,
     /// Current library search query.
     pub search_query: String,
     /// Search results, if search mode is active.
@@ -274,6 +372,10 @@ pub struct PDFolioApp {
     pub pending_thumbnails: HashSet<ThumbnailCacheKey>,
     /// Active tag filter.
     pub active_tag_filter: Option<String>,
+    /// Active reading-progress filter.
+    pub active_reading_filter: Option<LibraryReadingFilter>,
+    /// Whether the library is filtered to missing source files.
+    pub missing_filter_active: bool,
     /// Entry currently showing inline tag input.
     pub tag_entry_id: Option<EntryId>,
     /// Current inline tag text.
@@ -294,6 +396,12 @@ pub struct PDFolioApp {
     pub pending_confirmation: Option<ConfirmationAction>,
     /// Latest library/import status.
     pub library_status: Option<String>,
+    /// Latest library error shown in the shared error banner.
+    pub library_error: Option<String>,
+    /// Active long-running bulk operation shown with shared progress styling.
+    pub bulk_operation_progress: Option<BulkOperationProgress>,
+    /// Recently completed folder drop target and timestamp for success flash.
+    pub folder_drop_flash: Option<(FolderId, Instant)>,
     /// Last library entry click used to detect double-click opens.
     pub last_library_click: Option<(EntryId, Instant)>,
     /// Hover tween state for library cards keyed by entry id.
@@ -302,6 +410,8 @@ pub struct PDFolioApp {
     pub animation_now: Instant,
     /// Active library entry drag state.
     pub library_drag: Option<LibraryDragState>,
+    /// Active folder drag state.
+    pub folder_drag: Option<FolderDragState>,
     /// Current visual theme.
     pub theme: AppTheme,
     /// Runtime style book loaded from bundled KDL and user overrides.
@@ -372,10 +482,22 @@ impl ThumbnailSize {
 pub struct LibraryDragState {
     /// Entry being dragged.
     pub entry_id: EntryId,
+    /// Entries moved by this drag, in their original visible order.
+    pub entry_ids: Vec<EntryId>,
     /// Original zero-based index in the visible manual-order list.
     pub source_index: usize,
     /// Current insertion index after removing the dragged entry from the visible list.
     pub target_index: usize,
+    /// Whether this drag moves multiple selected entries as a group.
+    pub multi: bool,
+    /// Active folder target for additive assignment.
+    pub drop_target: Option<FolderId>,
+    /// Folder currently hovered while waiting for dwell activation.
+    pub pending_drop_target: Option<FolderId>,
+    /// Time when the current folder hover began.
+    pub pending_drop_started_at: Option<Instant>,
+    /// Sidebar folders expanded by drag dwell and eligible to collapse on leave.
+    pub expanded_during_drag: HashSet<FolderId>,
     /// Whether pointer movement has crossed the drag threshold.
     pub active: bool,
     /// Cursor position recorded when the press began.
@@ -386,10 +508,49 @@ pub struct LibraryDragState {
     pub last_auto_scroll_tick: Option<Instant>,
 }
 
+/// Current drag state for moving a folder into another folder.
+#[derive(Debug, Clone)]
+pub struct FolderDragState {
+    /// Folder being dragged.
+    pub folder_id: FolderId,
+    /// Active folder target for nesting.
+    pub drop_target: Option<FolderId>,
+    /// Folder currently hovered while waiting for dwell activation.
+    pub pending_drop_target: Option<FolderId>,
+    /// Time when the current folder hover began.
+    pub pending_drop_started_at: Option<Instant>,
+    /// Sidebar folders expanded by drag dwell and eligible to collapse on cancel.
+    pub expanded_during_drag: HashSet<FolderId>,
+    /// Whether pointer movement has crossed the drag threshold.
+    pub active: bool,
+    /// Cursor position recorded when the press began.
+    pub press_cursor: Option<Point>,
+    /// Latest cursor position in window coordinates.
+    pub cursor: Option<Point>,
+}
+
 #[derive(Debug, Clone)]
 enum LibraryRenderItem {
     Entry(LibraryEntry),
     Ghost(LibraryEntry),
+    DropZone(LibraryEntry),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct FolderSmartCounts {
+    total: usize,
+    in_progress: usize,
+    missing: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct BulkOperationProgress {
+    /// User-facing operation label.
+    pub label: String,
+    /// Number of PDFs included in the operation.
+    pub total: usize,
+    /// Time when the operation began, used for indeterminate animation.
+    pub started_at: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -409,6 +570,14 @@ struct LibraryMasonryItem {
 enum LibraryEntryRenderMode {
     Normal,
     Placeholder,
+    Floating,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FolderCardRenderMode {
+    Normal,
+    Placeholder,
+    NestingTarget,
     Floating,
 }
 
@@ -463,6 +632,9 @@ impl PDFolioApp {
             library_grid_zoom: preferences
                 .grid_zoom
                 .clamp(LIBRARY_GRID_ZOOM_MIN, LIBRARY_GRID_ZOOM_MAX),
+            library_metadata_density: LibraryMetadataDensity::from_visible_fields(
+                &preferences.visible_metadata_fields,
+            ),
             jump_dialog_open: false,
             jump_input: String::new(),
             annotations: Vec::new(),
@@ -472,6 +644,7 @@ impl PDFolioApp {
             selected_folder: preferences.selected_folder,
             new_folder_name: String::new(),
             create_folder_dialog_open: false,
+            folder_rename_input: String::new(),
             search_query: String::new(),
             search_results: None,
             search_hit_pages: HashMap::new(),
@@ -488,11 +661,16 @@ impl PDFolioApp {
             library_tag_sidebar_open: true,
             resizing_library_tag_sidebar: false,
             library_sidebar_tab: LibrarySidebarTab::Files,
-            library_tree_root_expanded: true,
-            collapsed_library_tree_folders: HashSet::new(),
+            library_tree_root_expanded: preferences.library_tree_root_expanded,
+            collapsed_library_tree_folders: preferences
+                .collapsed_folder_ids
+                .into_iter()
+                .collect::<HashSet<_>>(),
             thumbnails: HashMap::new(),
             pending_thumbnails: HashSet::new(),
             active_tag_filter: None,
+            active_reading_filter: None,
+            missing_filter_active: false,
             tag_entry_id: None,
             tag_input: String::new(),
             selected_library_entries: HashSet::new(),
@@ -503,10 +681,14 @@ impl PDFolioApp {
             details_author_input: String::new(),
             pending_confirmation: None,
             library_status: None,
+            library_error: None,
+            bulk_operation_progress: None,
+            folder_drop_flash: None,
             last_library_click: None,
             library_card_hover_animations: HashMap::new(),
             animation_now: Instant::now(),
             library_drag: None,
+            folder_drag: None,
             theme: AppTheme::Dark,
             style_book,
             style_load_error,
@@ -729,6 +911,11 @@ impl PDFolioApp {
                     entry.folders.iter().any(|folder| &folder.id == folder_id)
                 })
             })
+            .filter(|entry| {
+                self.active_reading_filter
+                    .is_none_or(|filter| library_entry_reading_state(entry) == filter)
+            })
+            .filter(|entry| !self.missing_filter_active || entry.missing)
             .cloned()
             .collect()
     }
@@ -855,27 +1042,139 @@ impl PDFolioApp {
     }
 
     fn child_folders(&self) -> Vec<Folder> {
-        self.library_folders
+        let mut folders = self
+            .library_folders
             .iter()
             .filter(|folder| folder.parent_id == self.selected_folder)
             .cloned()
-            .collect()
+            .collect::<Vec<_>>();
+        folders.sort_by_key(|folder| (folder.manual_order, folder.name.to_lowercase()));
+        folders
     }
 
-    fn folder_entry_count(&self, folder_id: &FolderId) -> usize {
-        self.library_entries
+    fn folder_smart_counts(&self, folder_id: Option<&FolderId>) -> FolderSmartCounts {
+        let folder_ids = folder_id.map(|id| self.folder_subtree_ids(id));
+        let entries = self.library_entries.iter().filter(|entry| {
+            folder_ids.as_ref().map_or(true, |folder_ids| {
+                entry
+                    .folders
+                    .iter()
+                    .any(|folder| folder_ids.contains(&folder.id))
+            })
+        });
+        let mut counts = FolderSmartCounts::default();
+        for entry in entries {
+            counts.total += 1;
+            if entry.missing {
+                counts.missing += 1;
+            }
+            if entry.page_count.is_some_and(|page_count| {
+                page_count > 0 && entry.last_page.saturating_add(1) < page_count
+            }) {
+                counts.in_progress += 1;
+            }
+        }
+        counts
+    }
+
+    fn folder_subtree_ids(&self, folder_id: &FolderId) -> HashSet<FolderId> {
+        let mut folder_ids = HashSet::new();
+        self.collect_folder_subtree_ids(folder_id, &mut folder_ids);
+        folder_ids
+    }
+
+    fn collect_folder_subtree_ids(&self, folder_id: &FolderId, folder_ids: &mut HashSet<FolderId>) {
+        if !folder_ids.insert(folder_id.clone()) {
+            return;
+        }
+        for child in self
+            .library_folders
             .iter()
-            .filter(|entry| entry.folders.iter().any(|folder| &folder.id == folder_id))
-            .count()
+            .filter(|folder| folder.parent_id.as_ref() == Some(folder_id))
+        {
+            self.collect_folder_subtree_ids(&child.id, folder_ids);
+        }
     }
 
     fn selected_folder_name(&self) -> Option<String> {
+        self.selected_folder().map(|folder| folder.name.clone())
+    }
+
+    fn selected_folder(&self) -> Option<&Folder> {
         self.selected_folder.as_ref().and_then(|selected| {
             self.library_folders
                 .iter()
                 .find(|folder| &folder.id == selected)
-                .map(|folder| folder.name.clone())
         })
+    }
+
+    fn selected_folder_sibling_order(&self) -> Option<(Option<FolderId>, Vec<FolderId>, usize)> {
+        let folder = self.selected_folder()?;
+        let parent_id = folder.parent_id.clone();
+        let mut siblings = self
+            .library_folders
+            .iter()
+            .filter(|candidate| candidate.parent_id == parent_id)
+            .collect::<Vec<_>>();
+        siblings.sort_by_key(|candidate| (candidate.manual_order, candidate.name.to_lowercase()));
+        let folder_ids = siblings
+            .iter()
+            .map(|candidate| candidate.id.clone())
+            .collect::<Vec<_>>();
+        let index = folder_ids
+            .iter()
+            .position(|folder_id| folder_id == &folder.id)?;
+        Some((parent_id, folder_ids, index))
+    }
+
+    fn selected_folder_manual_reorder(
+        &self,
+        direction: isize,
+    ) -> Option<(Option<FolderId>, Vec<FolderId>)> {
+        let (parent_id, mut folder_ids, index) = self.selected_folder_sibling_order()?;
+        let next_index = index.checked_add_signed(direction)?;
+        if next_index >= folder_ids.len() {
+            return None;
+        }
+        folder_ids.swap(index, next_index);
+        Some((parent_id, folder_ids))
+    }
+
+    fn folder_drag_manual_reorder(
+        &self,
+        folder_id: &FolderId,
+        target_id: &FolderId,
+    ) -> Option<(Option<FolderId>, Vec<FolderId>)> {
+        let folder = self
+            .library_folders
+            .iter()
+            .find(|folder| &folder.id == folder_id)?;
+        let target = self
+            .library_folders
+            .iter()
+            .find(|folder| &folder.id == target_id)?;
+        if folder.parent_id != target.parent_id || folder.id == target.id {
+            return None;
+        }
+
+        let mut siblings = self
+            .library_folders
+            .iter()
+            .filter(|candidate| candidate.parent_id == folder.parent_id)
+            .collect::<Vec<_>>();
+        siblings.sort_by_key(|candidate| (candidate.manual_order, candidate.name.to_lowercase()));
+        let folder_ids = siblings
+            .iter()
+            .map(|candidate| candidate.id.clone())
+            .collect::<Vec<_>>();
+        let next_order = reorder_folder_ids_before_target(&folder_ids, folder_id, target_id)?;
+        (next_order != folder_ids).then_some((folder.parent_id.clone(), next_order))
+    }
+
+    fn sync_folder_rename_input(&mut self) {
+        self.folder_rename_input = self
+            .selected_folder()
+            .map_or_else(String::new, |folder| folder.name.clone());
     }
 
     fn folder_breadcrumbs(&self) -> Vec<(String, Option<FolderId>)> {
@@ -923,6 +1222,28 @@ impl PDFolioApp {
 
         self.prune_selection_to_visible_entries(&visible_entries);
         self.sync_details_editor_to_selection();
+    }
+
+    fn toggle_library_entry_selection(&mut self, entry_id: EntryId) {
+        toggle_selection_entry_id(&mut self.selected_library_entries, entry_id.clone());
+        self.library_selection_anchor = Some(entry_id);
+        let visible_entries = self.visible_library_entries();
+        self.prune_selection_to_visible_entries(&visible_entries);
+        self.sync_details_editor_to_selection();
+    }
+
+    fn master_checkbox_state(&self) -> MasterCheckboxState {
+        let visible_entries = self.visible_library_entries();
+        if visible_entries.is_empty() {
+            return MasterCheckboxState::None;
+        }
+
+        let selected_visible = visible_entries
+            .iter()
+            .filter(|entry| self.selected_library_entries.contains(&entry.id))
+            .count();
+
+        master_checkbox_state_for_counts(selected_visible, visible_entries.len())
     }
 
     fn select_library_range(&mut self, entry_id: EntryId, visible_entries: &[LibraryEntry]) {
@@ -1174,6 +1495,45 @@ impl PDFolioApp {
             .retain(|entry_id, animation| {
                 animation.is_animating(now) || visible_entry_ids.contains(entry_id)
             });
+        self.expire_folder_drop_flash(now);
+    }
+
+    fn start_bulk_operation_progress(&mut self, label: impl Into<String>, total: usize) {
+        let label = label.into();
+        self.library_status = Some(format!("{label} {total} PDFs..."));
+        self.bulk_operation_progress = Some(BulkOperationProgress {
+            label,
+            total,
+            started_at: Instant::now(),
+        });
+    }
+
+    fn start_folder_drop_flash(&mut self, folder_id: FolderId, now: Instant) {
+        self.folder_drop_flash = Some((folder_id, now));
+        self.animation_now = now;
+    }
+
+    fn expire_folder_drop_flash(&mut self, now: Instant) {
+        if self
+            .folder_drop_flash
+            .as_ref()
+            .is_some_and(|(_, started_at)| {
+                now.saturating_duration_since(*started_at)
+                    >= Duration::from_millis(LIBRARY_FOLDER_DROP_FLASH_MS)
+            })
+        {
+            self.folder_drop_flash = None;
+        }
+    }
+
+    fn folder_drop_flash_active(&self, folder_id: &FolderId) -> bool {
+        folder_drop_flash_active_at(
+            folder_id,
+            self.folder_drop_flash
+                .as_ref()
+                .map(|(flashed_folder_id, started_at)| (flashed_folder_id, *started_at)),
+            self.animation_now,
+        )
     }
 
     fn library_card_hover_animation() -> Animation<bool> {
@@ -1197,22 +1557,62 @@ impl PDFolioApp {
     }
 
     fn begin_library_drag(&mut self, entry_id: EntryId) {
-        let Some(source_index) = self
-            .visible_library_entries()
+        self.folder_drag = None;
+        let visible_entries = self.visible_library_entries();
+        let Some(source_index) = visible_entries
             .iter()
             .position(|entry| entry.id == entry_id)
         else {
             return;
         };
+        let multi = self.selected_library_entries.len() > 1
+            && self.selected_library_entries.contains(&entry_id);
+        let entry_ids = if multi {
+            visible_entries
+                .iter()
+                .filter(|entry| self.selected_library_entries.contains(&entry.id))
+                .map(|entry| entry.id.clone())
+                .collect()
+        } else {
+            vec![entry_id.clone()]
+        };
 
         self.library_drag = Some(LibraryDragState {
             entry_id,
+            entry_ids,
             source_index,
             target_index: source_index,
+            multi,
+            drop_target: None,
+            pending_drop_target: None,
+            pending_drop_started_at: None,
+            expanded_during_drag: HashSet::new(),
             active: false,
             press_cursor: None,
             cursor: None,
             last_auto_scroll_tick: None,
+        });
+    }
+
+    fn begin_folder_drag(&mut self, folder_id: FolderId) {
+        if !self
+            .library_folders
+            .iter()
+            .any(|folder| folder.id == folder_id)
+        {
+            return;
+        }
+
+        self.library_drag = None;
+        self.folder_drag = Some(FolderDragState {
+            folder_id,
+            drop_target: None,
+            pending_drop_target: None,
+            pending_drop_started_at: None,
+            expanded_during_drag: HashSet::new(),
+            active: false,
+            press_cursor: None,
+            cursor: None,
         });
     }
 
@@ -1225,23 +1625,183 @@ impl PDFolioApp {
         if let Some(drag) = &mut self.library_drag {
             let press_cursor = *drag.press_cursor.get_or_insert(cursor);
             drag.cursor = Some(cursor);
-            if can_drag_reorder
-                && !drag.active
-                && distance_between(press_cursor, cursor) >= LIBRARY_DRAG_ACTIVATION_DISTANCE
-            {
-                drag.active = true;
-            } else if !can_drag_reorder
-                && distance_between(press_cursor, cursor) >= LIBRARY_DRAG_ACTIVATION_DISTANCE
-            {
-                self.library_status = Some(String::from(
-                    "Switch to unfiltered Manual sort to reorder PDFs.",
-                ));
+            if distance_between(press_cursor, cursor) >= LIBRARY_DRAG_ACTIVATION_DISTANCE {
+                if !drag.active {
+                    drag.active = true;
+                }
+                if !can_drag_reorder && drag.drop_target.is_none() {
+                    self.library_status = Some(String::from(
+                        "Drop on a folder, or switch to unfiltered Manual sort to reorder PDFs.",
+                    ));
+                }
             }
         }
 
         if self.library_drag.as_ref().is_some_and(|drag| drag.active) {
             self.update_library_drag_target_from_cursor();
         }
+    }
+
+    fn set_folder_drop_hover_target(&mut self, folder_id: Option<FolderId>, now: Instant) {
+        if self.library_drag.is_none() && self.folder_drag.is_none() {
+            return;
+        };
+        let folder_drag_card_target = if folder_id.is_none() {
+            self.folder_drag
+                .as_ref()
+                .filter(|drag| drag.active)
+                .and_then(|drag| {
+                    drag.cursor.and_then(|cursor| {
+                        self.folder_card_target_at_cursor(cursor, &drag.folder_id)
+                    })
+                })
+        } else {
+            None
+        };
+
+        if let Some(drag) = &mut self.library_drag {
+            if drag.pending_drop_target == folder_id {
+                return;
+            }
+
+            drag.pending_drop_target = folder_id.clone();
+            drag.pending_drop_started_at = drag.pending_drop_target.as_ref().map(|_| now);
+            drag.drop_target = None;
+        }
+
+        if let Some(drag) = &mut self.folder_drag {
+            let target = folder_id.or(folder_drag_card_target).filter(|target| {
+                folder_can_move_into(&self.library_folders, &drag.folder_id, target)
+            });
+            if drag.pending_drop_target == target {
+                return;
+            }
+
+            drag.pending_drop_target = target.clone();
+            drag.pending_drop_started_at = drag.pending_drop_target.as_ref().map(|_| now);
+            drag.drop_target = if drag.active { target } else { None };
+        }
+    }
+
+    fn update_folder_drop_target_dwell(&mut self, now: Instant) {
+        let library_target = self.library_drag.as_ref().and_then(|drag| {
+            if !drag.active || drag.drop_target.is_some() {
+                return None;
+            }
+            let folder_id = drag.pending_drop_target.clone()?;
+            let started_at = drag.pending_drop_started_at?;
+            folder_drop_target_ready(started_at, now).then_some(folder_id)
+        });
+
+        let folder_target = self.folder_drag.as_ref().and_then(|drag| {
+            if !drag.active || drag.drop_target.is_some() {
+                return None;
+            }
+            let folder_id = drag.pending_drop_target.clone()?;
+            let started_at = drag.pending_drop_started_at?;
+            folder_drop_target_ready(started_at, now).then_some(folder_id)
+        });
+
+        let Some(folder_id) = library_target.or(folder_target) else {
+            return;
+        };
+
+        let should_expand = self.folder_has_children(&folder_id)
+            && self.collapsed_library_tree_folders.contains(&folder_id);
+        if should_expand {
+            self.collapsed_library_tree_folders.remove(&folder_id);
+        }
+
+        if let Some(drag) = &mut self.library_drag {
+            drag.drop_target = Some(folder_id.clone());
+            if should_expand {
+                drag.expanded_during_drag.insert(folder_id.clone());
+            }
+        }
+        if let Some(drag) = &mut self.folder_drag {
+            drag.drop_target = Some(folder_id.clone());
+            if should_expand {
+                drag.expanded_during_drag.insert(folder_id);
+            }
+        }
+    }
+
+    fn update_folder_drag_target(&mut self, cursor: Point) {
+        let Some(drag) = &mut self.folder_drag else {
+            return;
+        };
+
+        let press_cursor = *drag.press_cursor.get_or_insert(cursor);
+        drag.cursor = Some(cursor);
+        if distance_between(press_cursor, cursor) >= LIBRARY_DRAG_ACTIVATION_DISTANCE {
+            drag.active = true;
+        }
+        if !drag.active {
+            return;
+        }
+
+        let dragged_folder_id = drag.folder_id.clone();
+        if let Some(target) = self.folder_card_target_at_cursor(cursor, &dragged_folder_id) {
+            self.set_folder_drag_card_target(Some(target));
+        }
+    }
+
+    fn set_folder_drag_card_target(&mut self, folder_id: Option<FolderId>) {
+        let Some(drag) = &mut self.folder_drag else {
+            return;
+        };
+        let target = folder_id
+            .filter(|target| folder_can_move_into(&self.library_folders, &drag.folder_id, target));
+        if drag.drop_target == target {
+            return;
+        }
+        drag.pending_drop_target = target.clone();
+        drag.pending_drop_started_at = target.as_ref().map(|_| Instant::now());
+        drag.drop_target = target;
+    }
+
+    fn active_folder_drop_target(&self) -> Option<&FolderId> {
+        self.library_drag
+            .as_ref()
+            .and_then(|drag| drag.drop_target.as_ref())
+            .or_else(|| {
+                self.folder_drag
+                    .as_ref()
+                    .and_then(|drag| drag.drop_target.as_ref())
+            })
+    }
+
+    fn folder_card_target_at_cursor(
+        &self,
+        cursor: Point,
+        dragged_folder_id: &FolderId,
+    ) -> Option<FolderId> {
+        let child_folders = self.child_folders();
+        folder_card_target_at_cursor(
+            cursor,
+            &child_folders,
+            dragged_folder_id,
+            self.library_viewport_x,
+            self.library_viewport_y,
+            self.library_scroll_offset,
+            self.library_grid_card_width(),
+            self.layout().library_folder_grid_row_height,
+            self.layout().library_masonry_gap,
+            Spacing::SM,
+            folder_cards_per_row(self),
+        )
+    }
+
+    fn collapse_drag_expanded_folders(&mut self, folders: HashSet<FolderId>) {
+        for folder_id in folders {
+            self.collapsed_library_tree_folders.insert(folder_id);
+        }
+    }
+
+    fn folder_has_children(&self, folder_id: &FolderId) -> bool {
+        self.library_folders
+            .iter()
+            .any(|folder| folder.parent_id.as_ref() == Some(folder_id))
     }
 
     fn update_library_drag_target_from_cursor(&mut self) {
@@ -1255,13 +1815,14 @@ impl PDFolioApp {
             return;
         };
 
+        let dragged_ids = self
+            .library_drag
+            .as_ref()
+            .map(|drag| drag.entry_ids.iter().cloned().collect::<HashSet<_>>())
+            .unwrap_or_default();
         let compact_entries = entries
             .iter()
-            .filter(|entry| {
-                self.library_drag
-                    .as_ref()
-                    .is_none_or(|drag| entry.id != drag.entry_id)
-            })
+            .filter(|entry| !dragged_ids.contains(&entry.id))
             .cloned()
             .collect::<Vec<_>>();
         let compact_len = compact_entries.len();
@@ -1334,6 +1895,12 @@ impl PDFolioApp {
     }
 
     fn auto_scroll_library_drag(&mut self, tick: Instant) -> Task<Message> {
+        if self.library_drag.is_none() && self.folder_drag.is_none() {
+            return Task::none();
+        }
+
+        self.update_folder_drop_target_dwell(tick);
+
         if self.library_drag.is_none() {
             return Task::none();
         }
@@ -1382,27 +1949,109 @@ impl PDFolioApp {
         };
 
         if !drag.active {
+            self.collapse_drag_expanded_folders(drag.expanded_during_drag);
             return Task::done(Message::LibraryEntryClicked(drag.entry_id));
         }
 
-        if drag.source_index == drag.target_index || !self.can_drag_reorder_library() {
+        if let Some(folder_id) = drag.drop_target.clone() {
+            if self.selected_folder.as_ref() == Some(&folder_id) {
+                self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+                return scroll_library_to_offset_task(self.library_scroll_offset);
+            }
+            let entry_ids = drag.entry_ids.clone();
+            if entry_ids.is_empty() {
+                return Task::none();
+            }
+            self.library_status = Some(format!(
+                "Adding {} to folder...",
+                format_count(entry_ids.len(), "PDF")
+            ));
+            return Task::batch([
+                assign_entries_to_folder_task(Arc::clone(&self.db), entry_ids, folder_id),
+                scroll_library_to_offset_task(self.library_scroll_offset),
+            ]);
+        }
+
+        if !self.can_drag_reorder_library() {
+            self.collapse_drag_expanded_folders(drag.expanded_during_drag);
             return scroll_library_to_offset_task(self.library_scroll_offset);
         }
 
-        let mut entries = self.visible_library_entries();
-        if drag.source_index >= entries.len() || drag.target_index > entries.len() {
+        let entries = self.visible_library_entries();
+        let entry_ids: Vec<EntryId> = entries.iter().map(|entry| entry.id.clone()).collect();
+        let next_order = reorder_entry_ids_for_drag(&entry_ids, &drag.entry_ids, drag.target_index);
+        if next_order == entry_ids {
+            self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+            return scroll_library_to_offset_task(self.library_scroll_offset);
+        }
+        if next_order.len() != entries.len() {
+            self.collapse_drag_expanded_folders(drag.expanded_during_drag);
             return Task::none();
         }
 
-        let moved = entries.remove(drag.source_index);
-        let insert_index = drag.target_index.min(entries.len());
-        entries.insert(insert_index, moved);
+        let entries_by_id = entries
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect::<HashMap<_, _>>();
+        let entries = next_order
+            .iter()
+            .filter_map(|entry_id| entries_by_id.get(entry_id).cloned())
+            .collect::<Vec<_>>();
 
-        let entry_ids: Vec<EntryId> = entries.iter().map(|entry| entry.id.clone()).collect();
         self.library_entries = entries;
-        self.library_status = Some(String::from("Saving manual PDF order..."));
+        self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+        self.library_status = Some(if drag.multi {
+            format!("Saving manual order for {} PDFs...", drag.entry_ids.len())
+        } else {
+            String::from("Saving manual PDF order...")
+        });
         Task::batch([
-            persist_manual_entry_order_task(Arc::clone(&self.db), entry_ids),
+            persist_manual_entry_order_task(Arc::clone(&self.db), next_order),
+            scroll_library_to_offset_task(self.library_scroll_offset),
+        ])
+    }
+
+    fn finish_folder_drag(&mut self) -> Task<Message> {
+        let Some(drag) = self.folder_drag.take() else {
+            return Task::none();
+        };
+
+        if !drag.active {
+            self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+            return Task::done(Message::FolderSelected(Some(drag.folder_id)));
+        }
+
+        if let Some(target_id) = drag.drop_target.clone() {
+            if !folder_can_move_into(&self.library_folders, &drag.folder_id, &target_id) {
+                self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+                self.library_error = Some(String::from("That folder cannot be moved there."));
+                return Task::none();
+            }
+
+            self.library_status = Some(String::from("Moving folder..."));
+            self.start_folder_drop_flash(target_id.clone(), Instant::now());
+            return Task::batch([
+                move_folder_task(Arc::clone(&self.db), drag.folder_id, Some(target_id)),
+                scroll_library_to_offset_task(self.library_scroll_offset),
+            ]);
+        }
+
+        let Some(target_id) = drag.pending_drop_target.clone() else {
+            self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+            return Task::none();
+        };
+
+        let Some((parent_id, next_order)) =
+            self.folder_drag_manual_reorder(&drag.folder_id, &target_id)
+        else {
+            self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+            return Task::none();
+        };
+
+        self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+        self.library_status = Some(String::from("Saving manual folder order..."));
+        Task::batch([
+            persist_manual_folder_order_task(Arc::clone(&self.db), parent_id, next_order),
             scroll_library_to_offset_task(self.library_scroll_offset),
         ])
     }
@@ -1782,8 +2431,13 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.request_visible_thumbnails(),
             ]);
         }
+        Message::LibraryMetadataDensityChanged(density) => {
+            app.library_metadata_density = density;
+            return save_library_preferences_task(app);
+        }
         Message::LibraryLoaded(entries) => {
             app.library_entries = entries;
+            app.library_error = None;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
             app.sync_details_editor_to_selection();
@@ -1804,13 +2458,21 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     .any(|folder| &folder.id == selected)
             }) {
                 app.selected_folder = None;
+                app.sync_folder_rename_input();
                 return save_library_preferences_task(app);
             }
+            app.sync_folder_rename_input();
         }
         Message::LibraryRefresh => return app.refresh_library(),
         Message::LibraryError(error) => {
-            app.library_status = Some(error);
+            app.library_status = Some(String::from("Library operation failed."));
+            app.library_error = Some(error);
+            app.bulk_operation_progress = None;
             app.pending_thumbnails.clear();
+        }
+        Message::LibraryStatus(status) => {
+            app.library_status = Some(status);
+            app.library_error = None;
         }
         Message::ImportFolderDialog => return import_folder_dialog_task(),
         Message::ImportFolderSelected(path) => {
@@ -1873,6 +2535,15 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 return Task::done(Message::OpenLibraryEntry(entry_id));
             }
         }
+        Message::EntryCheckboxToggled(entry_id) => {
+            app.toggle_library_entry_selection(entry_id);
+        }
+        Message::MasterCheckboxClicked => match app.master_checkbox_state() {
+            MasterCheckboxState::All => app.clear_library_selection(),
+            MasterCheckboxState::None | MasterCheckboxState::Partial => {
+                app.select_all_visible_library_entries();
+            }
+        },
         Message::LibraryEntryHoverChanged(entry_id, hovered) => {
             app.set_library_card_hover(entry_id, hovered);
         }
@@ -1881,6 +2552,9 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::BeginLibraryEntryDrag(entry_id) => {
             app.begin_library_drag(entry_id);
+        }
+        Message::BeginFolderDrag(folder_id) => {
+            app.begin_folder_drag(folder_id);
         }
         Message::ClearLibrarySelection => {
             app.clear_library_selection();
@@ -1891,11 +2565,20 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::LibraryEntryDragMoved(position) => {
             app.update_library_drag_target(position);
         }
+        Message::FolderDragMoved(position) => {
+            app.update_folder_drag_target(position);
+        }
+        Message::FolderDropTargetChanged(folder_id) => {
+            app.set_folder_drop_hover_target(folder_id, Instant::now());
+        }
         Message::LibraryAutoScrollTick(tick) => {
             return app.auto_scroll_library_drag(tick);
         }
         Message::EndLibraryEntryDrag => {
             return app.finish_library_drag();
+        }
+        Message::EndFolderDrag => {
+            return app.finish_folder_drag();
         }
         Message::ManualEntryOrderSaved => {
             app.library_status = Some(String::from("Manual PDF order saved."));
@@ -1986,11 +2669,13 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ToggleLibraryTreeRoot => {
             app.library_tree_root_expanded = !app.library_tree_root_expanded;
+            return save_library_preferences_task(app);
         }
         Message::ToggleLibraryTreeFolder(folder_id) => {
             if !app.collapsed_library_tree_folders.insert(folder_id.clone()) {
                 app.collapsed_library_tree_folders.remove(&folder_id);
             }
+            return save_library_preferences_task(app);
         }
         Message::LibraryWatchEvent(event) => {
             let db = Arc::clone(&app.db);
@@ -2015,8 +2700,41 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.prune_selection_to_visible_entries(&visible_entries);
             return app.request_visible_thumbnails();
         }
+        Message::ReadingFilterChanged(filter) => {
+            app.active_reading_filter = filter;
+            app.library_drag = None;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return app.request_visible_thumbnails();
+        }
+        Message::MissingFilterChanged(active) => {
+            app.missing_filter_active = active;
+            app.library_drag = None;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return app.request_visible_thumbnails();
+        }
         Message::FolderSelected(folder_id) => {
             app.selected_folder = folder_id;
+            app.sync_folder_rename_input();
+            app.library_drag = None;
+            app.library_scroll_offset = 0.0;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return Task::batch([
+                save_library_preferences_task(app),
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(0.0),
+            ]);
+        }
+        Message::ClearLibraryFilters => {
+            app.search_query.clear();
+            app.search_results = None;
+            app.search_hit_pages.clear();
+            app.active_tag_filter = None;
+            app.active_reading_filter = None;
+            app.missing_filter_active = false;
+            app.selected_folder = None;
             app.library_drag = None;
             app.library_scroll_offset = 0.0;
             let visible_entries = app.visible_library_entries();
@@ -2029,6 +2747,13 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::NewFolderNameChanged(value) => {
             app.new_folder_name = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(80)
+                .collect();
+        }
+        Message::FolderRenameInputChanged(value) => {
+            app.folder_rename_input = value
                 .chars()
                 .filter(|ch| !ch.is_control())
                 .take(80)
@@ -2058,9 +2783,70 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 },
             );
         }
+        Message::RenameSelectedFolder => {
+            let Some(folder_id) = app.selected_folder.clone() else {
+                return Task::none();
+            };
+            let name = app.folder_rename_input.trim().to_owned();
+            if name.is_empty() {
+                return Task::none();
+            }
+            app.library_status = Some(format!("Renaming folder to {name}..."));
+            return rename_folder_task(Arc::clone(&app.db), folder_id, name);
+        }
+        Message::MoveSelectedFolderToRoot => {
+            let Some(folder_id) = app.selected_folder.clone() else {
+                return Task::none();
+            };
+            app.library_status = Some(String::from("Moving folder to library root..."));
+            return move_folder_task(Arc::clone(&app.db), folder_id, None);
+        }
+        Message::MoveSelectedFolderUp => {
+            let Some(folder) = app.selected_folder().cloned() else {
+                return Task::none();
+            };
+            let Some(parent_id) = folder.parent_id.as_ref() else {
+                return Task::none();
+            };
+            let grandparent_id = app
+                .library_folders
+                .iter()
+                .find(|candidate| &candidate.id == parent_id)
+                .and_then(|parent| parent.parent_id.clone());
+            app.library_status = Some(String::from("Moving folder up one level..."));
+            return move_folder_task(Arc::clone(&app.db), folder.id, grandparent_id);
+        }
+        Message::MoveSelectedFolderEarlier => {
+            let Some((parent_id, folder_ids)) = app.selected_folder_manual_reorder(-1) else {
+                return Task::none();
+            };
+            app.library_status = Some(String::from("Moving folder earlier..."));
+            return persist_manual_folder_order_task(Arc::clone(&app.db), parent_id, folder_ids);
+        }
+        Message::MoveSelectedFolderLater => {
+            let Some((parent_id, folder_ids)) = app.selected_folder_manual_reorder(1) else {
+                return Task::none();
+            };
+            app.library_status = Some(String::from("Moving folder later..."));
+            return persist_manual_folder_order_task(Arc::clone(&app.db), parent_id, folder_ids);
+        }
+        Message::RequestDeleteSelectedFolder => {
+            if let Some(folder_id) = app.selected_folder.clone() {
+                app.pending_confirmation = Some(ConfirmationAction::DeleteFolder(folder_id));
+            }
+        }
+        Message::DeleteFolder(folder_id) => {
+            app.library_status = Some(String::from("Deleting folder..."));
+            return delete_folder_task(Arc::clone(&app.db), folder_id);
+        }
+        Message::FolderUpdated => {
+            app.library_status = Some(String::from("Folder updated."));
+            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+        }
         Message::FolderCreated(folder_id) => {
             app.library_status = Some(String::from("Folder created."));
             app.selected_folder = Some(folder_id);
+            app.sync_folder_rename_input();
             app.library_scroll_offset = 0.0;
             return Task::batch([
                 save_library_preferences_task(app),
@@ -2120,6 +2906,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 ConfirmationAction::ResetDetailsMetadata(entry_id) => {
                     Message::ResetDetailsMetadata(entry_id)
                 }
+                ConfirmationAction::DeleteFolder(folder_id) => Message::DeleteFolder(folder_id),
             });
         }
         Message::SelectionToolbarActionSelected(action) => {
@@ -2200,6 +2987,51 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library_status = Some(format!("Resetting metadata for {}...", entry_title(&entry)));
             return reset_metadata_task(Arc::clone(&app.db), entry);
         }
+        Message::RevealEntryInFileManager(entry_id) => {
+            let Some(entry) = app
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            else {
+                return Task::none();
+            };
+            app.library_status = Some(format!("Revealing {}...", entry_title(&entry)));
+            return open_file_manager_task(entry.path, true);
+        }
+        Message::OpenEntryContainingFolder(entry_id) => {
+            let Some(entry) = app
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            else {
+                return Task::none();
+            };
+            app.library_status = Some(format!("Opening folder for {}...", entry_title(&entry)));
+            return open_file_manager_task(entry.path, false);
+        }
+        Message::RelinkMissingEntry(entry_id) => {
+            return relink_file_dialog_task(entry_id);
+        }
+        Message::RelinkFileSelected { entry_id, path } => {
+            let Some(entry) = app
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            else {
+                return Task::none();
+            };
+            app.library_status = Some(format!("Relinking {}...", entry_title(&entry)));
+            return relink_entry_task(Arc::clone(&app.db), entry_id, path);
+        }
+        Message::RelinkFinished { entry_id: _, path } => {
+            app.library_status = Some(format!("Relinked PDF to {}.", path.display()));
+            app.library_error = None;
+            app.pending_thumbnails.clear();
+            return Task::batch([app.refresh_library(), app.request_visible_thumbnails()]);
+        }
         Message::MetadataEditFinished {
             entry_id: _,
             label,
@@ -2230,7 +3062,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>();
-            app.library_status = Some(format!("Adding tag to {} PDFs...", entry_ids.len()));
+            app.start_bulk_operation_progress("Adding tag to", entry_ids.len());
             return bulk_operation_task(
                 Arc::clone(&app.db),
                 entry_ids,
@@ -2248,7 +3080,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>();
-            app.library_status = Some(format!("Removing tag from {} PDFs...", entry_ids.len()));
+            app.start_bulk_operation_progress("Removing tag from", entry_ids.len());
             return bulk_operation_task(
                 Arc::clone(&app.db),
                 entry_ids,
@@ -2269,7 +3101,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if entry_ids.is_empty() {
                 return Task::none();
             }
-            app.library_status = Some(format!("Adding {} PDFs to folder...", entry_ids.len()));
+            app.start_bulk_operation_progress("Adding to folder", entry_ids.len());
             return bulk_operation_task(
                 Arc::clone(&app.db),
                 entry_ids,
@@ -2291,7 +3123,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if entry_ids.is_empty() {
                 return Task::none();
             }
-            app.library_status = Some(format!("Removing {} PDFs from folder...", entry_ids.len()));
+            app.start_bulk_operation_progress("Removing from folder", entry_ids.len());
             return bulk_operation_task(
                 Arc::clone(&app.db),
                 entry_ids,
@@ -2304,7 +3136,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if entries.is_empty() {
                 return Task::none();
             }
-            app.library_status = Some(format!("Resetting metadata for {} PDFs...", entries.len()));
+            app.start_bulk_operation_progress("Resetting metadata for", entries.len());
             return bulk_reset_metadata_task(Arc::clone(&app.db), entries);
         }
         Message::BulkApplyTitleSortCleanup => {
@@ -2316,10 +3148,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if entry_ids.is_empty() {
                 return Task::none();
             }
-            app.library_status = Some(format!(
-                "Cleaning title sort keys for {} PDFs...",
-                entry_ids.len()
-            ));
+            app.start_bulk_operation_progress("Cleaning title sort keys for", entry_ids.len());
             return bulk_operation_task(
                 Arc::clone(&app.db),
                 entry_ids,
@@ -2332,7 +3161,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if entries.is_empty() {
                 return Task::none();
             }
-            app.library_status = Some(format!("Refreshing metadata for {} PDFs...", entries.len()));
+            app.start_bulk_operation_progress("Refreshing metadata for", entries.len());
             return bulk_refresh_metadata_task(Arc::clone(&app.db), entries);
         }
         Message::BulkRebuildThumbnails => {
@@ -2345,7 +3174,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.pending_thumbnails
                     .retain(|key| key.entry_id != entry.id);
             }
-            app.library_status = Some(format!("Rebuilding {} thumbnails...", entries.len()));
+            app.start_bulk_operation_progress("Rebuilding thumbnails for", entries.len());
             return bulk_thumbnail_task(entries);
         }
         Message::BulkReindex => {
@@ -2353,7 +3182,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if entries.is_empty() {
                 return Task::none();
             }
-            app.library_status = Some(format!("Reindexing {} PDFs...", entries.len()));
+            app.start_bulk_operation_progress("Reindexing", entries.len());
             return bulk_reindex_task(entries);
         }
         Message::BulkDeleteFromLibrary => {
@@ -2365,10 +3194,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if entry_ids.is_empty() {
                 return Task::none();
             }
-            app.library_status = Some(format!(
-                "Deleting {} PDFs from library metadata...",
-                entry_ids.len()
-            ));
+            app.start_bulk_operation_progress("Deleting from library metadata", entry_ids.len());
             return bulk_delete_metadata_task(Arc::clone(&app.db), entry_ids);
         }
         Message::BulkOperationFinished {
@@ -2376,9 +3202,32 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             updated,
             errors,
         } => {
+            app.bulk_operation_progress = None;
             app.library_status = Some(if errors.is_empty() {
+                app.library_error = None;
                 format!("{label} {updated} PDFs.")
             } else {
+                app.library_error = Some(errors.join("\n"));
+                format!("{label} {updated} PDFs; {} failed.", errors.len())
+            });
+            app.clear_library_selection();
+            app.pending_thumbnails.clear();
+            return Task::batch([app.refresh_library(), app.request_visible_thumbnails()]);
+        }
+        Message::FolderAssignmentFinished {
+            folder_id,
+            label,
+            updated,
+            errors,
+        } => {
+            app.library_status = Some(if errors.is_empty() {
+                app.library_error = None;
+                if updated > 0 {
+                    app.start_folder_drop_flash(folder_id, Instant::now());
+                }
+                format!("{label} {updated} PDFs.")
+            } else {
+                app.library_error = Some(errors.join("\n"));
                 format!("{label} {updated} PDFs; {} failed.", errors.len())
             });
             app.clear_library_selection();
@@ -2603,11 +3452,31 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 }
             }
         }
+        Message::ShortcutPressed(Shortcut::FocusSearch) => {
+            if app.mode == AppMode::Library {
+                return operation::focus(Id::new(LIBRARY_SEARCH_INPUT_ID));
+            }
+        }
+        Message::ShortcutPressed(Shortcut::RenameSelected) => {
+            if app.mode == AppMode::Library && app.selected_library_entries.len() == 1 {
+                return operation::focus(Id::new(LIBRARY_DETAILS_TITLE_INPUT_ID));
+            }
+            if app.mode == AppMode::Library && app.selected_folder.is_some() {
+                return operation::focus(Id::new(LIBRARY_FOLDER_RENAME_INPUT_ID));
+            }
+        }
         Message::ShortcutPressed(Shortcut::DeleteSelected) => {
             if app.mode == AppMode::Library && !app.selected_library_entries.is_empty() {
                 return Task::done(Message::RequestConfirmation(
                     ConfirmationAction::BulkDeleteFromLibrary,
                 ));
+            }
+            if app.mode == AppMode::Library {
+                if let Some(folder_id) = app.selected_folder.clone() {
+                    return Task::done(Message::RequestConfirmation(
+                        ConfirmationAction::DeleteFolder(folder_id),
+                    ));
+                }
             }
         }
         Message::ShortcutPressed(Shortcut::Jump) => {
@@ -2740,6 +3609,11 @@ fn view(app: &PDFolioApp) -> Element<'_, Message> {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    } else if let Some(floating) = floating_folder_drag_preview(app, tokens) {
+        stack![menu_content, floating]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     } else if let Some(floating) = floating_library_drag_preview(app, tokens) {
         stack![menu_content, library_drag_capture_layer(), floating]
             .width(Length::Fill)
@@ -2782,6 +3656,7 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
                 Class::LibrarySearchInput,
                 Message::SearchQueryChanged,
             )
+            .id(Id::new(LIBRARY_SEARCH_INPUT_ID))
             .width(Length::Fill),
         )
         .push(
@@ -2800,6 +3675,7 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             .menu_style(move |_| menu_style_for_class(tokens, Class::LibrarySortDropdown)),
         )
         .push(library_layout_toggle_button(app, tokens))
+        .push(library_metadata_density_picker(app, tokens))
         .push(library_new_folder_button(tokens).on_press(Message::OpenCreateFolderDialog))
         .spacing(Spacing::MD)
         .align_y(iced::Alignment::Center);
@@ -2821,6 +3697,12 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let mut content = column![header, context_row,]
         .spacing(Spacing::MD)
         .padding(Spacing::LG);
+    if let Some(progress) = app.bulk_operation_progress.as_ref() {
+        content = content.push(bulk_operation_progress_banner(app, progress, tokens));
+    }
+    if let Some(error) = app.library_error.as_deref() {
+        content = content.push(error_banner(error, tokens));
+    }
 
     if entries.is_empty() && child_folders.is_empty() {
         content = content.push(empty_state(
@@ -2847,6 +3729,7 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
                 LibraryRenderItem::Ghost(entry) => {
                     library_entry_row(app, entry, tokens, LibraryEntryRenderMode::Placeholder)
                 }
+                LibraryRenderItem::DropZone(_) => library_drop_zone_row(app, tokens),
             });
         }
         if bottom_spacer > 0.0 {
@@ -2895,6 +3778,7 @@ fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
                             tokens,
                             LibraryEntryRenderMode::Placeholder,
                         ),
+                        LibraryRenderItem::DropZone(_) => library_drop_zone_card(app, tokens),
                     });
                     cursor_y = bottom;
                 }
@@ -2958,6 +3842,8 @@ fn view_library_breadcrumb_row<'a>(
     row![
         row![
             trail.width(Length::Shrink),
+            library_quick_filter_chips(app, tokens),
+            library_filter_summary(app, tokens),
             library_grid_zoom_control(app, tokens),
         ]
         .spacing(Spacing::MD)
@@ -2977,6 +3863,92 @@ fn view_library_breadcrumb_row<'a>(
     .into()
 }
 
+fn library_quick_filter_chips<'a>(
+    app: &'a PDFolioApp,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let mut chips = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
+
+    for filter in LIBRARY_READING_FILTER_OPTIONS {
+        let active = app.active_reading_filter == Some(filter);
+        let label = filter.label();
+        let next = if active { None } else { Some(filter) };
+        let chip = tag_pill(label, tokens)
+            .on_press(Message::ReadingFilterChanged(next))
+            .padding([Spacing::XS, Spacing::MD])
+            .style(move |_, status| {
+                if active {
+                    crate::style::button_style(tokens, Class::LibraryImportButton, status)
+                } else {
+                    crate::style::button_style(tokens, Class::TagPill, status)
+                }
+            });
+        chips = chips.push(chip);
+    }
+
+    let missing_active = app.missing_filter_active;
+    chips = chips.push(
+        tag_pill("Missing", tokens)
+            .on_press(Message::MissingFilterChanged(!missing_active))
+            .padding([Spacing::XS, Spacing::MD])
+            .style(move |_, status| {
+                if missing_active {
+                    crate::style::button_style(tokens, Class::LibraryImportButton, status)
+                } else {
+                    crate::style::button_style(tokens, Class::TagPill, status)
+                }
+            }),
+    );
+
+    chips.into()
+}
+
+fn library_filter_summary<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element<'a, Message> {
+    let mut labels = Vec::new();
+    if let Some(folder_name) = app.selected_folder_name() {
+        labels.push(format!("Folder: {folder_name}"));
+    }
+    if let Some(tag) = app.active_tag_filter.as_ref() {
+        labels.push(format!("Tag: {tag}"));
+    }
+    if let Some(filter) = app.active_reading_filter {
+        labels.push(format!("Reading: {}", filter.label()));
+    }
+    if app.missing_filter_active {
+        labels.push(String::from("Missing files"));
+    }
+    let query = app.search_query.trim();
+    if !query.is_empty() {
+        labels.push(format!("Search: {query}"));
+    }
+
+    if labels.is_empty() {
+        return container("").width(Length::Shrink).into();
+    }
+
+    let mut row = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
+    for label in labels {
+        row = row.push(
+            container(
+                text(label)
+                    .size(FontSize::SM)
+                    .font(ui_font(FontWeight::MEDIUM))
+                    .color(tokens.text_primary)
+                    .wrapping(Wrapping::None),
+            )
+            .padding([Spacing::XS, Spacing::MD])
+            .style(move |_| container_style(tokens, Class::TagPill)),
+        );
+    }
+
+    row = row.push(
+        tag_pill("Clear filters", tokens)
+            .on_press(Message::ClearLibraryFilters)
+            .padding([Spacing::XS, Spacing::MD]),
+    );
+    row.into()
+}
+
 fn view_library_selection_status_row<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -2984,6 +3956,11 @@ fn view_library_selection_status_row<'a>(
 ) -> Element<'a, Message> {
     let selected_count = app.selected_library_entries.len();
     let mut details = row![
+        master_checkbox(
+            app.master_checkbox_state(),
+            tokens,
+            Message::MasterCheckboxClicked
+        ),
         text(format!("{} selected", format_count(selected_count, "PDF")))
             .size(FontSize::SM)
             .font(ui_font(FontWeight::MEDIUM))
@@ -3117,6 +4094,59 @@ fn view_confirmation_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     .into()
 }
 
+fn bulk_operation_progress_banner<'a>(
+    app: &'a PDFolioApp,
+    progress: &'a BulkOperationProgress,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let elapsed = app
+        .animation_now
+        .saturating_duration_since(progress.started_at)
+        .as_secs_f32();
+    let value = indeterminate_progress_value(elapsed);
+    let label = format!("{} {} PDFs...", progress.label, progress.total);
+
+    container(
+        column![
+            row![
+                text(label)
+                    .size(FontSize::SM)
+                    .font(ui_font(FontWeight::SEMIBOLD))
+                    .color(tokens.text_primary),
+                text("Working in background")
+                    .size(FontSize::SM)
+                    .font(ui_font(FontWeight::REGULAR))
+                    .color(tokens.text_secondary),
+            ]
+            .spacing(Spacing::MD)
+            .align_y(iced::Alignment::Center),
+            progress_bar(value, tokens),
+        ]
+        .spacing(Spacing::XS),
+    )
+    .width(Length::Fill)
+    .padding([Spacing::SM, Spacing::MD])
+    .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
+    .into()
+}
+
+fn indeterminate_progress_value(elapsed_secs: f32) -> f32 {
+    let sweep = (elapsed_secs * 0.72).fract();
+    (0.18 + 0.64 * (0.5 - (sweep - 0.5).abs()) * 2.0).clamp(0.0, 1.0)
+}
+
+fn folder_drop_flash_active_at(
+    folder_id: &FolderId,
+    flash: Option<(&FolderId, Instant)>,
+    now: Instant,
+) -> bool {
+    flash.is_some_and(|(flashed_folder_id, started_at)| {
+        flashed_folder_id == folder_id
+            && now.saturating_duration_since(started_at)
+                < Duration::from_millis(LIBRARY_FOLDER_DROP_FLASH_MS)
+    })
+}
+
 fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens(&app.style_book);
     let parent = app
@@ -3186,6 +4216,17 @@ fn confirmation_copy<'a>(
             String::from("This clears the edited display title and author for this PDF."),
             "Reset",
         ),
+        ConfirmationAction::DeleteFolder(folder_id) => (
+            "Delete folder?",
+            format!(
+                "This removes the folder \"{}\" and any nested folders. PDFs remain in the library and on disk.",
+                app.library_folders
+                    .iter()
+                    .find(|folder| &folder.id == folder_id)
+                    .map_or("Selected folder", |folder| folder.name.as_str())
+            ),
+            "Delete",
+        ),
     }
 }
 
@@ -3194,11 +4235,24 @@ fn view_folder_cards<'a>(
     folders: Vec<Folder>,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
+    let active_folder_drag = app.folder_drag.as_ref().filter(|drag| drag.active);
     let mut rows = column![].spacing(Spacing::SM);
     for chunk in folders.chunks(folder_cards_per_row(app)) {
         let mut card_row = row![].spacing(app.layout().library_masonry_gap);
         for folder in chunk {
-            card_row = card_row.push(folder_grid_card(app, folder.clone(), tokens));
+            let mode = if active_folder_drag.is_some_and(|drag| drag.folder_id == folder.id) {
+                if active_folder_drag
+                    .and_then(|drag| drag.drop_target.as_ref())
+                    .is_some()
+                {
+                    FolderCardRenderMode::NestingTarget
+                } else {
+                    FolderCardRenderMode::Placeholder
+                }
+            } else {
+                FolderCardRenderMode::Normal
+            };
+            card_row = card_row.push(folder_grid_card(app, folder.clone(), tokens, mode));
         }
         rows = rows.push(card_row);
     }
@@ -3206,16 +4260,8 @@ fn view_folder_cards<'a>(
 }
 
 fn folder_cards_per_row(app: &PDFolioApp) -> usize {
-    let available_width = app
-        .library_viewport_width
-        .max(
-            app.viewport_width
-                - app.library_tag_sidebar_width
-                - app.layout().sidebar_resize_handle_width,
-        )
-        .max(app.layout().window_size()[0])
-        - Spacing::LG * 2.0
-        - app.layout().library_scrollbar_gutter;
+    let available_width =
+        (app.library_viewport_width - app.layout().library_scrollbar_gutter).max(1.0);
     let card_pitch = app.library_grid_card_width() + app.layout().library_masonry_gap;
     ((available_width + app.layout().library_masonry_gap) / card_pitch)
         .floor()
@@ -3237,33 +4283,37 @@ fn folder_grid_card<'a>(
     app: &'a PDFolioApp,
     folder: Folder,
     tokens: ThemeTokens,
+    mode: FolderCardRenderMode,
 ) -> Element<'a, Message> {
     let folder_id = folder.id.clone();
-    let count = app.folder_entry_count(&folder.id);
+    let drop_active = app.active_folder_drop_target() == Some(&folder.id);
+    let flash_active = app.folder_drop_flash_active(&folder.id);
+    let smart_counts = app.folder_smart_counts(Some(&folder.id));
     let child_count = app
         .library_folders
         .iter()
         .filter(|child| child.parent_id.as_ref() == Some(&folder.id))
         .count();
-    let meta = folder_meta_label(count, child_count);
+    let meta = folder_meta_label(smart_counts, child_count);
     let folder_title_size = app.library_card_font_size(FontSize::CONTROL);
     let folder_meta_size = app.library_card_font_size(FontSize::SM);
     let folder_text_width = (app.library_grid_card_width() - 72.0).max(16.0);
+    let content_alpha = folder_card_content_alpha(app, mode);
     let title =
         truncate_for_width_with_font(&folder.name, folder_text_width, 0.0, folder_title_size);
     let meta = truncate_for_width_with_font(&meta, folder_text_width, 0.0, folder_meta_size);
     let content = row![
-        folder_icon(tokens),
+        folder_icon(tokens, content_alpha),
         column![
             text(title)
                 .size(folder_title_size)
                 .font(ui_font(FontWeight::SEMIBOLD))
-                .color(tokens.text_primary)
+                .color(with_alpha(tokens.text_primary, content_alpha))
                 .wrapping(Wrapping::None),
             text(meta)
                 .size(folder_meta_size)
                 .font(ui_font(FontWeight::REGULAR))
-                .color(tokens.text_secondary)
+                .color(with_alpha(tokens.text_secondary, content_alpha))
                 .wrapping(Wrapping::None),
         ]
         .spacing(app.library_card_spacing().min(Spacing::XS))
@@ -3274,23 +4324,49 @@ fn folder_grid_card<'a>(
     .height(app.layout().library_folder_grid_row_height)
     .align_y(iced::Alignment::Center);
 
-    button(
-        container(content)
-            .width(Length::Fill)
-            .style(move |_| container_style(tokens, Class::LibraryFolderCard)),
-    )
-    .width(app.library_grid_card_width())
-    .on_press(Message::FolderSelected(Some(folder_id)))
-    .style(move |_, status| crate::style::button_style(tokens, Class::LibraryFolderCard, status))
-    .into()
+    let card = container(content)
+        .width(Length::Fill)
+        .style(move |_| {
+            let mut style = container_style(tokens, Class::LibraryFolderCard);
+            if matches!(mode, FolderCardRenderMode::Placeholder) {
+                let mut background = mix_color(tokens.surface, tokens.background, 0.55);
+                background.a = 0.28;
+                style.background = Some(iced::Background::Color(background));
+                style.border.color = mix_color(tokens.border, tokens.background, 0.62);
+            }
+            if drop_active || flash_active || matches!(mode, FolderCardRenderMode::NestingTarget) {
+                let drop_style = container_style(tokens, Class::FolderDropTarget);
+                style.background = drop_style.background;
+                style.border = drop_style.border;
+                style.shadow = drop_style.shadow;
+            }
+            style
+        })
+        .width(app.library_grid_card_width());
+
+    if mode == FolderCardRenderMode::Floating {
+        return card.into();
+    }
+
+    let area = mouse_area(card)
+        .on_enter(Message::FolderDropTargetChanged(Some(folder_id)))
+        .on_exit(Message::FolderDropTargetChanged(None));
+    if mode == FolderCardRenderMode::Normal {
+        area.on_press(Message::BeginFolderDrag(folder.id.clone()))
+            .on_release(Message::EndFolderDrag)
+            .interaction(mouse::Interaction::Grab)
+            .into()
+    } else {
+        area.into()
+    }
 }
 
-fn folder_icon<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
+fn folder_icon<'a>(tokens: ThemeTokens, alpha: f32) -> Element<'a, Message> {
     container(
         text("DIR")
             .size(FontSize::SM)
             .font(ui_font(FontWeight::SEMIBOLD))
-            .color(tokens.accent),
+            .color(with_alpha(tokens.accent, alpha)),
     )
     .center(38.0)
     .height(28.0)
@@ -3306,16 +4382,48 @@ fn folder_icon<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
     .into()
 }
 
-fn folder_meta_label(entry_count: usize, child_count: usize) -> String {
-    match (entry_count, child_count) {
-        (0, 0) => String::from("Empty"),
-        (entries, 0) => format_count(entries, "PDF"),
-        (0, children) => format_count(children, "Folder"),
-        (entries, children) => format!(
-            "{} . {}",
-            format_count(entries, "PDF"),
-            format_count(children, "Folder")
-        ),
+fn folder_card_content_alpha(app: &PDFolioApp, mode: FolderCardRenderMode) -> f32 {
+    if mode == FolderCardRenderMode::Placeholder {
+        app.layout().library_drag_placeholder_content_alpha
+    } else {
+        1.0
+    }
+}
+
+fn folder_meta_label(counts: FolderSmartCounts, child_count: usize) -> String {
+    let mut parts = Vec::new();
+    if counts.total > 0 {
+        parts.push(format_count(counts.total, "PDF"));
+    }
+    if child_count > 0 {
+        parts.push(format_count(child_count, "Folder"));
+    }
+    if counts.in_progress > 0 {
+        parts.push(format!("{} reading", counts.in_progress));
+    }
+    if counts.missing > 0 {
+        parts.push(format!("{} missing", counts.missing));
+    }
+
+    if parts.is_empty() {
+        String::from("Empty")
+    } else {
+        parts.join(" . ")
+    }
+}
+
+fn folder_sidebar_count_label(counts: FolderSmartCounts) -> String {
+    if counts.in_progress > 0 || counts.missing > 0 {
+        let mut parts = vec![format_count(counts.total, "PDF")];
+        if counts.in_progress > 0 {
+            parts.push(format!("{} reading", counts.in_progress));
+        }
+        if counts.missing > 0 {
+            parts.push(format!("{} missing", counts.missing));
+        }
+        parts.join(" . ")
+    } else {
+        format_count(counts.total, "PDF")
     }
 }
 
@@ -3340,7 +4448,7 @@ fn scroll_library_to_offset_task(offset_y: f32) -> Task<Message> {
 impl LibraryRenderItem {
     fn entry(&self) -> &LibraryEntry {
         match self {
-            Self::Entry(entry) | Self::Ghost(entry) => entry,
+            Self::Entry(entry) | Self::Ghost(entry) | Self::DropZone(entry) => entry,
         }
     }
 }
@@ -3353,34 +4461,75 @@ fn library_render_items(app: &PDFolioApp, entries: &[LibraryEntry]) -> Vec<Libra
             .map(LibraryRenderItem::Entry)
             .collect();
     };
-    let Some(ghost_entry) = entries
+    if !drag.multi {
+        let Some(ghost_entry) = entries
+            .iter()
+            .find(|entry| entry.id == drag.entry_id)
+            .cloned()
+        else {
+            return entries
+                .iter()
+                .cloned()
+                .map(LibraryRenderItem::Entry)
+                .collect();
+        };
+
+        let compact_entries: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry.id != drag.entry_id)
+            .cloned()
+            .collect();
+        let target_index = drag.target_index.min(compact_entries.len());
+
+        let mut items = Vec::with_capacity(entries.len());
+        for index in 0..=compact_entries.len() {
+            if target_index == index {
+                items.push(LibraryRenderItem::Ghost(ghost_entry.clone()));
+            }
+
+            if let Some(entry) = compact_entries.get(index) {
+                items.push(LibraryRenderItem::Entry(entry.clone()));
+            }
+        }
+
+        return items;
+    }
+
+    let dragged_ids = drag.entry_ids.iter().cloned().collect::<HashSet<_>>();
+    let placeholder_entries = entries
         .iter()
-        .find(|entry| entry.id == drag.entry_id)
+        .filter(|entry| dragged_ids.contains(&entry.id))
         .cloned()
-    else {
+        .collect::<Vec<_>>();
+    if placeholder_entries.is_empty() {
         return entries
             .iter()
             .cloned()
             .map(LibraryRenderItem::Entry)
             .collect();
-    };
+    }
 
-    let compact_entries: Vec<_> = entries
-        .iter()
-        .filter(|entry| entry.id != drag.entry_id)
-        .cloned()
-        .collect();
-    let target_index = drag.target_index.min(compact_entries.len());
-
-    let mut items = Vec::with_capacity(entries.len());
-    for index in 0..=compact_entries.len() {
-        if target_index == index {
-            items.push(LibraryRenderItem::Ghost(ghost_entry.clone()));
-        }
-
-        if let Some(entry) = compact_entries.get(index) {
+    let drop_zone_entry = placeholder_entries[0].clone();
+    let target_index = drag
+        .target_index
+        .min(entries.len().saturating_sub(placeholder_entries.len()));
+    let mut compact_index = 0;
+    let mut drop_zone_inserted = false;
+    let mut items = Vec::with_capacity(entries.len() + 1);
+    for entry in entries {
+        if dragged_ids.contains(&entry.id) {
+            items.push(LibraryRenderItem::Ghost(entry.clone()));
+        } else {
+            if !drop_zone_inserted && drag.drop_target.is_none() && compact_index == target_index {
+                items.push(LibraryRenderItem::DropZone(drop_zone_entry.clone()));
+                drop_zone_inserted = true;
+            }
             items.push(LibraryRenderItem::Entry(entry.clone()));
+            compact_index += 1;
         }
+    }
+    if !drop_zone_inserted && drag.drop_target.is_none() {
+        items.push(LibraryRenderItem::DropZone(drop_zone_entry));
     }
 
     items
@@ -3418,12 +4567,15 @@ fn floating_library_drag_preview<'a>(
 ) -> Option<Element<'a, Message>> {
     let drag = app.library_drag.as_ref().filter(|drag| drag.active)?;
     let cursor = drag.cursor?;
-    let entry = app
-        .visible_library_entries()
-        .into_iter()
-        .find(|entry| entry.id == drag.entry_id)?;
+    let visible_entries = app.visible_library_entries();
+    let entry = visible_entries
+        .iter()
+        .find(|entry| entry.id == drag.entry_id)?
+        .clone();
 
-    let preview = if app.compact_view_mode {
+    let preview = if drag.multi {
+        multi_drag_stack_preview(app, drag, &visible_entries, tokens)?
+    } else if app.compact_view_mode {
         library_entry_row(app, entry, tokens, LibraryEntryRenderMode::Floating)
     } else {
         library_entry_card(app, entry, tokens, LibraryEntryRenderMode::Floating)
@@ -3448,6 +4600,96 @@ fn floating_library_drag_preview<'a>(
             .height(Length::Fill)
             .into(),
     )
+}
+
+fn floating_folder_drag_preview<'a>(
+    app: &'a PDFolioApp,
+    tokens: ThemeTokens,
+) -> Option<Element<'a, Message>> {
+    let drag = app.folder_drag.as_ref().filter(|drag| drag.active)?;
+    let cursor = drag.cursor?;
+    let folder = app
+        .library_folders
+        .iter()
+        .find(|folder| folder.id == drag.folder_id)?
+        .clone();
+    let preview = container(folder_grid_card(
+        app,
+        folder,
+        tokens,
+        FolderCardRenderMode::Floating,
+    ))
+    .style(move |_| container_style(tokens, Class::DragStackGhost));
+
+    Some(
+        pin(preview)
+            .x((cursor.x - app.layout().library_drag_preview_grid_x_offset).max(0.0))
+            .y((cursor.y - app.layout().library_drag_preview_grid_y_offset).max(0.0))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+    )
+}
+
+fn multi_drag_stack_preview<'a>(
+    app: &'a PDFolioApp,
+    drag: &LibraryDragState,
+    visible_entries: &[LibraryEntry],
+    tokens: ThemeTokens,
+) -> Option<Element<'a, Message>> {
+    let dragged_ids = drag.entry_ids.iter().collect::<HashSet<_>>();
+    let mut entries = visible_entries
+        .iter()
+        .filter(|entry| dragged_ids.contains(&entry.id))
+        .take(3)
+        .cloned()
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return None;
+    }
+
+    while entries.len() < 3 {
+        let entry = entries.last().cloned()?;
+        entries.push(entry);
+    }
+
+    let rear = drag_stack_card(app, entries[2].clone(), tokens);
+    let middle = drag_stack_card(app, entries[1].clone(), tokens);
+    let front = drag_stack_card(app, entries[0].clone(), tokens);
+    let badge = container(
+        text(format_count(drag.entry_ids.len(), "PDF"))
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::BOLD))
+            .color(tokens.text_primary),
+    )
+    .padding([Spacing::XS, Spacing::MD])
+    .style(move |_| container_style(tokens, Class::DragStackGhost));
+
+    Some(
+        stack![
+            pin(rear).x(Spacing::LG).y(Spacing::LG),
+            pin(middle).x(Spacing::SM).y(Spacing::SM),
+            pin(front).x(0.0).y(0.0),
+            pin(badge).x(Spacing::MD).y(Spacing::MD),
+        ]
+        .into(),
+    )
+}
+
+fn drag_stack_card<'a>(
+    app: &'a PDFolioApp,
+    entry: LibraryEntry,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let card = if app.compact_view_mode {
+        library_entry_row(app, entry, tokens, LibraryEntryRenderMode::Floating)
+    } else {
+        library_entry_card(app, entry, tokens, LibraryEntryRenderMode::Floating)
+    };
+
+    container(card)
+        .style(move |_| container_style(tokens, Class::DragStackGhost))
+        .into()
 }
 
 fn library_drag_capture_layer<'a>() -> Element<'a, Message> {
@@ -3699,9 +4941,10 @@ fn view_file_tree_sidebar<'a>(
     sidebar_width: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
+    let library_counts = app.folder_smart_counts(None);
     let mut tree = column![file_tree_row(
         "Library",
-        None,
+        Some(folder_sidebar_count_label(library_counts)),
         0,
         app.selected_folder.is_none(),
         true,
@@ -3710,6 +4953,7 @@ fn view_file_tree_sidebar<'a>(
         Message::FolderSelected(None),
         sidebar_width,
         tokens,
+        false,
     ),]
     .spacing(0);
 
@@ -3717,7 +4961,94 @@ fn view_file_tree_sidebar<'a>(
         tree = tree.push(folder_sidebar_rows(app, None, 1, sidebar_width, tokens));
     }
 
-    tree.into()
+    let mut content = column![tree].spacing(Spacing::SM);
+    if let Some(panel) = selected_folder_actions_panel(app, sidebar_width, tokens) {
+        content = content.push(panel);
+    }
+
+    content.into()
+}
+
+fn selected_folder_actions_panel<'a>(
+    app: &'a PDFolioApp,
+    sidebar_width: f32,
+    tokens: ThemeTokens,
+) -> Option<Element<'a, Message>> {
+    let folder = app.selected_folder()?;
+    let parent_id = folder.parent_id.clone();
+    let has_parent = parent_id.is_some();
+    let has_grandparent = parent_id.as_ref().is_some_and(|parent_id| {
+        app.library_folders
+            .iter()
+            .find(|candidate| &candidate.id == parent_id)
+            .and_then(|parent| parent.parent_id.as_ref())
+            .is_some()
+    });
+    let can_move_earlier = app
+        .selected_folder_sibling_order()
+        .is_some_and(|(_, _, index)| index > 0);
+    let can_move_later = app
+        .selected_folder_sibling_order()
+        .is_some_and(|(_, folder_ids, index)| index + 1 < folder_ids.len());
+    let input_width = (sidebar_width - Spacing::LG * 2.0).max(80.0);
+    let mut actions = column![
+        text("Folder")
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .color(tokens.text_secondary),
+        text_input("Folder name", &app.folder_rename_input)
+            .on_input(Message::FolderRenameInputChanged)
+            .on_submit(Message::RenameSelectedFolder)
+            .id(Id::new(LIBRARY_FOLDER_RENAME_INPUT_ID))
+            .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+            .width(input_width),
+        row![
+            sidebar_action_button("Rename", tokens).on_press(Message::RenameSelectedFolder),
+            sidebar_action_button("Delete", tokens).on_press(Message::RequestDeleteSelectedFolder),
+        ]
+        .spacing(Spacing::XS)
+        .align_y(iced::Alignment::Center),
+        row![
+            maybe_sidebar_action_button(
+                "Earlier",
+                tokens,
+                can_move_earlier,
+                Message::MoveSelectedFolderEarlier,
+            ),
+            maybe_sidebar_action_button(
+                "Later",
+                tokens,
+                can_move_later,
+                Message::MoveSelectedFolderLater,
+            ),
+        ]
+        .spacing(Spacing::XS)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::SM);
+
+    if has_parent {
+        actions = actions.push(
+            sidebar_action_button("Move to root", tokens)
+                .on_press(Message::MoveSelectedFolderToRoot)
+                .width(Length::Fill),
+        );
+    }
+    if has_grandparent {
+        actions = actions.push(
+            sidebar_action_button("Move up", tokens)
+                .on_press(Message::MoveSelectedFolderUp)
+                .width(Length::Fill),
+        );
+    }
+
+    Some(
+        container(actions)
+            .width(Length::Fill)
+            .padding([Spacing::SM, Spacing::MD])
+            .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
+            .into(),
+    )
 }
 
 fn view_tag_tree_sidebar<'a>(
@@ -3738,6 +5069,7 @@ fn view_tag_tree_sidebar<'a>(
             Message::TagFilterChanged(None),
             sidebar_width,
             tokens,
+            false,
         ),
         section_heading("Tags", tokens),
     ]
@@ -3761,6 +5093,7 @@ fn view_tag_tree_sidebar<'a>(
             Message::TagFilterChanged(Some(tag)),
             sidebar_width,
             tokens,
+            false,
         ));
     }
 
@@ -3801,6 +5134,7 @@ fn view_selected_pdf_sidebar<'a>(
     } else {
         "Available"
     };
+    let duplicate_label = duplicate_status_label(app, &entry);
     let details_width = (sidebar_width - Spacing::MD * 2.0).max(80.0);
     let heading = row![
         section_heading("PDF Details", tokens).width(Length::Fill),
@@ -3814,7 +5148,7 @@ fn view_selected_pdf_sidebar<'a>(
     .spacing(Spacing::XS)
     .align_y(iced::Alignment::Center);
 
-    let content = column![
+    let mut content = column![
         heading,
         thumbnail_element(app, &entry.id, tokens, details_width.min(160.0), 1.0),
         text(truncate_for_width(&title, details_width, 0.0))
@@ -3831,6 +5165,7 @@ fn view_selected_pdf_sidebar<'a>(
         sidebar_detail_row("Pages", page_count_label(&entry), details_width, tokens),
         sidebar_detail_row("Progress", progress_label, details_width, tokens),
         sidebar_detail_row("Size", file_size_label(&entry), details_width, tokens),
+        sidebar_detail_row("Duplicates", duplicate_label, details_width, tokens),
         sidebar_detail_row("Opened", last_opened_label(&entry), details_width, tokens),
         sidebar_detail_row(
             "Added",
@@ -3843,10 +5178,24 @@ fn view_selected_pdf_sidebar<'a>(
         sidebar_detail_row("Tags", tags_label, details_width, tokens),
         sidebar_action_button("Open PDF", tokens)
             .on_press(Message::OpenLibraryEntry(entry.id.clone())),
-        sidebar_action_button("Clear selection", tokens).on_press(Message::ClearLibrarySelection),
-    ]
-    .spacing(Spacing::SM)
-    .padding(Spacing::MD);
+        sidebar_action_button("Reveal in file manager", tokens)
+            .on_press(Message::RevealEntryInFileManager(entry.id.clone())),
+        sidebar_action_button("Open containing folder", tokens)
+            .on_press(Message::OpenEntryContainingFolder(entry.id.clone())),
+    ];
+    if entry.missing {
+        content = content.push(
+            sidebar_action_button("Relink missing file", tokens)
+                .on_press(Message::RelinkMissingEntry(entry.id.clone())),
+        );
+    }
+    let content = content
+        .push(
+            sidebar_action_button("Clear selection", tokens)
+                .on_press(Message::ClearLibrarySelection),
+        )
+        .spacing(Spacing::SM)
+        .padding(Spacing::MD);
 
     container(
         scrollable(content)
@@ -3961,6 +5310,24 @@ fn selected_pdf_progress_label(entry: &LibraryEntry) -> String {
     )
 }
 
+fn duplicate_status_label(app: &PDFolioApp, entry: &LibraryEntry) -> String {
+    let duplicate_count = app
+        .library_entries
+        .iter()
+        .filter(|candidate| candidate.id == entry.id)
+        .count()
+        .saturating_sub(1);
+    duplicate_status_label_for_count(duplicate_count)
+}
+
+fn duplicate_status_label_for_count(duplicate_count: usize) -> String {
+    if duplicate_count == 0 {
+        String::from("Unique content hash")
+    } else {
+        format_count(duplicate_count, "matching duplicate")
+    }
+}
+
 fn folder_sidebar_rows<'a>(
     app: &'a PDFolioApp,
     parent_id: Option<&'a FolderId>,
@@ -3983,9 +5350,12 @@ fn folder_sidebar_rows<'a>(
             .any(|child| child.parent_id.as_ref() == Some(&folder.id));
         let expanded = !app.collapsed_library_tree_folders.contains(&folder.id);
         let active = app.selected_folder.as_ref() == Some(&folder.id);
-        rows = rows.push(file_tree_row(
+        let drop_active = app.active_folder_drop_target() == Some(&folder.id);
+        let flash_active = app.folder_drop_flash_active(&folder.id);
+        let counts = app.folder_smart_counts(Some(&folder.id));
+        let row = file_tree_row(
             &folder.name,
-            None,
+            Some(folder_sidebar_count_label(counts)),
             depth,
             active,
             has_children,
@@ -3994,7 +5364,15 @@ fn folder_sidebar_rows<'a>(
             Message::FolderSelected(Some(folder.id.clone())),
             sidebar_width,
             tokens,
-        ));
+            drop_active || flash_active,
+        );
+        rows = rows.push(
+            mouse_area(row)
+                .on_enter(Message::FolderDropTargetChanged(Some(folder.id.clone())))
+                .on_exit(Message::FolderDropTargetChanged(None))
+                .on_press(Message::BeginFolderDrag(folder.id.clone()))
+                .on_release(Message::EndFolderDrag),
+        );
         if expanded {
             rows = rows.push(folder_sidebar_rows(
                 app,
@@ -4020,6 +5398,7 @@ fn file_tree_row<'a>(
     message: Message,
     sidebar_width: f32,
     tokens: ThemeTokens,
+    drop_active: bool,
 ) -> Element<'a, Message> {
     let label = label.into();
     let file_tree_style = tokens.class_styles[Class::FileTree.index()];
@@ -4033,9 +5412,11 @@ fn file_tree_row<'a>(
         .background
         .unwrap_or_else(|| sidebar_tab_content_background(tokens));
     let indent = (depth as f32 * 12.0).min(72.0);
-    let meta_width = if meta.is_some() { 52.0 } else { 0.0 };
+    let meta_width = meta
+        .as_ref()
+        .map_or(0.0, |value| (value.len() as f32 * 6.0).clamp(52.0, 128.0));
     let label_width = (sidebar_width - indent - meta_width - 34.0).max(52.0);
-    let text_color = if active {
+    let text_color = if active || drop_active {
         active_style.text_color.unwrap_or(tokens.text_primary)
     } else {
         normal_style.text_color.unwrap_or(tokens.text_secondary)
@@ -4115,7 +5496,7 @@ fn file_tree_row<'a>(
                 status,
                 iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
             );
-            let state = if active {
+            let state = if active || drop_active {
                 ComponentState::Active
             } else if hovered {
                 ComponentState::Hovered
@@ -4124,11 +5505,21 @@ fn file_tree_row<'a>(
             };
             let mut style = crate::style::button_style(tokens, Class::FileTree, status);
             apply_file_tree_state_style(&mut style, tokens, state, content_background);
+            if drop_active {
+                let drop_style = crate::style::button_style(
+                    tokens,
+                    Class::FolderDropTarget,
+                    button::Status::Active,
+                );
+                style.background = drop_style.background;
+                style.border = drop_style.border;
+                style.shadow = drop_style.shadow;
+            }
             style
         })
         .on_press(message);
 
-    if active {
+    if active || drop_active {
         if let Some(border) = side_border_for_class(tokens, Class::FileTree, ComponentState::Active)
         {
             side_border(row_button, border)
@@ -4219,6 +5610,32 @@ fn sidebar_action_button<'a>(
     .style(move |_, status| crate::style::button_style(tokens, Class::SidebarActionButton, status))
 }
 
+fn maybe_sidebar_action_button<'a>(
+    label: impl Into<String>,
+    tokens: ThemeTokens,
+    enabled: bool,
+    message: Message,
+) -> iced::widget::Button<'a, Message> {
+    let button = button(
+        text(label.into())
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(if enabled {
+                tokens.text_primary
+            } else {
+                with_alpha(tokens.text_secondary, 0.55)
+            }),
+    )
+    .padding([Spacing::SM, Spacing::LG])
+    .style(move |_, status| crate::style::button_style(tokens, Class::SidebarActionButton, status));
+
+    if enabled {
+        button.on_press(message)
+    } else {
+        button
+    }
+}
+
 fn library_layout_toggle_button(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let (icon, tooltip_label) = if app.compact_view_mode {
         (GRID_LAYOUT_SVG, "Switch to grid")
@@ -4306,6 +5723,55 @@ fn library_new_folder_button<'a>(tokens: ThemeTokens) -> iced::widget::Button<'a
     .style(move |_, status| crate::style::button_style(tokens, Class::LibraryImportButton, status))
 }
 
+fn library_drop_zone_card<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element<'a, Message> {
+    container(
+        text("Drop selected PDFs here")
+            .size(app.library_card_font_size(FontSize::SM))
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .color(tokens.text_primary)
+            .wrapping(Wrapping::None),
+    )
+    .width(app.library_grid_card_width())
+    .height(app.library_card_estimated_height(&EntryId::new("__drop_zone__")))
+    .center(Length::Fill)
+    .style(move |_| container_style(tokens, Class::DragInsertionMarker))
+    .into()
+}
+
+fn library_drop_zone_row<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element<'a, Message> {
+    container(
+        text("Drop selected PDFs here")
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .color(tokens.text_primary)
+            .wrapping(Wrapping::None),
+    )
+    .width(Length::Fill)
+    .height(app.layout().library_list_row_height)
+    .center(Length::Fill)
+    .style(move |_| container_style(tokens, Class::DragInsertionMarker))
+    .into()
+}
+
+fn library_metadata_density_picker<'a>(
+    app: &'a PDFolioApp,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    pick_list(
+        LIBRARY_METADATA_DENSITY_OPTIONS,
+        Some(app.library_metadata_density),
+        Message::LibraryMetadataDensityChanged,
+    )
+    .placeholder("Metadata")
+    .width(130.0)
+    .padding([Spacing::SM, Spacing::MD])
+    .text_size(FontSize::MD)
+    .font(ui_font(FontWeight::MEDIUM))
+    .style(move |_, status| pick_list_style(tokens, Class::LibrarySortDropdown, status))
+    .menu_style(move |_| menu_style_for_class(tokens, Class::LibrarySortDropdown))
+    .into()
+}
+
 fn library_entry_card<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -4321,15 +5787,14 @@ fn library_entry_card<'a>(
         .or_else(|| entry.author.clone())
         .unwrap_or_else(|| String::from("Unknown author"));
     let opened = last_opened_label(&entry);
-    let metadata_label = library_card_metadata_label(&entry);
-    let search_page = app.search_hit_pages.get(&entry_id).copied();
+    let metadata_label = library_card_metadata_label(app.library_metadata_density, &entry);
+    let search_match = library_search_match_label(app, &entry, &entry_id);
     let content_alpha = library_entry_content_alpha(app, mode);
     let text_secondary = with_alpha(tokens.text_secondary, content_alpha);
     let accent = with_alpha(tokens.accent, content_alpha);
-    let activity_label = search_page.map_or(opened, |page| {
-        format!("Match on page {}", u32::from(page) + 1)
-    });
-    let activity_color = if search_page.is_some() {
+    let activity_is_match = search_match.is_some();
+    let activity_label = search_match.unwrap_or(opened);
+    let activity_color = if activity_is_match {
         accent
     } else {
         text_secondary
@@ -4340,8 +5805,8 @@ fn library_entry_card<'a>(
     let metadata_font_size = app.library_card_font_size(FontSize::SM);
     let text_width = app.library_card_title_width();
     let author = truncate_for_width_with_font(&author, text_width, 0.0, metadata_font_size);
-    let metadata_label =
-        truncate_for_width_with_font(&metadata_label, text_width, 0.0, metadata_font_size);
+    let metadata_label = metadata_label
+        .map(|label| truncate_for_width_with_font(&label, text_width, 0.0, metadata_font_size));
     let activity_label =
         truncate_for_width_with_font(&activity_label, text_width, 0.0, metadata_font_size);
     let hover_progress = if mode == LibraryEntryRenderMode::Normal {
@@ -4358,26 +5823,33 @@ fn library_entry_card<'a>(
             .font(ui_font(FontWeight::REGULAR))
             .color(text_secondary)
             .wrapping(Wrapping::None),
-        text(metadata_label)
-            .size(metadata_font_size)
-            .font(ui_font(FontWeight::REGULAR))
-            .color(text_secondary)
-            .wrapping(Wrapping::None),
-        text(activity_label)
-            .size(metadata_font_size)
-            .font(ui_font(if search_page.is_some() {
-                FontWeight::MEDIUM
-            } else {
-                FontWeight::REGULAR
-            }))
-            .color(activity_color)
-            .wrapping(Wrapping::None),
-        progress_bar(progress_value, tokens),
     ]
     .spacing(app.library_card_spacing())
     .padding(app.library_card_padding())
     .height(app.library_card_info_height())
     .width(Length::Fill);
+    if let Some(metadata_label) = metadata_label {
+        info = info.push(
+            text(metadata_label)
+                .size(metadata_font_size)
+                .font(ui_font(FontWeight::REGULAR))
+                .color(text_secondary)
+                .wrapping(Wrapping::None),
+        );
+    }
+    info = info
+        .push(
+            text(activity_label)
+                .size(metadata_font_size)
+                .font(ui_font(if activity_is_match {
+                    FontWeight::MEDIUM
+                } else {
+                    FontWeight::REGULAR
+                }))
+                .color(activity_color)
+                .wrapping(Wrapping::None),
+        )
+        .push(progress_bar(progress_value, tokens));
 
     if mode == LibraryEntryRenderMode::Normal && app.tag_entry_id.as_ref() == Some(&entry_id) {
         info = info.push(
@@ -4386,6 +5858,25 @@ fn library_entry_card<'a>(
                 .on_submit(Message::SubmitTag),
         );
     }
+    let checkbox_visible = selected
+        || !app.selected_library_entries.is_empty()
+        || app.library_card_hover_progress(&entry_id) > 0.01;
+    let media = if mode == LibraryEntryRenderMode::Normal && checkbox_visible {
+        stack![
+            media,
+            container(selection_checkbox(
+                selected,
+                tokens,
+                Message::EntryCheckboxToggled(entry_id.clone())
+            ))
+            .padding(Spacing::SM)
+            .width(Length::Shrink)
+            .height(Length::Shrink),
+        ]
+        .into()
+    } else {
+        media
+    };
     let body = column![media, info].spacing(0).width(Length::Fill);
     let width = if mode == LibraryEntryRenderMode::Floating {
         Length::Fixed(app.library_grid_card_width())
@@ -4428,16 +5919,10 @@ fn library_entry_row<'a>(
     let entry_id = entry.id.clone();
     let selected = app.selected_library_entries.contains(&entry_id);
     let title = entry_title(&entry);
-    let details = format!(
-        "{}{}",
-        entry_author(&entry),
-        entry
-            .page_count
-            .map_or(String::new(), |pages| format!(" . {pages} pages"))
-    );
+    let details = library_row_metadata_label(app.library_metadata_density, &entry);
     let tags = entry.tags.clone();
     let progress_value = progress_fraction(&entry);
-    let search_page = app.search_hit_pages.get(&entry_id).copied();
+    let search_match = library_search_match_label(app, &entry, &entry_id);
     let content_alpha = library_entry_content_alpha(app, mode);
     let hover_progress = if mode == LibraryEntryRenderMode::Normal {
         app.library_card_hover_progress(&entry_id)
@@ -4463,9 +5948,9 @@ fn library_entry_row<'a>(
     ]
     .spacing(Spacing::XS)
     .width(Length::Fill);
-    if let Some(page) = search_page {
+    if let Some(match_label) = search_match {
         detail_column = detail_column.push(
-            text(format!("Match on page {}", u32::from(page) + 1))
+            text(match_label)
                 .size(FontSize::SM)
                 .font(ui_font(FontWeight::MEDIUM))
                 .color(accent),
@@ -4476,7 +5961,22 @@ fn library_entry_row<'a>(
     } else {
         tags_row(entry_id.clone(), tags, tokens)
     });
+    let checkbox_lane: Element<'a, Message> = if mode == LibraryEntryRenderMode::Normal
+        && (selected
+            || !app.selected_library_entries.is_empty()
+            || app.library_card_hover_progress(&entry_id) > 0.01)
+    {
+        selection_checkbox(
+            selected,
+            tokens,
+            Message::EntryCheckboxToggled(entry_id.clone()),
+        )
+        .into()
+    } else {
+        container("").width(Length::Fixed(24.0)).into()
+    };
     let row_content = row![
+        checkbox_lane,
         thumbnail_element(
             app,
             &entry_id,
@@ -5422,6 +6922,7 @@ fn view_selection_context_row(app: &PDFolioApp, tokens: ThemeTokens) -> Element<
                 text_input("Title", &app.details_title_input)
                     .on_input(Message::DetailsTitleChanged)
                     .on_submit(Message::SaveDetailsMetadata)
+                    .id(Id::new(LIBRARY_DETAILS_TITLE_INPUT_ID))
                     .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
                     .width(title_input_width),
             )
@@ -5960,6 +7461,31 @@ fn open_library_document_task(entry_id: EntryId, path: PathBuf) -> Task<Message>
     )
 }
 
+fn open_file_manager_task(path: PathBuf, reveal: bool) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let Some((program, args)) = file_manager_command(&path, reveal) else {
+                    anyhow::bail!(
+                        "Could not determine a containing folder for {}.",
+                        path.display()
+                    );
+                };
+                let status = std::process::Command::new(&program).args(&args).status()?;
+                if !status.success() {
+                    anyhow::bail!("File manager command failed for {}.", path.display());
+                }
+                Ok::<_, anyhow::Error>(())
+            })
+            .await?
+        },
+        |result| match result {
+            Ok(()) => Message::LibraryStatus(String::from("File manager opened.")),
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
 fn open_file_dialog_task() -> Task<Message> {
     Task::perform(
         async {
@@ -5985,6 +7511,26 @@ fn import_folder_dialog_task() -> Task<Message> {
     )
 }
 
+fn relink_file_dialog_task(entry_id: EntryId) -> Task<Message> {
+    Task::perform(
+        async {
+            rfd::AsyncFileDialog::new()
+                .add_filter("PDF documents", &["pdf"])
+                .pick_file()
+                .await
+                .map(|file| file.path().to_path_buf())
+        },
+        move |path| {
+            path.map_or(Message::FileDialogCanceled, |path| {
+                Message::RelinkFileSelected {
+                    entry_id: entry_id.clone(),
+                    path,
+                }
+            })
+        },
+    )
+}
+
 fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
     let db = Arc::clone(&app.db);
     let preferences = LibraryPreferences {
@@ -5997,11 +7543,9 @@ fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
         selected_folder: app.selected_folder.clone(),
         sidebar_width: app.library_tag_sidebar_width,
         grid_zoom: app.library_grid_zoom(),
-        visible_metadata_fields: vec![
-            String::from("author"),
-            String::from("page_count"),
-            String::from("file_size"),
-        ],
+        visible_metadata_fields: app.library_metadata_density.visible_fields(),
+        library_tree_root_expanded: app.library_tree_root_expanded,
+        collapsed_folder_ids: app.collapsed_library_tree_folders.iter().cloned().collect(),
     };
 
     Task::perform(
@@ -6025,6 +7569,26 @@ fn persist_manual_entry_order_task(db: Arc<Db>, entry_ids: Vec<EntryId>) -> Task
         },
         |result| match result {
             Ok(()) => Message::ManualEntryOrderSaved,
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn persist_manual_folder_order_task(
+    db: Arc<Db>,
+    parent_id: Option<FolderId>,
+    folder_ids: Vec<FolderId>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                db.set_manual_folder_order(parent_id.as_ref(), &folder_ids)
+            })
+            .await??;
+            Ok::<_, anyhow::Error>(())
+        },
+        |result| match result {
+            Ok(()) => Message::FolderUpdated,
             Err(error) => Message::LibraryError(error.to_string()),
         },
     )
@@ -6056,6 +7620,88 @@ where
         },
         |result| match result {
             Ok((label, updated, errors)) => Message::BulkOperationFinished {
+                label,
+                updated,
+                errors,
+            },
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn rename_folder_task(db: Arc<Db>, folder_id: FolderId, name: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || db.rename_folder(&folder_id, &name)).await??;
+            Ok::<_, anyhow::Error>(())
+        },
+        |result| match result {
+            Ok(()) => Message::FolderUpdated,
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn move_folder_task(
+    db: Arc<Db>,
+    folder_id: FolderId,
+    new_parent_id: Option<FolderId>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || db.move_folder(&folder_id, new_parent_id.as_ref()))
+                .await??;
+            Ok::<_, anyhow::Error>(())
+        },
+        |result| match result {
+            Ok(()) => Message::FolderUpdated,
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn delete_folder_task(db: Arc<Db>, folder_id: FolderId) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || db.delete_folder(&folder_id)).await??;
+            Ok::<_, anyhow::Error>(())
+        },
+        |result| match result {
+            Ok(()) => Message::FolderUpdated,
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn assign_entries_to_folder_task(
+    db: Arc<Db>,
+    entry_ids: Vec<EntryId>,
+    folder_id: FolderId,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let completed_folder_id = folder_id.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut updated = 0;
+                let mut errors = Vec::new();
+                for entry_id in entry_ids {
+                    match db.add_entry_to_folder(&entry_id, &folder_id) {
+                        Ok(()) => updated += 1,
+                        Err(error) => errors.push(format!("{}: {error}", entry_id.as_str())),
+                    }
+                }
+                Ok::<_, anyhow::Error>((
+                    completed_folder_id,
+                    String::from("Added to folder"),
+                    updated,
+                    errors,
+                ))
+            })
+            .await?
+        },
+        |result| match result {
+            Ok((folder_id, label, updated, errors)) => Message::FolderAssignmentFinished {
+                folder_id,
                 label,
                 updated,
                 errors,
@@ -6117,6 +7763,26 @@ fn reset_metadata_task(db: Arc<Db>, entry: LibraryEntry) -> Task<Message> {
                 label,
                 errors,
             },
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn relink_entry_task(db: Arc<Db>, entry_id: EntryId, path: PathBuf) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking({
+                let entry_id = entry_id.clone();
+                let path = path.clone();
+                move || {
+                    db.relink_entry_path(&entry_id, &path)?;
+                    Ok::<_, anyhow::Error>((entry_id, path))
+                }
+            })
+            .await?
+        },
+        |result| match result {
+            Ok((entry_id, path)) => Message::RelinkFinished { entry_id, path },
             Err(error) => Message::LibraryError(error.to_string()),
         },
     )
@@ -6338,10 +8004,7 @@ fn import_pdf_with_index(db: &Db, path: PathBuf) -> anyhow::Result<ImportedEntry
     let id = EntryId::new(hash_file(&path)?);
     let inserted = db.entry_by_path(&path)?.is_none();
     let doc = PdfDoc::open(&path)?;
-    let title = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .map(ToOwned::to_owned);
+    let title = attributed_title(&doc).or_else(|| title_from_path(&path));
     let page_count = doc.page_count();
     let author = attributed_author(&doc);
 
@@ -6415,6 +8078,32 @@ fn attributed_author(doc: &PdfDoc) -> Option<String> {
         .flatten()
         .and_then(|author| clean_author_candidate(&author))
         .or_else(|| author_from_contents(doc))
+}
+
+fn attributed_title(doc: &PdfDoc) -> Option<String> {
+    doc.metadata_title()
+        .ok()
+        .flatten()
+        .and_then(clean_import_title)
+}
+
+fn title_from_path(path: &Path) -> Option<String> {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(clean_import_title)
+}
+
+fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
+    let title = value
+        .as_ref()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if title.is_empty() || title.eq_ignore_ascii_case("untitled") {
+        None
+    } else {
+        Some(title.chars().take(512).collect())
+    }
 }
 
 fn author_from_contents(doc: &PdfDoc) -> Option<String> {
@@ -6518,19 +8207,107 @@ fn apply_watch_event(db: &Db, event: LibraryWatchEvent) -> anyhow::Result<()> {
 }
 
 fn entry_matches_query(entry: &LibraryEntry, normalized_query: &str) -> bool {
-    entry_title(entry).to_lowercase().contains(normalized_query)
-        || entry_author(entry)
-            .to_lowercase()
-            .contains(normalized_query)
-        || entry
-            .path
-            .to_string_lossy()
-            .to_lowercase()
-            .contains(normalized_query)
-        || entry
-            .tags
-            .iter()
+    entry_search_fields_match(
+        &entry_title(entry),
+        &entry_author(entry),
+        &entry.path.to_string_lossy(),
+        entry.tags.iter().map(String::as_str),
+        entry.folders.iter().map(|folder| folder.name.as_str()),
+        normalized_query,
+    )
+}
+
+fn library_search_match_label(
+    app: &PDFolioApp,
+    entry: &LibraryEntry,
+    entry_id: &EntryId,
+) -> Option<String> {
+    let query = app.search_query.trim().to_lowercase();
+    if query.is_empty() {
+        return None;
+    }
+
+    app.search_hit_pages
+        .get(entry_id)
+        .map(|page| format!("Match on page {}", u32::from(*page) + 1))
+        .or_else(|| search_match_source_label(entry, &query))
+}
+
+fn search_match_source_label(entry: &LibraryEntry, normalized_query: &str) -> Option<String> {
+    search_match_source_label_for_fields(
+        &entry_title(entry),
+        &entry_author(entry),
+        &entry.path.to_string_lossy(),
+        entry.tags.iter().map(String::as_str),
+        entry.folders.iter().map(|folder| folder.name.as_str()),
+        normalized_query,
+    )
+}
+
+fn search_match_source_label_for_fields<'a>(
+    title: &str,
+    author: &str,
+    path: &str,
+    tags: impl IntoIterator<Item = &'a str>,
+    folder_names: impl IntoIterator<Item = &'a str>,
+    normalized_query: &str,
+) -> Option<String> {
+    if normalized_query.is_empty() {
+        return None;
+    }
+
+    if title.to_lowercase().contains(normalized_query) {
+        Some(String::from("Match in title"))
+    } else if author.to_lowercase().contains(normalized_query) {
+        Some(String::from("Match in author"))
+    } else if tags
+        .into_iter()
+        .any(|tag| tag.to_lowercase().contains(normalized_query))
+    {
+        Some(String::from("Match in tag"))
+    } else if folder_names
+        .into_iter()
+        .any(|folder| folder.to_lowercase().contains(normalized_query))
+    {
+        Some(String::from("Match in folder"))
+    } else if path.to_lowercase().contains(normalized_query) {
+        Some(String::from("Match in path"))
+    } else {
+        None
+    }
+}
+
+fn entry_search_fields_match<'a>(
+    title: &str,
+    author: &str,
+    path: &str,
+    tags: impl IntoIterator<Item = &'a str>,
+    folder_names: impl IntoIterator<Item = &'a str>,
+    normalized_query: &str,
+) -> bool {
+    title.to_lowercase().contains(normalized_query)
+        || author.to_lowercase().contains(normalized_query)
+        || path.to_lowercase().contains(normalized_query)
+        || tags
+            .into_iter()
             .any(|tag| tag.to_lowercase().contains(normalized_query))
+        || folder_names
+            .into_iter()
+            .any(|folder| folder.to_lowercase().contains(normalized_query))
+}
+
+fn library_entry_reading_state(entry: &LibraryEntry) -> LibraryReadingFilter {
+    library_reading_state(entry.last_page, entry.page_count)
+}
+
+fn library_reading_state(last_page: u16, page_count: Option<u16>) -> LibraryReadingFilter {
+    if page_count.is_some_and(|count| count > 0 && last_page.saturating_add(1) >= count) {
+        LibraryReadingFilter::Finished
+    } else if last_page > 0 {
+        LibraryReadingFilter::Reading
+    } else {
+        LibraryReadingFilter::Unread
+    }
 }
 
 fn entry_title(entry: &LibraryEntry) -> String {
@@ -6676,12 +8453,40 @@ fn file_size_label(entry: &LibraryEntry) -> String {
     )
 }
 
-fn library_card_metadata_label(entry: &LibraryEntry) -> String {
-    format!(
-        "{}   •   {}",
-        library_card_page_count_label(entry),
-        file_size_label(entry)
-    )
+fn library_card_metadata_label(
+    density: LibraryMetadataDensity,
+    entry: &LibraryEntry,
+) -> Option<String> {
+    match density {
+        LibraryMetadataDensity::Minimal => None,
+        LibraryMetadataDensity::Standard => Some(library_card_page_count_label(entry)),
+        LibraryMetadataDensity::Detailed => Some(format!(
+            "{}   •   {}",
+            library_card_page_count_label(entry),
+            file_size_label(entry)
+        )),
+    }
+}
+
+fn library_row_metadata_label(density: LibraryMetadataDensity, entry: &LibraryEntry) -> String {
+    match density {
+        LibraryMetadataDensity::Minimal => entry_author(entry),
+        LibraryMetadataDensity::Standard => format!(
+            "{}{}",
+            entry_author(entry),
+            entry
+                .page_count
+                .map_or(String::new(), |pages| format!(" . {pages} pages"))
+        ),
+        LibraryMetadataDensity::Detailed => format!(
+            "{}{} . {}",
+            entry_author(entry),
+            entry
+                .page_count
+                .map_or(String::new(), |pages| format!(" . {pages} pages")),
+            file_size_label(entry)
+        ),
+    }
 }
 
 fn library_card_page_count_label(entry: &LibraryEntry) -> String {
@@ -6916,6 +8721,9 @@ fn subscription(app: &PDFolioApp) -> Subscription<Message> {
                 (_, Some("g") | Some("G")) if modifiers.control() => {
                     Some(Message::ShortcutPressed(Shortcut::Jump))
                 }
+                (_, Some("f") | Some("F")) if modifiers.control() => {
+                    Some(Message::ShortcutPressed(Shortcut::FocusSearch))
+                }
                 (_, Some("a") | Some("A")) if modifiers.control() => {
                     Some(Message::ShortcutPressed(Shortcut::SelectAll))
                 }
@@ -6926,6 +8734,9 @@ fn subscription(app: &PDFolioApp) -> Subscription<Message> {
                 }
                 (keyboard::Key::Named(keyboard::key::Named::Delete), _) => {
                     Some(Message::ShortcutPressed(Shortcut::DeleteSelected))
+                }
+                (keyboard::Key::Named(keyboard::key::Named::F2), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::RenameSelected))
                 }
                 (keyboard::Key::Character(value), _) if value.as_str() == "0" => {
                     Some(Message::ShortcutPressed(Shortcut::Reset))
@@ -7010,7 +8821,28 @@ fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         Subscription::none()
     };
 
-    let animations = if app.library_card_hover_animation_active() {
+    let folder_drag = if app.folder_drag.is_some() {
+        Subscription::batch([
+            event::listen_with(|event, _status, _window| match event {
+                Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                    Some(Message::FolderDragMoved(position))
+                }
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                    Some(Message::EndFolderDrag)
+                }
+                _ => None,
+            }),
+            time::every(Duration::from_millis(LIBRARY_DRAG_AUTOSCROLL_TICK_MS))
+                .map(Message::LibraryAutoScrollTick),
+        ])
+    } else {
+        Subscription::none()
+    };
+
+    let animations = if app.library_card_hover_animation_active()
+        || app.bulk_operation_progress.is_some()
+        || app.folder_drop_flash.is_some()
+    {
         time::every(Duration::from_millis(LIBRARY_CARD_HOVER_TICK_MS)).map(Message::AnimationFrame)
     } else {
         Subscription::none()
@@ -7022,6 +8854,7 @@ fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         style_watcher,
         sidebar_resize,
         library_drag,
+        folder_drag,
         animations,
     ])
 }
@@ -7153,6 +8986,31 @@ fn collect_style_files(
     }
 }
 
+fn file_manager_command(path: &Path, reveal: bool) -> Option<(String, Vec<String>)> {
+    let parent = path.parent()?;
+    if cfg!(target_os = "windows") {
+        if reveal {
+            Some((
+                String::from("explorer"),
+                vec![format!("/select,{}", path.display())],
+            ))
+        } else {
+            Some((String::from("explorer"), vec![parent.display().to_string()]))
+        }
+    } else if cfg!(target_os = "macos") {
+        if reveal {
+            Some((
+                String::from("open"),
+                vec![String::from("-R"), path.display().to_string()],
+            ))
+        } else {
+            Some((String::from("open"), vec![parent.display().to_string()]))
+        }
+    } else {
+        Some((String::from("xdg-open"), vec![parent.display().to_string()]))
+    }
+}
+
 fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<Item = Message> {
     let paths = paths.clone();
     stream::channel(100, async move |mut output| {
@@ -7211,9 +9069,189 @@ fn scroll_delta_pixels(delta: mouse::ScrollDelta, line_scroll_pixels: f32) -> (f
     }
 }
 
+fn toggle_selection_entry_id(selection: &mut HashSet<EntryId>, entry_id: EntryId) {
+    if !selection.insert(entry_id.clone()) {
+        selection.remove(&entry_id);
+    }
+}
+
+fn master_checkbox_state_for_counts(
+    selected_visible: usize,
+    visible_count: usize,
+) -> MasterCheckboxState {
+    match selected_visible {
+        0 => MasterCheckboxState::None,
+        count if count == visible_count && visible_count > 0 => MasterCheckboxState::All,
+        _ => MasterCheckboxState::Partial,
+    }
+}
+
+fn reorder_entry_ids_for_drag(
+    entries: &[EntryId],
+    dragged_entries: &[EntryId],
+    drop_index: usize,
+) -> Vec<EntryId> {
+    let dragged = dragged_entries.iter().cloned().collect::<HashSet<_>>();
+    if dragged.is_empty() {
+        return entries.to_vec();
+    }
+
+    let moving = entries
+        .iter()
+        .filter(|entry_id| dragged.contains(*entry_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if moving.is_empty() {
+        return entries.to_vec();
+    }
+
+    let mut remaining = entries
+        .iter()
+        .filter(|entry_id| !dragged.contains(*entry_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let insert_index = drop_index.min(remaining.len());
+    remaining.splice(insert_index..insert_index, moving);
+    remaining
+}
+
+fn reorder_folder_ids_before_target(
+    folders: &[FolderId],
+    dragged_folder: &FolderId,
+    target_folder: &FolderId,
+) -> Option<Vec<FolderId>> {
+    if dragged_folder == target_folder {
+        return None;
+    }
+
+    let dragged_index = folders
+        .iter()
+        .position(|folder_id| folder_id == dragged_folder)?;
+    let target_index = folders
+        .iter()
+        .position(|folder_id| folder_id == target_folder)?;
+    let mut next_order = folders.to_vec();
+    let dragged = next_order.remove(dragged_index);
+    let target_index = next_order
+        .iter()
+        .position(|folder_id| folder_id == target_folder)
+        .unwrap_or(target_index.min(next_order.len()));
+    next_order.insert(target_index, dragged);
+    Some(next_order)
+}
+
+#[cfg(test)]
+fn dragged_placeholder_count(entries: &[EntryId], dragged_entries: &[EntryId]) -> usize {
+    let dragged = dragged_entries.iter().collect::<HashSet<_>>();
+    entries
+        .iter()
+        .filter(|entry_id| dragged.contains(entry_id))
+        .count()
+}
+
+fn folder_drop_target_ready(started_at: Instant, now: Instant) -> bool {
+    now.checked_duration_since(started_at)
+        .is_some_and(|elapsed| elapsed >= Duration::from_millis(LIBRARY_FOLDER_DROP_DWELL_MS))
+}
+
+fn folder_can_move_into(folders: &[Folder], folder_id: &FolderId, target_id: &FolderId) -> bool {
+    if folder_id == target_id {
+        return false;
+    }
+
+    let mut current = Some(target_id);
+    while let Some(id) = current {
+        if id == folder_id {
+            return false;
+        }
+        current = folders
+            .iter()
+            .find(|folder| &folder.id == id)
+            .and_then(|folder| folder.parent_id.as_ref());
+    }
+
+    folders.iter().any(|folder| &folder.id == target_id)
+}
+
+fn folder_card_target_at_cursor(
+    cursor: Point,
+    folders: &[Folder],
+    dragged_folder_id: &FolderId,
+    viewport_x: f32,
+    viewport_y: f32,
+    scroll_offset: f32,
+    card_width: f32,
+    row_height: f32,
+    column_gap: f32,
+    row_gap: f32,
+    per_row: usize,
+) -> Option<FolderId> {
+    if folders.is_empty() || per_row == 0 {
+        return None;
+    }
+
+    let content_x = cursor.x - viewport_x;
+    let content_y = cursor.y - viewport_y + scroll_offset;
+    if content_x < 0.0 || content_y < 0.0 {
+        return None;
+    }
+
+    let column_pitch = card_width + column_gap;
+    let row_pitch = row_height + row_gap;
+    if column_pitch <= 0.0 || row_pitch <= 0.0 {
+        return None;
+    }
+
+    let column = (content_x / column_pitch).floor() as usize;
+    let row = (content_y / row_pitch).floor() as usize;
+    if column >= per_row {
+        return None;
+    }
+
+    let x_in_cell = content_x - column as f32 * column_pitch;
+    let y_in_cell = content_y - row as f32 * row_pitch;
+    if x_in_cell > card_width || y_in_cell > row_height {
+        return None;
+    }
+
+    let index = row.saturating_mul(per_row).saturating_add(column);
+    folders
+        .get(index)
+        .filter(|folder| &folder.id != dragged_folder_id)
+        .map(|folder| folder.id.clone())
+}
+
+#[cfg(test)]
+fn folder_drop_target_at_cursor(
+    cursor: Point,
+    targets: &[(FolderId, Rectangle)],
+) -> Option<FolderId> {
+    targets
+        .iter()
+        .find(|(_, bounds)| {
+            cursor.x >= bounds.x
+                && cursor.x <= bounds.x + bounds.width
+                && cursor.y >= bounds.y
+                && cursor.y <= bounds.y + bounds.height
+        })
+        .map(|(folder_id, _)| folder_id.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_db(label: &str) -> Db {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "pdf-folio-ui-{label}-{}-{nanos}.db",
+            std::process::id()
+        ));
+        Db::open(path).expect("test database should open")
+    }
 
     #[test]
     fn range_selection_ids_preserves_visible_order_forward() {
@@ -7235,6 +9273,415 @@ mod tests {
             ids.iter().map(EntryId::as_str).collect::<Vec<_>>(),
             vec!["b", "c", "d"]
         );
+    }
+
+    #[test]
+    fn checkbox_toggle_adds_and_removes_one_entry_without_clearing_others() {
+        let mut selected = HashSet::from([EntryId::new("a"), EntryId::new("b")]);
+
+        toggle_selection_entry_id(&mut selected, EntryId::new("c"));
+        assert!(selected.contains(&EntryId::new("a")));
+        assert!(selected.contains(&EntryId::new("b")));
+        assert!(selected.contains(&EntryId::new("c")));
+
+        toggle_selection_entry_id(&mut selected, EntryId::new("b"));
+        assert!(selected.contains(&EntryId::new("a")));
+        assert!(!selected.contains(&EntryId::new("b")));
+        assert!(selected.contains(&EntryId::new("c")));
+    }
+
+    #[test]
+    fn master_checkbox_state_reflects_none_partial_and_all_visible_selection() {
+        assert_eq!(
+            master_checkbox_state_for_counts(0, 4),
+            MasterCheckboxState::None
+        );
+        assert_eq!(
+            master_checkbox_state_for_counts(2, 4),
+            MasterCheckboxState::Partial
+        );
+        assert_eq!(
+            master_checkbox_state_for_counts(4, 4),
+            MasterCheckboxState::All
+        );
+        assert_eq!(
+            master_checkbox_state_for_counts(0, 0),
+            MasterCheckboxState::None
+        );
+    }
+
+    #[test]
+    fn metadata_density_round_trips_visible_field_preferences() {
+        for density in [
+            LibraryMetadataDensity::Minimal,
+            LibraryMetadataDensity::Standard,
+            LibraryMetadataDensity::Detailed,
+        ] {
+            assert_eq!(
+                LibraryMetadataDensity::from_visible_fields(&density.visible_fields()),
+                density
+            );
+        }
+    }
+
+    #[test]
+    fn reading_state_uses_progress_and_known_page_count() {
+        assert_eq!(
+            library_reading_state(0, Some(12)),
+            LibraryReadingFilter::Unread
+        );
+        assert_eq!(
+            library_reading_state(3, Some(12)),
+            LibraryReadingFilter::Reading
+        );
+        assert_eq!(
+            library_reading_state(11, Some(12)),
+            LibraryReadingFilter::Finished
+        );
+        assert_eq!(
+            library_reading_state(4, None),
+            LibraryReadingFilter::Reading
+        );
+    }
+
+    #[test]
+    fn multi_drag_reorder_preserves_selected_relative_order() {
+        let entries = ["a", "b", "c", "d", "e"].map(EntryId::new);
+        let dragged = ["b", "d"].map(EntryId::new);
+        let result = reorder_entry_ids_for_drag(&entries, &dragged, 2);
+
+        assert_eq!(
+            result.iter().map(EntryId::as_str).collect::<Vec<_>>(),
+            vec!["a", "c", "b", "d", "e"]
+        );
+    }
+
+    #[test]
+    fn multi_drag_reorder_can_append_selected_group() {
+        let entries = ["a", "b", "c", "d"].map(EntryId::new);
+        let dragged = ["a", "c"].map(EntryId::new);
+        let result = reorder_entry_ids_for_drag(&entries, &dragged, usize::MAX);
+
+        assert_eq!(
+            result.iter().map(EntryId::as_str).collect::<Vec<_>>(),
+            vec!["b", "d", "a", "c"]
+        );
+    }
+
+    #[test]
+    fn multi_drag_placeholder_count_matches_visible_selection_size() {
+        let entries = ["a", "b", "c", "d"].map(EntryId::new);
+        let dragged = ["b", "d", "missing"].map(EntryId::new);
+
+        assert_eq!(dragged_placeholder_count(&entries, &dragged), 2);
+    }
+
+    #[test]
+    fn folder_drag_reorder_moves_folder_before_hovered_sibling() {
+        let folders = ["a", "b", "c", "d"].map(FolderId::new);
+
+        let result =
+            reorder_folder_ids_before_target(&folders, &FolderId::new("d"), &FolderId::new("b"))
+                .unwrap();
+
+        assert_eq!(
+            result.iter().map(FolderId::as_str).collect::<Vec<_>>(),
+            vec!["a", "d", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn folder_drop_target_activates_after_dwell_delay() {
+        let started_at = Instant::now();
+
+        assert!(!folder_drop_target_ready(
+            started_at,
+            started_at + Duration::from_millis(LIBRARY_FOLDER_DROP_DWELL_MS - 1)
+        ));
+        assert!(folder_drop_target_ready(
+            started_at,
+            started_at + Duration::from_millis(LIBRARY_FOLDER_DROP_DWELL_MS)
+        ));
+    }
+
+    #[test]
+    fn folder_drop_target_hit_testing_resolves_cursor_bounds() {
+        let reading = FolderId::new("reading");
+        let archive = FolderId::new("archive");
+        let targets = vec![
+            (
+                reading.clone(),
+                Rectangle {
+                    x: 10.0,
+                    y: 20.0,
+                    width: 100.0,
+                    height: 40.0,
+                },
+            ),
+            (
+                archive.clone(),
+                Rectangle {
+                    x: 10.0,
+                    y: 72.0,
+                    width: 100.0,
+                    height: 40.0,
+                },
+            ),
+        ];
+
+        assert_eq!(
+            folder_drop_target_at_cursor(Point::new(24.0, 36.0), &targets),
+            Some(reading)
+        );
+        assert_eq!(
+            folder_drop_target_at_cursor(Point::new(24.0, 84.0), &targets),
+            Some(archive)
+        );
+        assert_eq!(
+            folder_drop_target_at_cursor(Point::new(4.0, 84.0), &targets),
+            None
+        );
+    }
+
+    #[test]
+    fn folder_move_target_rejects_self_and_descendants() {
+        let db = test_db("folder-move-target");
+        let root = db.create_folder("Root", None).unwrap();
+        let child = db.create_folder("Child", Some(&root)).unwrap();
+        let sibling = db.create_folder("Sibling", None).unwrap();
+        let folders = db.get_folders().unwrap();
+
+        assert!(!folder_can_move_into(&folders, &root, &root));
+        assert!(!folder_can_move_into(&folders, &root, &child));
+        assert!(folder_can_move_into(&folders, &child, &sibling));
+    }
+
+    #[test]
+    fn folder_card_target_hit_test_uses_grid_cells() {
+        let db = test_db("folder-card-hit-test");
+        let first = db.create_folder("First", None).unwrap();
+        let second = db.create_folder("Second", None).unwrap();
+        let third = db.create_folder("Third", None).unwrap();
+        let folders = db.get_folders().unwrap();
+
+        assert_eq!(
+            folder_card_target_at_cursor(
+                Point::new(132.0, 18.0),
+                &folders,
+                &first,
+                0.0,
+                0.0,
+                0.0,
+                100.0,
+                40.0,
+                12.0,
+                8.0,
+                2,
+            ),
+            Some(second)
+        );
+        assert_eq!(
+            folder_card_target_at_cursor(
+                Point::new(18.0, 18.0),
+                &folders,
+                &first,
+                0.0,
+                0.0,
+                0.0,
+                100.0,
+                40.0,
+                12.0,
+                8.0,
+                2,
+            ),
+            None
+        );
+        assert_eq!(
+            folder_card_target_at_cursor(
+                Point::new(108.0, 18.0),
+                &folders,
+                &third,
+                0.0,
+                0.0,
+                0.0,
+                100.0,
+                40.0,
+                12.0,
+                8.0,
+                2,
+            ),
+            None
+        );
+        assert_eq!(
+            folder_card_target_at_cursor(
+                Point::new(18.0, 58.0),
+                &folders,
+                &first,
+                0.0,
+                0.0,
+                0.0,
+                100.0,
+                40.0,
+                12.0,
+                8.0,
+                2,
+            ),
+            Some(third)
+        );
+    }
+
+    #[test]
+    fn entry_search_fields_match_folder_names() {
+        assert!(entry_search_fields_match(
+            "Quarterly Report",
+            "Analyst",
+            "/tmp/report.pdf",
+            ["finance"].into_iter(),
+            ["Research Archive"].into_iter(),
+            "archive",
+        ));
+        assert!(!entry_search_fields_match(
+            "Quarterly Report",
+            "Analyst",
+            "/tmp/report.pdf",
+            ["finance"].into_iter(),
+            ["Research Archive"].into_iter(),
+            "cookbook",
+        ));
+    }
+
+    #[test]
+    fn search_match_source_label_reports_metadata_source() {
+        assert_eq!(
+            search_match_source_label_for_fields(
+                "Quarterly Report",
+                "Analyst",
+                "/tmp/reports/quarterly.pdf",
+                ["finance"],
+                ["Research Archive"],
+                "quarterly"
+            ),
+            Some(String::from("Match in title"))
+        );
+        assert_eq!(
+            search_match_source_label_for_fields(
+                "Quarterly Report",
+                "Analyst",
+                "/tmp/reports/quarterly.pdf",
+                ["finance"],
+                ["Research Archive"],
+                "analyst"
+            ),
+            Some(String::from("Match in author"))
+        );
+        assert_eq!(
+            search_match_source_label_for_fields(
+                "Quarterly Report",
+                "Analyst",
+                "/tmp/reports/quarterly.pdf",
+                ["finance"],
+                ["Research Archive"],
+                "finance"
+            ),
+            Some(String::from("Match in tag"))
+        );
+        assert_eq!(
+            search_match_source_label_for_fields(
+                "Quarterly Report",
+                "Analyst",
+                "/tmp/reports/quarterly.pdf",
+                ["finance"],
+                ["Research Archive"],
+                "archive"
+            ),
+            Some(String::from("Match in folder"))
+        );
+        assert_eq!(
+            search_match_source_label_for_fields(
+                "Quarterly Report",
+                "Analyst",
+                "/tmp/reports/quarterly.pdf",
+                ["finance"],
+                ["Research Archive"],
+                "reports"
+            ),
+            Some(String::from("Match in path"))
+        );
+    }
+
+    #[test]
+    fn import_title_cleanup_rejects_poor_titles_and_cleans_spacing() {
+        assert_eq!(
+            clean_import_title("  Quarterly   Report  "),
+            Some(String::from("Quarterly Report"))
+        );
+        assert_eq!(clean_import_title("Untitled"), None);
+        assert_eq!(
+            title_from_path(Path::new("/tmp/Research Notes.pdf")),
+            Some(String::from("Research Notes"))
+        );
+    }
+
+    #[test]
+    fn file_manager_command_targets_parent_for_containing_folder() {
+        let path = PathBuf::from("/tmp/pdf-folio/report.pdf");
+
+        let (_, args) = file_manager_command(&path, false).unwrap();
+        assert!(args.iter().any(|arg| arg.contains("pdf-folio")));
+
+        let (program, reveal_args) = file_manager_command(&path, true).unwrap();
+        assert!(!program.is_empty());
+        assert!(!reveal_args.is_empty());
+    }
+
+    #[test]
+    fn duplicate_status_label_reports_unique_and_matching_count() {
+        assert_eq!(duplicate_status_label_for_count(0), "Unique content hash");
+        assert_eq!(duplicate_status_label_for_count(2), "2 matching duplicates");
+    }
+
+    #[test]
+    fn folder_smart_count_labels_include_progress_and_missing_state() {
+        let counts = FolderSmartCounts {
+            total: 12,
+            in_progress: 3,
+            missing: 1,
+        };
+
+        assert_eq!(
+            folder_meta_label(counts, 2),
+            "12 PDFs . 2 Folders . 3 reading . 1 missing"
+        );
+        assert_eq!(
+            folder_sidebar_count_label(counts),
+            "12 PDFs . 3 reading . 1 missing"
+        );
+        assert_eq!(folder_meta_label(FolderSmartCounts::default(), 0), "Empty");
+    }
+
+    #[test]
+    fn indeterminate_progress_value_stays_inside_progress_bar_range() {
+        for elapsed in [0.0, 0.25, 0.75, 1.5, 4.25, 12.0] {
+            let value = indeterminate_progress_value(elapsed);
+            assert!((0.0..=1.0).contains(&value));
+        }
+    }
+
+    #[test]
+    fn folder_drop_flash_expires_after_success_window() {
+        let folder_id = FolderId::new("reading");
+        let started_at = Instant::now();
+
+        assert!(folder_drop_flash_active_at(
+            &folder_id,
+            Some((&folder_id, started_at)),
+            started_at + Duration::from_millis(LIBRARY_FOLDER_DROP_FLASH_MS - 1)
+        ));
+        assert!(!folder_drop_flash_active_at(
+            &folder_id,
+            Some((&folder_id, started_at)),
+            started_at + Duration::from_millis(LIBRARY_FOLDER_DROP_FLASH_MS)
+        ));
     }
 
     #[test]

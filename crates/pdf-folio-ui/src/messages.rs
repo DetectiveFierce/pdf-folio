@@ -11,7 +11,7 @@ use pdf_folio_library::{
     EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
 };
 
-use crate::app::ThumbnailSize;
+use crate::app::{LibraryMetadataDensity, LibraryReadingFilter, ThumbnailSize};
 use crate::style::StyleBook;
 use crate::Settings;
 
@@ -134,6 +134,8 @@ pub enum ConfirmationAction {
     BulkDeleteFromLibrary,
     /// Clear display metadata overrides for one PDF in the details panel.
     ResetDetailsMetadata(EntryId),
+    /// Delete one folder without deleting PDFs on disk.
+    DeleteFolder(FolderId),
 }
 
 /// Top selection-toolbar actions chosen from compact dropdown menus.
@@ -288,6 +290,8 @@ pub enum Message {
     LibrarySortChanged(LibrarySortMode),
     /// Change the masonry grid card scale.
     LibraryGridZoomChanged(f32),
+    /// Change the amount of metadata shown in library cards and rows.
+    LibraryMetadataDensityChanged(LibraryMetadataDensity),
     /// Library view preferences were persisted.
     LibraryPreferencesSaved,
     /// Add an annotation.
@@ -304,6 +308,8 @@ pub enum Message {
     LibraryRefresh,
     /// A library operation failed.
     LibraryError(String),
+    /// A library operation completed with a user-facing status.
+    LibraryStatus(String),
     /// Open the native folder picker for bulk import.
     ImportFolderDialog,
     /// The native folder picker selected an import directory.
@@ -316,6 +322,10 @@ pub enum Message {
     OpenLibraryEntry(EntryId),
     /// A library entry was clicked.
     LibraryEntryClicked(EntryId),
+    /// A library entry selection checkbox was toggled.
+    EntryCheckboxToggled(EntryId),
+    /// The master visible-entry selection checkbox was clicked.
+    MasterCheckboxClicked,
     /// A library entry hover target changed.
     LibraryEntryHoverChanged(EntryId, bool),
     /// Animation frame for active UI tweens.
@@ -328,10 +338,18 @@ pub enum Message {
     BeginLibraryEntryDrag(EntryId),
     /// Cursor moved while dragging a library entry.
     LibraryEntryDragMoved(Point),
+    /// Begin dragging a folder for nesting.
+    BeginFolderDrag(FolderId),
+    /// Cursor moved while dragging a folder.
+    FolderDragMoved(Point),
+    /// A folder drop target changed while dragging PDFs.
+    FolderDropTargetChanged(Option<FolderId>),
     /// Auto-scroll timer tick while dragging a library entry.
     LibraryAutoScrollTick(Instant),
     /// Finish the active library entry drag.
     EndLibraryEntryDrag,
+    /// Finish the active folder drag.
+    EndFolderDrag,
     /// Manual entry ordering was persisted.
     ManualEntryOrderSaved,
     /// A library entry document was opened successfully.
@@ -375,8 +393,14 @@ pub enum Message {
     LibraryWatchEvent(LibraryWatchEvent),
     /// Tag filter changed.
     TagFilterChanged(Option<String>),
+    /// Reading-progress filter changed.
+    ReadingFilterChanged(Option<LibraryReadingFilter>),
+    /// Missing-files filter changed.
+    MissingFilterChanged(bool),
     /// Selected library folder changed.
     FolderSelected(Option<FolderId>),
+    /// Clear active library search, tag, folder, reading, and missing filters.
+    ClearLibraryFilters,
     /// Inline new folder name changed.
     NewFolderNameChanged(String),
     /// Open the new-folder dialog.
@@ -385,6 +409,24 @@ pub enum Message {
     CreateFolder,
     /// A folder was created.
     FolderCreated(FolderId),
+    /// Selected-folder rename input changed.
+    FolderRenameInputChanged(String),
+    /// Rename the selected folder.
+    RenameSelectedFolder,
+    /// Move the selected folder to the library root.
+    MoveSelectedFolderToRoot,
+    /// Move the selected folder up to its grandparent.
+    MoveSelectedFolderUp,
+    /// Move the selected folder earlier among its siblings.
+    MoveSelectedFolderEarlier,
+    /// Move the selected folder later among its siblings.
+    MoveSelectedFolderLater,
+    /// Request confirmation before deleting the selected folder.
+    RequestDeleteSelectedFolder,
+    /// Delete the selected folder after confirmation.
+    DeleteFolder(FolderId),
+    /// Folder metadata changed and the library should refresh.
+    FolderUpdated,
     /// Start inline tag entry for an item.
     StartTagEntry(EntryId),
     /// Inline tag text changed.
@@ -435,6 +477,16 @@ pub enum Message {
     SaveDetailsMetadata,
     /// Reset one details-panel entry to extracted PDF metadata.
     ResetDetailsMetadata(EntryId),
+    /// Reveal one PDF in the platform file manager where supported.
+    RevealEntryInFileManager(EntryId),
+    /// Open the containing folder for one PDF.
+    OpenEntryContainingFolder(EntryId),
+    /// Pick a replacement source file for a missing PDF.
+    RelinkMissingEntry(EntryId),
+    /// A replacement source file was chosen for a missing PDF.
+    RelinkFileSelected { entry_id: EntryId, path: PathBuf },
+    /// Relinking a missing PDF finished.
+    RelinkFinished { entry_id: EntryId, path: PathBuf },
     /// Metadata edit finished.
     MetadataEditFinished {
         entry_id: EntryId,
@@ -443,6 +495,13 @@ pub enum Message {
     },
     /// A bulk operation finished.
     BulkOperationFinished {
+        label: String,
+        updated: usize,
+        errors: Vec<String>,
+    },
+    /// A drag-to-folder assignment finished.
+    FolderAssignmentFinished {
+        folder_id: FolderId,
         label: String,
         updated: usize,
         errors: Vec<String>,
@@ -498,6 +557,10 @@ pub enum Shortcut {
     SelectAll,
     /// Open the selected library entry.
     OpenSelected,
+    /// Focus the library search field.
+    FocusSearch,
+    /// Focus the selected PDF title or selected folder name for rename.
+    RenameSelected,
     /// Delete selected library entries from metadata.
     DeleteSelected,
     /// Open the jump-to-page overlay.

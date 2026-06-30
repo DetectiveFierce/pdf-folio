@@ -92,6 +92,14 @@ pub enum Class {
     EmptyState,
     /// Library drag insertion marker.
     DragInsertionMarker,
+    /// Library entry selection checkbox.
+    SelectionCheckbox,
+    /// Library toolbar master selection checkbox.
+    MasterCheckbox,
+    /// Multi-selection drag stack ghost.
+    DragStackGhost,
+    /// Active folder target for PDF drag/drop assignment.
+    FolderDropTarget,
 }
 
 /// Visual state shared by components that do not expose an iced status directly.
@@ -136,7 +144,7 @@ impl ComponentState {
 
 impl Class {
     /// Number of semantic classes represented in style files.
-    pub const COUNT: usize = 42;
+    pub const COUNT: usize = 46;
 
     /// Stable index for style arrays.
     pub const fn index(self) -> usize {
@@ -183,6 +191,10 @@ impl Class {
             Self::EmptyState => 39,
             Self::DragInsertionMarker => 40,
             Self::FileTreeFoldButton => 41,
+            Self::SelectionCheckbox => 42,
+            Self::MasterCheckbox => 43,
+            Self::DragStackGhost => 44,
+            Self::FolderDropTarget => 45,
         }
     }
 }
@@ -383,6 +395,20 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
             tokens.focus,
             BorderWidth::NONE,
             Radius::SM,
+        ),
+        Class::SelectionCheckbox | Class::MasterCheckbox => (
+            tokens.surface_raised,
+            tokens.text_primary,
+            tokens.accent,
+            BorderWidth::HAIRLINE,
+            Radius::SM,
+        ),
+        Class::DragStackGhost | Class::FolderDropTarget => (
+            mix_color(tokens.surface_raised, tokens.accent, 0.18),
+            tokens.text_primary,
+            tokens.focus,
+            BorderWidth::HAIRLINE,
+            Radius::MD,
         ),
         Class::TagPill => (
             mix_color(tokens.surface, tokens.accent, 0.12),

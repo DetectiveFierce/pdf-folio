@@ -189,6 +189,10 @@ pub struct LibraryPreferences {
     pub grid_zoom: f32,
     /// Metadata fields visible in cards/rows.
     pub visible_metadata_fields: Vec<String>,
+    /// Whether the root library tree section is expanded.
+    pub library_tree_root_expanded: bool,
+    /// Folder tree nodes collapsed by the user.
+    pub collapsed_folder_ids: Vec<FolderId>,
 }
 
 impl Default for LibraryPreferences {
@@ -204,6 +208,8 @@ impl Default for LibraryPreferences {
                 String::from("page_count"),
                 String::from("file_size"),
             ],
+            library_tree_root_expanded: true,
+            collapsed_folder_ids: Vec::new(),
         }
     }
 }
@@ -434,6 +440,49 @@ impl Db {
             transaction.execute(
                 "UPDATE entries SET manual_order = ?1 WHERE id = ?2",
                 params![(index as i64 + 1) * MANUAL_ORDER_GAP, entry_id.as_str()],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Replaces the manual order of sibling folders under one parent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any folder is missing, does not belong to the requested parent, or
+    /// SQLite cannot write the order.
+    pub fn set_manual_folder_order(
+        &self,
+        parent_id: Option<&FolderId>,
+        folder_ids: &[FolderId],
+    ) -> Result<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        for (index, folder_id) in folder_ids.iter().enumerate() {
+            let actual_parent = transaction
+                .query_row(
+                    "SELECT parent_id FROM folders WHERE id = ?1",
+                    params![folder_id.as_str()],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .map(|parent| parent.map(FolderId::new))
+                .with_context(|| format!("Folder {} does not exist.", folder_id.as_str()))?;
+            if actual_parent.as_ref() != parent_id {
+                anyhow::bail!(
+                    "Folder {} does not belong to the requested parent.",
+                    folder_id.as_str()
+                );
+            }
+
+            transaction.execute(
+                "UPDATE folders SET manual_order = ?1, updated_at = ?2 WHERE id = ?3",
+                params![
+                    (index as i64 + 1) * MANUAL_ORDER_GAP,
+                    Utc::now().timestamp(),
+                    folder_id.as_str()
+                ],
             )?;
         }
         transaction.commit()?;
@@ -730,6 +779,19 @@ impl Db {
                 .map(ToOwned::to_owned)
                 .collect();
         }
+        if let Some(value) =
+            self.preference_with_connection(&connection, "library_tree_root_expanded")?
+        {
+            preferences.library_tree_root_expanded = value.parse().unwrap_or(true);
+        }
+        if let Some(value) = self.preference_with_connection(&connection, "collapsed_folder_ids")? {
+            preferences.collapsed_folder_ids = value
+                .split(',')
+                .map(str::trim)
+                .filter(|folder_id| !folder_id.is_empty())
+                .map(FolderId::new)
+                .collect();
+        }
 
         Ok(preferences)
     }
@@ -742,6 +804,12 @@ impl Db {
     pub fn save_library_preferences(&self, preferences: &LibraryPreferences) -> Result<()> {
         let connection = self.connection()?;
         let visible_metadata_fields = preferences.visible_metadata_fields.join(",");
+        let collapsed_folder_ids = preferences
+            .collapsed_folder_ids
+            .iter()
+            .map(FolderId::as_str)
+            .collect::<Vec<_>>()
+            .join(",");
         self.set_preference_with_connection(
             &connection,
             "sort_mode",
@@ -774,6 +842,16 @@ impl Db {
             &connection,
             "visible_metadata_fields",
             &visible_metadata_fields,
+        )?;
+        self.set_preference_with_connection(
+            &connection,
+            "library_tree_root_expanded",
+            &preferences.library_tree_root_expanded.to_string(),
+        )?;
+        self.set_preference_with_connection(
+            &connection,
+            "collapsed_folder_ids",
+            &collapsed_folder_ids,
         )?;
         Ok(())
     }
@@ -920,6 +998,20 @@ impl Db {
         connection.execute(
             "UPDATE entries SET missing = ?1 WHERE path = ?2",
             params![i64::from(missing), path.to_string_lossy()],
+        )?;
+        Ok(())
+    }
+
+    /// Updates an entry's source path and marks it present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot update the entry.
+    pub fn relink_entry_path(&self, entry_id: &EntryId, path: &Path) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "UPDATE entries SET path = ?1, missing = 0 WHERE id = ?2",
+            params![path.to_string_lossy(), entry_id.as_str()],
         )?;
         Ok(())
     }
@@ -1368,6 +1460,21 @@ mod tests {
     }
 
     #[test]
+    fn relinks_missing_entry_to_new_path() {
+        let db = test_db();
+        let id = EntryId::new("book");
+        db.insert_entry(&entry("book", "The Book")).unwrap();
+        db.set_missing(&id, true).unwrap();
+
+        let next_path = Path::new("/tmp/relinked-book.pdf");
+        db.relink_entry_path(&id, next_path).unwrap();
+
+        let entry = db.entry_by_path(next_path).unwrap().unwrap();
+        assert_eq!(entry.id, id);
+        assert!(!entry.missing);
+    }
+
+    #[test]
     fn folders_support_membership_nesting_and_cascade() {
         let db = test_db();
         db.insert_entry(&entry("a", "Alpha")).unwrap();
@@ -1410,9 +1517,67 @@ mod tests {
     }
 
     #[test]
+    fn folders_support_manual_sibling_reordering() {
+        let db = test_db();
+        let root_a = db.create_folder("Alpha", None).unwrap();
+        let root_b = db.create_folder("Beta", None).unwrap();
+        let root_c = db.create_folder("Gamma", None).unwrap();
+        let child_a = db.create_folder("Child A", Some(&root_a)).unwrap();
+        let child_b = db.create_folder("Child B", Some(&root_a)).unwrap();
+
+        db.set_manual_folder_order(None, &[root_c.clone(), root_a.clone(), root_b.clone()])
+            .unwrap();
+        db.set_manual_folder_order(Some(&root_a), &[child_b.clone(), child_a.clone()])
+            .unwrap();
+
+        let folders = db.get_folders().unwrap();
+        let root_order = folders
+            .iter()
+            .filter(|folder| folder.parent_id.is_none())
+            .map(|folder| folder.id.clone())
+            .collect::<Vec<_>>();
+        let child_order = folders
+            .iter()
+            .filter(|folder| folder.parent_id.as_ref() == Some(&root_a))
+            .map(|folder| folder.id.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(root_order, vec![root_c, root_a.clone(), root_b]);
+        assert_eq!(child_order, vec![child_b, child_a]);
+        assert!(db
+            .set_manual_folder_order(None, &[root_a, FolderId::new("missing")])
+            .is_err());
+    }
+
+    #[test]
+    fn folder_assignment_is_additive_across_folders() {
+        let db = test_db();
+        let entry_id = EntryId::new("paper");
+        db.insert_entry(&entry("paper", "Paper")).unwrap();
+
+        let first = db.create_folder("Reading", None).unwrap();
+        let second = db.create_folder("Research", None).unwrap();
+        db.add_entry_to_folder(&entry_id, &first).unwrap();
+        db.add_entry_to_folder(&entry_id, &second).unwrap();
+
+        let entry = db
+            .entry_by_path(Path::new("/tmp/paper.pdf"))
+            .unwrap()
+            .unwrap();
+        let folder_names = entry
+            .folders
+            .iter()
+            .map(|folder| folder.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(folder_names.contains(&"Reading"));
+        assert!(folder_names.contains(&"Research"));
+    }
+
+    #[test]
     fn library_preferences_round_trip() {
         let db = test_db();
         let folder = db.create_folder("Reading", None).unwrap();
+        let collapsed_folder = db.create_folder("Collapsed", None).unwrap();
         let preferences = LibraryPreferences {
             sort_mode: LibrarySortMode::TitleAsc,
             layout_mode: LibraryLayoutMode::List,
@@ -1420,6 +1585,8 @@ mod tests {
             sidebar_width: 220.0,
             grid_zoom: 1.24,
             visible_metadata_fields: vec![String::from("author"), String::from("progress")],
+            library_tree_root_expanded: false,
+            collapsed_folder_ids: vec![collapsed_folder.clone()],
         };
 
         db.save_library_preferences(&preferences).unwrap();
@@ -1434,5 +1601,7 @@ mod tests {
             loaded.visible_metadata_fields,
             vec![String::from("author"), String::from("progress")]
         );
+        assert!(!loaded.library_tree_root_expanded);
+        assert_eq!(loaded.collapsed_folder_ids, vec![collapsed_folder]);
     }
 }

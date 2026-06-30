@@ -209,6 +209,63 @@ pub fn progress_bar(value: f32, tokens: ThemeTokens) -> iced::widget::ProgressBa
         .style(move |_| progress_bar_style(tokens, Class::ProgressBar))
 }
 
+/// Selection state represented by the library master checkbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MasterCheckboxState {
+    /// No visible entries are selected.
+    None,
+    /// Some, but not all, visible entries are selected.
+    Partial,
+    /// Every visible entry is selected.
+    All,
+}
+
+/// Creates a library entry selection checkbox.
+pub fn selection_checkbox<'a, Message: Clone + 'a>(
+    checked: bool,
+    tokens: ThemeTokens,
+    on_toggle: Message,
+) -> iced::widget::Button<'a, Message> {
+    checkbox_button(
+        if checked { "✓" } else { "" },
+        tokens,
+        Class::SelectionCheckbox,
+    )
+    .on_press(on_toggle)
+}
+
+/// Creates a master selection checkbox for all visible library entries.
+pub fn master_checkbox<'a, Message: Clone + 'a>(
+    state: MasterCheckboxState,
+    tokens: ThemeTokens,
+    on_click: Message,
+) -> iced::widget::Button<'a, Message> {
+    let label = match state {
+        MasterCheckboxState::None => "",
+        MasterCheckboxState::Partial => "−",
+        MasterCheckboxState::All => "✓",
+    };
+    checkbox_button(label, tokens, Class::MasterCheckbox).on_press(on_click)
+}
+
+fn checkbox_button<'a, Message: Clone + 'a>(
+    label: &'static str,
+    tokens: ThemeTokens,
+    class: Class,
+) -> iced::widget::Button<'a, Message> {
+    button(
+        text(label)
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::BOLD))
+            .color(tokens.text_primary)
+            .align_x(iced::alignment::Horizontal::Center),
+    )
+    .width(Length::Fixed(24.0))
+    .height(Length::Fixed(24.0))
+    .padding(0)
+    .style(move |_, status| button_style(tokens, class, status))
+}
+
 /// Creates an error banner.
 pub fn error_banner<'a, Message: 'a>(
     message: impl Into<String>,

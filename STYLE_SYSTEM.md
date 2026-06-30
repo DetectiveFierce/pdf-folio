@@ -129,6 +129,33 @@ shadow can evolve without touching scroll or render math. Annotation toolbars, a
 popovers, presentation overlays, and minimap controls should reuse `Class::AnnotationToolbar`,
 `Class::AnnotationPopover`, `Class::PresentationOverlay`, and `Class::Minimap`.
 
+## Library Interaction Patterns
+
+Library cards, rows, folder targets, metadata controls, and bulk-action surfaces should first look
+for an existing class or helper before adding local styling. Selection state should use
+`LibraryCard` / `LibraryRow` selected states for the content surface and `SelectionCheckbox` or
+`MasterCheckbox` for checkbox affordances.
+
+Selection checkboxes are 24px logical hit targets. Grid cards place the checkbox as a top-left
+overlay on the thumbnail/media region so title text remains unobscured. List rows reserve a leading
+inline checkbox lane to avoid text shifting when selection mode becomes active. Checkbox helpers
+accept only checked state, tokens, and a toggle message; selection membership stays in app logic.
+
+Manual drag placeholders use `DragInsertionMarker` and the drag placeholder alpha layout token.
+Multi-selection drag previews use `DragStackGhost`: the UI layer composes a small stack from
+already-loaded card or row previews, while the style class controls the stack surface, border,
+badge, and theme contrast. Drag geometry, selected-entry ordering, target index calculation, and
+database persistence stay out of style helpers.
+
+Folder assignment targets use `FolderDropTarget` for the active drop surface. Folder-card and
+sidebar-row hit testing, dwell activation, and drag resolution belong in the drag state machine;
+the style class only supplies the visual highlight. Folder assignment is additive, so the visual
+pattern should communicate "add to this folder" rather than "move out of the current folder."
+
+Library errors and partial failures should render through `error_banner(...)` / `Class::ErrorBanner`
+instead of only appearing as status text. Progress for long-running bulk operations should use the
+shared `progress_bar(...)` helper and `Class::ProgressBar`.
+
 ## Anti-Patterns
 
 - Do not add raw `Color::from_rgb8(...)` values to ordinary view code.
