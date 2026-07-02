@@ -3,7 +3,7 @@ component "LibraryVirtualization" {
 }
 
 component "LibraryControlBar" {
-    normal background="#160F07" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
+    normal background="#160F07" text="#C8B89A" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
     normal background="#F7F3EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
 }
 
@@ -18,7 +18,7 @@ component "LibrarySearchInput" {
 }
 
 component "LibrarySortDropdown" {
-    normal background="#201409" text="#DDD0BA" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
+    normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
     hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
     pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
 
@@ -29,7 +29,7 @@ component "LibrarySortDropdown" {
 
 component "LibraryViewToggle" {
     normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
-    hovered background="#2B1D0E" text="#DDD0BA" border="#D4A85359" theme="espresso"
+    hovered background="#2B1D0E" text="#C8B89A" border="#D4A85359" theme="espresso"
     pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
 
     normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
@@ -38,7 +38,7 @@ component "LibraryViewToggle" {
 }
 
 component "LibraryImportButton" {
-    normal background="#24180B" text="#DDD0BA" border="#D4A85340" border_width=1 radius=6 theme="espresso"
+    normal background="#24180B" text="#C8B89A" border="#D4A85340" border_width=1 radius=6 theme="espresso"
     hovered background="#30220F" text="#D4A853" border="#D4A85373" theme="espresso"
     pressed background="#3A2912" text="#D4A853" border="#D4A853" theme="espresso"
 

@@ -5,5 +5,5 @@ pub mod document;
 pub mod renderer;
 
 pub use annotations::{Annotation, AnnotationId, AnnotationKind, ColorRgba, PagePoint, PageRect};
-pub use document::{OutlineNode, PdfDoc, RenderedPage};
+pub use document::{OutlineNode, PageTextChar, PageTextLayer, PdfDoc, RenderedPage, TextRect};
 pub use renderer::{TileCache, TileKey};

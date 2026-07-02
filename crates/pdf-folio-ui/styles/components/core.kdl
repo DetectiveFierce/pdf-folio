@@ -20,7 +20,7 @@ component "MenuBar" {
 
 component "MenuButton" {
     normal background="#0E0904" text="#8B6E52" border="#00000000" border_width=0 radius=0 theme="espresso"
-    hovered background="#160F07" text="#DDD0BA" border="#00000000" border_width=0 theme="espresso"
+    hovered background="#160F07" text="#C8B89A" border="#00000000" border_width=0 theme="espresso"
     pressed background="#211609" text="#D4A853" border="#D4A853" border_width=0 theme="espresso"
     active background="#0E0904" text="#D4A853" border="#00000000" border_width=0 radius=0 theme="espresso"
 

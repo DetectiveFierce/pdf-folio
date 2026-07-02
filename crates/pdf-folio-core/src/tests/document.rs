@@ -67,6 +67,25 @@ fn extracts_fixture_text() -> Result<()> {
 }
 
 #[test]
+fn extracts_fixture_text_layer_with_character_bounds() -> Result<()> {
+    let doc = PdfDoc::open(&fixture_pdf())?;
+    let layer = doc.text_layer(0)?;
+
+    assert!(!layer.chars.is_empty());
+    assert!(layer.width_points > 0.0);
+    assert!(layer.height_points > 0.0);
+    assert!(layer.chars.iter().any(|character| character.text == "P"));
+    assert!(layer.chars.iter().any(|character| {
+        character.bounds.width > 0.0
+            && character.bounds.height > 0.0
+            && character.bounds.x >= 0.0
+            && character.bounds.y >= 0.0
+    }));
+
+    Ok(())
+}
+
+#[test]
 fn returns_empty_outline_for_fixture_without_bookmarks() -> Result<()> {
     let doc = PdfDoc::open(&fixture_pdf())?;
 

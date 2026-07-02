@@ -30,6 +30,9 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
             (_, Some("g") | Some("G")) if modifiers.control() => {
                 Some(Message::ShortcutPressed(Shortcut::Jump))
             }
+            (_, Some("c") | Some("C")) if modifiers.control() => {
+                Some(Message::ShortcutPressed(Shortcut::Copy))
+            }
             (_, Some("f") | Some("F")) if modifiers.control() => {
                 Some(Message::ShortcutPressed(Shortcut::FocusSearch))
             }

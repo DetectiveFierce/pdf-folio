@@ -853,7 +853,7 @@ impl FontWeight {
 }
 
 /// Primary application font family.
-pub const UI_FONT_FAMILY: &str = "Inter";
+pub const UI_FONT_FAMILY: &str = "IBM Plex Sans";
 /// Display font family for bookish titles and brand marks.
 pub const DISPLAY_FONT_FAMILY: &str = "Noto Serif";
 
