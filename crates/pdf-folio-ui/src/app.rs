@@ -2424,6 +2424,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.dismissed_document_errors.insert(error);
             }
             app.document_error = None;
+            return app.request_visible_pages();
         }
         Message::PageRendered {
             key,
@@ -2536,6 +2537,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if let Some(error) = app.library_error.take() {
                 app.dismissed_library_errors.insert(error);
             }
+            return scroll_library_to_offset_task(app.library_scroll_offset);
         }
         Message::LibraryStatus(status) => {
             app.library_status = Some(status);
