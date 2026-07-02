@@ -1,0 +1,27 @@
+[package]
+name = "iced_widget"
+description = "A minimal pdf-folio patch layer for iced_widget"
+version = "0.14.2"
+edition = "2024"
+authors = ["Héctor Ramón Jiménez <hector@hecrj.dev>"]
+license = "MIT"
+repository = "https://github.com/iced-rs/iced"
+homepage = "https://iced.rs"
+categories = ["gui"]
+keywords = ["gui", "ui", "graphics", "interface", "widgets"]
+
+[features]
+advanced = ["iced_widget_upstream/advanced"]
+canvas = ["iced_widget_upstream/canvas"]
+crisp = ["iced_widget_upstream/crisp"]
+highlighter = ["iced_widget_upstream/highlighter"]
+image = ["iced_widget_upstream/image"]
+lazy = ["iced_widget_upstream/lazy"]
+markdown = ["iced_widget_upstream/markdown"]
+qr_code = ["iced_widget_upstream/qr_code"]
+svg = ["iced_widget_upstream/svg"]
+wgpu = ["iced_widget_upstream/wgpu"]
+
+[dependencies]
+iced_widget_upstream = { package = "iced_widget", git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+log = "0.4"

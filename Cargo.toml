@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/iced-widget-patch",
     "crates/pdf-folio-core",
     "crates/pdf-folio-library",
     "crates/pdf-folio-main",
@@ -39,4 +40,17 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 wasmtime = "46.0.1"
 
 [patch.crates-io]
-iced_widget = { path = "vendor/iced_widget-0.14.2" }
+# The local `iced_widget` patch re-exports upstream iced_widget from this exact
+# revision and overrides only `scrollable`. Keep the supporting iced crates on
+# the same source so Rust sees one coherent set of iced core/renderer types.
+iced_core = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_debug = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_futures = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_graphics = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_highlighter = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_renderer = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_runtime = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_tiny_skia = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_wgpu = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_winit = { git = "https://github.com/iced-rs/iced", rev = "54abf81d13fec06d4d9ac754b03ce2c3313e8a1f" }
+iced_widget = { path = "crates/iced-widget-patch" }
