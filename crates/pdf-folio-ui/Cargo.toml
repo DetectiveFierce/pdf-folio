@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+path = "src/app.rs"
+
 [dependencies]
 anyhow.workspace = true
 iced.workspace = true
