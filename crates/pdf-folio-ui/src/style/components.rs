@@ -1,6 +1,6 @@
 //! Styled widget constructors for common UI pieces.
 
-use iced::widget::{button, container, progress_bar as iced_progress_bar, text, text_input};
+use iced::widget::{button, container, progress_bar as iced_progress_bar, text, text_input, Svg};
 use iced::{Element, Length};
 
 use super::classes::{
@@ -11,6 +11,8 @@ use super::side_border::side_border;
 use super::tokens::{
     ui_font, ContentAlignment, FontSize, FontWeight, Spacing, TextAlignment, ThemeTokens,
 };
+
+const CHECK_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"##;
 
 /// Creates text with semantic alignment control.
 pub fn aligned_text<'a>(
@@ -227,7 +229,7 @@ pub fn selection_checkbox<'a, Message: Clone + 'a>(
     on_toggle: Message,
 ) -> iced::widget::Button<'a, Message> {
     checkbox_button(
-        if checked { "✓" } else { "" },
+        selection_checkbox_mark(checked, tokens),
         tokens,
         Class::SelectionCheckbox,
     )
@@ -245,25 +247,54 @@ pub fn master_checkbox<'a, Message: Clone + 'a>(
         MasterCheckboxState::Partial => "−",
         MasterCheckboxState::All => "✓",
     };
-    checkbox_button(label, tokens, Class::MasterCheckbox).on_press(on_click)
+    checkbox_button(
+        checkbox_text_mark(label, tokens, FontSize::MD),
+        tokens,
+        Class::MasterCheckbox,
+    )
+    .on_press(on_click)
 }
 
 fn checkbox_button<'a, Message: Clone + 'a>(
-    label: &'static str,
+    content: Element<'a, Message>,
     tokens: ThemeTokens,
     class: Class,
 ) -> iced::widget::Button<'a, Message> {
-    button(
-        text(label)
-            .size(FontSize::SM)
-            .font(ui_font(FontWeight::BOLD))
-            .color(tokens.text_primary)
-            .align_x(iced::alignment::Horizontal::Center),
-    )
-    .width(Length::Fixed(24.0))
-    .height(Length::Fixed(24.0))
-    .padding(0)
-    .style(move |_, status| button_style(tokens, class, status))
+    button(container(content).center(Length::Fill))
+        .width(Length::Fixed(24.0))
+        .height(Length::Fixed(24.0))
+        .padding(0)
+        .style(move |_, status| button_style(tokens, class, status))
+}
+
+fn selection_checkbox_mark<'a, Message: 'a>(
+    checked: bool,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    if checked {
+        Svg::new(iced::widget::svg::Handle::from_memory(CHECK_SVG))
+            .width(18.0)
+            .height(18.0)
+            .style(move |_, _| iced::widget::svg::Style {
+                color: Some(tokens.text_primary),
+            })
+            .into()
+    } else {
+        container("").width(18.0).height(18.0).into()
+    }
+}
+
+fn checkbox_text_mark<'a, Message: 'a>(
+    label: &'static str,
+    tokens: ThemeTokens,
+    mark_size: u32,
+) -> Element<'a, Message> {
+    text(label)
+        .size(mark_size)
+        .font(ui_font(FontWeight::BOLD))
+        .color(tokens.text_primary)
+        .align_x(iced::alignment::Horizontal::Center)
+        .into()
 }
 
 /// Creates an error banner.

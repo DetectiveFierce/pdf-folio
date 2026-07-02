@@ -44,22 +44,22 @@ component "SidebarTab" {
     }
 
     normal theme="espresso" {
-        colors background="#090602" text="$text_secondary" border="#00000000"
+        colors background="#090602" text="#725A42" border="#00000000"
         border width=0 color="#00000000"
         radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
     }
     hovered theme="espresso" {
-        colors background="#191006" text="$text_primary" border="#00000000"
+        colors background="#191006" text="#9F805E" border="#00000000"
         border width=0 color="#00000000"
         radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
     }
     pressed theme="espresso" {
-        colors background="#251607" text="$text_primary" border="#00000000"
+        colors background="#251607" text="#AA8A64" border="#00000000"
         border width=0 color="#00000000"
         radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
     }
     active theme="espresso" {
-        colors background="#201409" text="$text_primary" border="#00000000"
+        colors background="#201409" text="#B0926D" border="#00000000"
         border width=0 color="#00000000"
         radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
     }
@@ -163,22 +163,58 @@ component "FileTreeFoldButton" {
 }
 
 component "SidebarDetailPanel" {
-    normal background="#201409" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal background="#201409" text="#B99C78" border="#00000000" border_width=0 radius=0 theme="espresso"
     normal background="#FCFAF5" text="#261E14" border="#00000000" border_width=0 radius=0 theme="light"
 }
 
 component "SidebarDetailRow" {
-    normal background="#160F07" text="#DDD0BA" border="#C8B89A12" border_width=1 radius=5 theme="espresso"
-    hovered background="#1B1208" text="#DDD0BA" border="#C8B89A26" theme="espresso"
+    normal background="#160F07" text="#B99C78" border="#C8B89A14" border_width=1 radius=6 theme="espresso"
+    hovered background="#1B1208" text="#C6AD8D" border="#C8B89A26" theme="espresso"
 
     normal background="#F6F2EA" text="#261E14" border="#D8CEBC80" border_width=1 radius=5 theme="light"
     hovered background="#FCFAF5" text="#261E14" border="#C8B89A" theme="light"
 }
 
+component "SidebarFolderCard" {
+    normal background="#160F07" text="#A88A66" border="#C8B89A14" border_width=1 radius=6 theme="espresso"
+    hovered background="#1B1208" text="#B99C78" border="#C8B89A26" theme="espresso"
+
+    normal background="#F6F2EA" text="#261E14" border="#D8CEBC80" border_width=1 radius=6 theme="light"
+    hovered background="#FCFAF5" text="#261E14" border="#C8B89A" theme="light"
+}
+
+component "SidebarFolderCardTitle" {
+    normal background="#00000000" text="#83684B" border="#00000000" border_width=0 radius=0 theme="espresso"
+
+    normal background="#00000000" text="#745F46" border="#00000000" border_width=0 radius=0 theme="light"
+}
+
+component "SidebarFolderTextInput" {
+    normal background="#120C06" text="#947657" border="#C8B89A24" border_width=1 radius=7 theme="espresso"
+    hovered background="#171007" text="#A88A66" border="#C8B89A34" border_width=1 radius=7 theme="espresso"
+    focused background="#1A1108" text="#A88A66" border="#A9823D80" border_width=1 radius=7 theme="espresso"
+
+    normal background="#F6F2EA" text="#4B3A28" border="#D8CEBC" border_width=1 radius=7 theme="light"
+    hovered background="#FCFAF5" text="#4B3A28" border="#C8B89A" border_width=1 radius=7 theme="light"
+    focused background="#FCFAF5" text="#4B3A28" border="#9C732B66" border_width=1 radius=7 theme="light"
+}
+
+component "SidebarFolderActionButton" {
+    normal background="#1E1409" text="#A98B67" border="#C8B89A26" border_width=1 radius=6 theme="espresso"
+    hovered background="#2B1D0E" text="#B99C78" border="#D4A85340" theme="espresso"
+    pressed background="#352511" text="#C49C4E" border="#D4A85399" theme="espresso"
+    disabled background="#181008" text="#6E563C" border="#C8B89A18" border_width=1 radius=6 theme="espresso"
+
+    normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
+    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+    disabled background="#F0EAE0" text="#9B8A72" border="#D8CEBC80" border_width=1 radius=6 theme="light"
+}
+
 component "SidebarActionButton" {
-    normal background="#1E1409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
-    hovered background="#2B1D0E" text="#DDD0BA" border="#D4A85359" theme="espresso"
-    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+    normal background="#1E1409" text="#B99C78" border="#C8B89A26" border_width=1 radius=6 theme="espresso"
+    hovered background="#2B1D0E" text="#CDB893" border="#D4A85340" theme="espresso"
+    pressed background="#352511" text="#D4A853" border="#D4A853B3" theme="espresso"
 
     normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
     hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"

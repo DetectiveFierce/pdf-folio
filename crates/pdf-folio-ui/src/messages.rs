@@ -225,6 +225,8 @@ pub enum Message {
     DocumentOpened(Arc<PdfDoc>),
     /// A document operation failed.
     DocumentError(String),
+    /// Dismiss the current document error banner.
+    DismissDocumentError,
     /// A page render finished.
     PageRendered {
         key: TileKey,
@@ -308,6 +310,8 @@ pub enum Message {
     LibraryRefresh,
     /// A library operation failed.
     LibraryError(String),
+    /// Dismiss the current library error banner.
+    DismissLibraryError,
     /// A library operation completed with a user-facing status.
     LibraryStatus(String),
     /// Open the native folder picker for bulk import.

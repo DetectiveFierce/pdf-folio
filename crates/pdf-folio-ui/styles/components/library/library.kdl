@@ -64,11 +64,15 @@ component "LibraryCard" {
     hovered background="#2B1D0E" text="#DDD0BA" border="#C8B89A2E" theme="espresso"
     selected background="#30230F" text="#DDD0BA" border="#D4A853" border_width=1.5 theme="espresso"
     pressed background="#352511" border="#D4A853" theme="espresso"
+    active background="#23180C" text="#DDD0BA" border="#D4A853" border_width=1 radius=8 theme="espresso"
+    disabled background="#120C05" text="#8B6E52" border="#1E160B" border_width=1 radius=8 theme="espresso"
 
     normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
     hovered background="#FCFAF5" text="#261E14" border="#C8B89A" theme="light"
     selected background="#EFE3CF" text="#261E14" border="#9C732B" theme="light"
     pressed background="#E8D8BD" border="#9C732B" theme="light"
+    active background="#F6F2EA" text="#261E14" border="#9C732B" border_width=1 radius=8 theme="light"
+    disabled background="#EFECE5" text="#745F46" border="#E1D8C9" border_width=1 radius=8 theme="light"
 }
 
 component "LibraryFolderCard" {
@@ -77,10 +81,12 @@ component "LibraryFolderCard" {
     normal background="#211609" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
     hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
     selected background="#30230F" text="#D4A853" border="#D4A853" theme="espresso"
+    disabled background="#120C05" text="#8B6E52" border="#1E160B" border_width=1 radius=8 theme="espresso"
 
     normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
     hovered background="#FCFAF5" text="#9C732B" border="#9C732B66" theme="light"
     selected background="#EFE3CF" text="#9C732B" border="#9C732B" theme="light"
+    disabled background="#EFECE5" text="#745F46" border="#E1D8C9" border_width=1 radius=8 theme="light"
 }
 
 component "LibraryRow" {
@@ -89,10 +95,14 @@ component "LibraryRow" {
     normal background="#1B1208" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=6 theme="espresso"
     hovered background="#23180C" text="#DDD0BA" border="#C8B89A2E" theme="espresso"
     selected background="#30230F" text="#DDD0BA" border="#D4A853" border_width=1.5 theme="espresso"
+    active background="#23180C" text="#DDD0BA" border="#D4A853" border_width=1 radius=6 theme="espresso"
+    disabled background="#120C05" text="#8B6E52" border="#1E160B" border_width=1 radius=6 theme="espresso"
 
     normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
     hovered background="#F6F2EA" text="#261E14" border="#C8B89A" theme="light"
     selected background="#EFE3CF" text="#261E14" border="#9C732B" theme="light"
+    active background="#FCFAF5" text="#261E14" border="#9C732B" border_width=1 radius=6 theme="light"
+    disabled background="#EFECE5" text="#745F46" border="#E1D8C9" border_width=1 radius=6 theme="light"
 }
 
 component "TagPill" {
