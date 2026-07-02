@@ -37,3 +37,6 @@ tokio = { version = "1.52.3", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 wasmtime = "46.0.1"
+
+[patch.crates-io]
+iced_widget = { path = "vendor/iced_widget-0.14.2" }

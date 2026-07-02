@@ -4,14 +4,15 @@ use crate::menu::{
     app_menu_capture_layer, library_sidebar_tab_label, selection_menu_capture_layer,
     view_app_menu_bar, view_app_menu_dropdown, view_selection_menu_dropdown,
 };
-use crate::viewer::canvas::ViewerCanvas;
+use crate::viewer::canvas::{ViewerCanvas, ViewerSelectionOverlay};
 use crate::viewer::outline::{view_jump_dialog, view_sidebar};
 use crate::*;
+use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{canvas, column, row, stack};
 
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens(&app.style_book);
-    let base_content: Element<'_, Message> = if app.doc.is_some() {
+    let base_content: Element<'_, Message> = if app.mode == AppMode::Viewer && app.doc.is_some() {
         let sidebar: Element<'_, Message> = if app.toc_open {
             view_sidebar(app).into()
         } else {
@@ -19,6 +20,12 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         };
 
         let viewer = canvas(ViewerCanvas { app })
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let selection_overlay = canvas(ViewerSelectionOverlay { app })
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let viewer_stack = stack![viewer, selection_overlay]
             .width(Length::Fill)
             .height(Length::Fill);
         let mut main = column![].spacing(0);
@@ -32,10 +39,11 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         if app.jump_dialog_open {
             main = main.push(view_jump_dialog(app));
         }
-        main = main.push(viewer);
+        main = main.push(viewer_stack);
 
         column![
             view_app_menu_bar(app),
+            view_viewer_toolbar(app),
             row![sidebar, main.width(Length::Fill)].height(Length::Fill)
         ]
         .into()
@@ -128,6 +136,94 @@ pub(crate) fn dismissible_error_banner<'a>(
     .into()
 }
 
+fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.theme.tokens(&app.style_book);
+    let page_count = app.doc.as_ref().map_or(0, |doc| doc.page_count());
+    let current_page = if page_count == 0 {
+        0
+    } else {
+        app.current_page().saturating_add(1).min(page_count)
+    };
+    let document_title = app
+        .doc
+        .as_ref()
+        .and_then(|doc| doc.path().file_name())
+        .and_then(|file_name| file_name.to_str())
+        .unwrap_or("Open PDF");
+    let toc_label = if app.toc_open {
+        "Hide Contents"
+    } else {
+        "Contents"
+    };
+    let theme_label = match app.theme {
+        AppTheme::Light => "Dark",
+        AppTheme::Dark => "Light",
+    };
+
+    let mut toolbar = row![
+        toolbar_button("Library", tokens).on_press(Message::BackToLibrary),
+        toolbar_button("Open PDF", tokens).on_press(Message::OpenFileDialog),
+        toolbar_button(toc_label, tokens).on_press(Message::ToggleSidebar),
+        container(
+            text(document_title)
+                .size(FontSize::MD)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary)
+                .wrapping(Wrapping::None)
+        )
+        .width(Length::Fill)
+        .center_y(Length::Shrink),
+        text(format!("{current_page} / {page_count}"))
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary)
+            .wrapping(Wrapping::None),
+        toolbar_button("Go to Page", tokens).on_press(Message::OpenJumpDialog),
+        icon_button("-", tokens).on_press(Message::ZoomOut),
+        text(format!(
+            "{}%",
+            (f32::from(app.zoom_width) / 8.0).round() as u16
+        ))
+        .size(FontSize::MD)
+        .font(ui_font(FontWeight::MEDIUM))
+        .color(tokens.text_secondary)
+        .wrapping(Wrapping::None),
+        icon_button("+", tokens).on_press(Message::ZoomIn),
+    ];
+
+    if let Some(selection) = app.viewer_text_selection {
+        let (start, end) = selection.ordered();
+        let label = if start.page == end.page {
+            let count = end.char_index.saturating_sub(start.char_index) + 1;
+            format!("{count} char{} selected", if count == 1 { "" } else { "s" })
+        } else {
+            format!("{} pages selected", end.page.saturating_sub(start.page) + 1)
+        };
+        toolbar = toolbar
+            .push(
+                text(label)
+                    .size(FontSize::SM)
+                    .font(ui_font(FontWeight::MEDIUM))
+                    .color(tokens.text_secondary)
+                    .wrapping(Wrapping::None),
+            )
+            .push(toolbar_button("Copy", tokens).on_press(Message::CopyViewerTextSelection))
+            .push(toolbar_button("Clear", tokens).on_press(Message::ClearViewerTextSelection));
+    }
+
+    let toolbar = toolbar
+        .push(toolbar_button(theme_label, tokens).on_press(Message::ThemeToggled))
+        .spacing(Spacing::SM)
+        .padding([Spacing::SM, Spacing::MD])
+        .height(app.layout().toolbar_height)
+        .align_y(iced::Alignment::Center);
+
+    container(toolbar)
+        .width(Length::Fill)
+        .style(move |_| container_style(tokens, Class::Toolbar))
+        .into()
+}
+
 pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens(&app.style_book);
     let entries = app.visible_library_entries();
@@ -145,7 +241,7 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             tokens,
         ));
     }
-    let header = header
+    let mut header = header
         .push(
             search_input_with_class(
                 "Search library",
@@ -173,7 +269,11 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             .menu_style(move |_| menu_style_for_class(tokens, Class::LibrarySortDropdown)),
         )
         .push(library_layout_toggle_button(app, tokens))
-        .push(library_metadata_density_picker(app, tokens))
+        .push(library_metadata_density_picker(app, tokens));
+    if app.doc.is_some() {
+        header = header.push(toolbar_button("Viewer", tokens).on_press(Message::BackToViewer));
+    }
+    let header = header
         .push(library_new_folder_button(tokens).on_press(Message::OpenCreateFolderDialog))
         .spacing(Spacing::MD)
         .align_y(iced::Alignment::Center);
@@ -371,35 +471,27 @@ pub(crate) fn library_quick_filter_chips<'a>(
 ) -> Element<'a, Message> {
     let mut chips = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
 
-    for filter in LIBRARY_READING_FILTER_OPTIONS {
-        let active = app.active_reading_filter == Some(filter);
-        let label = filter.label();
-        let next = if active { None } else { Some(filter) };
-        let chip = tag_pill(label, tokens)
-            .on_press(Message::ReadingFilterChanged(next))
-            .padding([Spacing::XS, Spacing::MD])
-            .style(move |_, status| {
-                if active {
-                    crate::style::button_style(tokens, Class::LibraryImportButton, status)
-                } else {
-                    crate::style::button_style(tokens, Class::TagPill, status)
-                }
-            });
-        chips = chips.push(chip);
-    }
-
     let missing_active = app.missing_filter_active;
+    let library_menu_text = tokens.class_styles[Class::LibraryControlBar.index()]
+        .resolve(ComponentState::Normal)
+        .text_color
+        .unwrap_or(tokens.text_secondary);
     chips = chips.push(
-        tag_pill("Missing", tokens)
-            .on_press(Message::MissingFilterChanged(!missing_active))
-            .padding([Spacing::XS, Spacing::MD])
-            .style(move |_, status| {
-                if missing_active {
-                    crate::style::button_style(tokens, Class::LibraryImportButton, status)
-                } else {
-                    crate::style::button_style(tokens, Class::TagPill, status)
-                }
-            }),
+        button(
+            text("Missing")
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(library_menu_text),
+        )
+        .on_press(Message::MissingFilterChanged(!missing_active))
+        .padding([Spacing::XS, Spacing::MD])
+        .style(move |_, status| {
+            if missing_active {
+                crate::style::button_style(tokens, Class::LibraryImportButton, status)
+            } else {
+                crate::style::button_style(tokens, Class::TagPill, status)
+            }
+        }),
     );
 
     chips.into()
@@ -1287,8 +1379,9 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
     };
 
     let body_scroll = scrollable(body)
+        .direction(sidebar_scroll_direction())
         .height(Length::Fill)
-        .style(move |_, status| scrollable_style(tokens, Class::Sidebar, status));
+        .style(move |_, status| sidebar_scrollable_style(tokens, status));
 
     let padded_body = container(body_scroll)
         .height(Length::Fill)
@@ -1646,13 +1739,23 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
 
     container(
         scrollable(content)
+            .direction(sidebar_scroll_direction())
             .height(Length::Fill)
-            .style(move |_, status| scrollable_style(tokens, Class::Sidebar, status)),
+            .style(move |_, status| sidebar_scrollable_style(tokens, status)),
     )
     .width(Length::Fill)
     .height(Length::Fill)
     .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
     .into()
+}
+
+fn sidebar_scroll_direction() -> Direction {
+    Direction::Vertical(
+        Scrollbar::new()
+            .width(4.0)
+            .scroller_width(2.0)
+            .anchor(Anchor::End),
+    )
 }
 
 pub(crate) fn view_multi_selection_sidebar<'a>(
@@ -2032,7 +2135,7 @@ pub(crate) fn sidebar_chevron_button<'a>(
         .width(18.0)
         .height(18.0)
         .style(move |_, _| iced::widget::svg::Style {
-            color: Some(tokens.text_primary),
+            color: Some(tokens.text_secondary),
         });
     let button = button(
         container(icon)
@@ -2217,7 +2320,7 @@ pub(crate) fn library_new_folder_button<'a>(
         text("New folder")
             .size(FontSize::MD)
             .font(ui_font(FontWeight::MEDIUM))
-            .color(tokens.text_primary),
+            .color(tokens.text_secondary),
     )
     .padding([Spacing::SM, Spacing::LG])
     .style(move |_, status| crate::style::button_style(tokens, Class::LibraryImportButton, status))
@@ -2292,19 +2395,11 @@ pub(crate) fn library_entry_card<'a>(
         .clone()
         .or_else(|| entry.author.clone())
         .unwrap_or_else(|| String::from("Unknown author"));
-    let opened = last_opened_label(&entry);
     let metadata_label = library_card_metadata_label(app.library_metadata_density, &entry);
     let search_match = library_search_match_label(app, &entry, &entry_id);
     let content_alpha = library_entry_content_alpha(app, mode);
     let text_secondary = with_alpha(tokens.text_secondary, content_alpha);
     let accent = with_alpha(tokens.accent, content_alpha);
-    let activity_is_match = search_match.is_some();
-    let activity_label = search_match.unwrap_or(opened);
-    let activity_color = if activity_is_match {
-        accent
-    } else {
-        text_secondary
-    };
     let progress_value = progress_fraction(&entry);
     let media = card_thumbnail_media(app, &entry_id, tokens, content_alpha);
     let title_font_size = app.library_card_title_font_size();
@@ -2313,8 +2408,8 @@ pub(crate) fn library_entry_card<'a>(
     let author = truncate_for_width_with_font(&author, text_width, 0.0, metadata_font_size);
     let metadata_label = metadata_label
         .map(|label| truncate_for_width_with_font(&label, text_width, 0.0, metadata_font_size));
-    let activity_label =
-        truncate_for_width_with_font(&activity_label, text_width, 0.0, metadata_font_size);
+    let search_match = search_match
+        .map(|label| truncate_for_width_with_font(&label, text_width, 0.0, metadata_font_size));
     let hover_progress = if mode == LibraryEntryRenderMode::Normal {
         app.library_card_hover_progress(&entry_id)
     } else {
@@ -2343,19 +2438,16 @@ pub(crate) fn library_entry_card<'a>(
                 .wrapping(Wrapping::None),
         );
     }
-    info = info
-        .push(
-            text(activity_label)
+    if let Some(search_match) = search_match {
+        info = info.push(
+            text(search_match)
                 .size(metadata_font_size)
-                .font(ui_font(if activity_is_match {
-                    FontWeight::MEDIUM
-                } else {
-                    FontWeight::REGULAR
-                }))
-                .color(activity_color)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(accent)
                 .wrapping(Wrapping::None),
-        )
-        .push(progress_bar(progress_value, tokens));
+        );
+    }
+    info = info.push(progress_bar(progress_value, tokens));
 
     if mode == LibraryEntryRenderMode::Normal && app.tag_entry_id.as_ref() == Some(&entry_id) {
         info = info.push(

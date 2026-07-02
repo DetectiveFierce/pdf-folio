@@ -96,16 +96,16 @@ pub(crate) fn app_menu_button<'a>(
     tokens: ThemeTokens,
     labels: &'a crate::style::AppLabelTokens,
 ) -> Element<'a, Message> {
+    let menu_text_color = tokens.class_styles[Class::LibraryControlBar.index()]
+        .resolve(ComponentState::Normal)
+        .text_color
+        .unwrap_or(tokens.text_secondary);
     button(
         container(
             text(app_menu_label(labels, menu))
                 .size(FontSize::MD)
                 .font(ui_font(FontWeight::MEDIUM))
-                .color(if active {
-                    tokens.accent
-                } else {
-                    tokens.text_secondary
-                })
+                .color(menu_text_color)
                 .wrapping(Wrapping::None),
         )
         .height(Length::Shrink)

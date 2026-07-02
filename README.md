@@ -106,7 +106,7 @@ The project is currently organized as a Rust workspace with separate crates for 
 - Dark and light themes.
 - Resizable library sidebar.
 - Collapsible library/sidebar panels.
-- Bundled Geist Mono Nerd Font Propo font family for consistent UI typography.
+- Bundled IBM Plex Sans font family for consistent UI typography.
 - Native file and folder dialogs through `rfd`.
 - Keyboard shortcuts for common actions including:
   - Zoom in/out/reset
@@ -241,4 +241,3 @@ The workspace package metadata declares:
 ```text
 MIT OR Apache-2.0
 ```
-

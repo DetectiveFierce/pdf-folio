@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use iced::keyboard;
 use iced::Point;
-use pdf_folio_core::{Annotation, AnnotationId, PdfDoc, TileKey};
+use pdf_folio_core::{Annotation, AnnotationId, PageTextLayer, PdfDoc, TileKey};
 use pdf_folio_library::{
     EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
 };
@@ -277,6 +277,23 @@ pub enum Message {
     ToggleOutlineNode(Vec<usize>),
     /// Open the jump-to-page overlay.
     OpenJumpDialog,
+    /// A page text layer was extracted.
+    ViewerTextLayerLoaded {
+        page: u16,
+        layer: Arc<PageTextLayer>,
+    },
+    /// A page text-layer extraction failed.
+    ViewerTextLayerError { page: u16, error: String },
+    /// Start selecting PDF text at the character under the cursor.
+    ViewerTextSelectionStarted { page: u16, char_index: usize },
+    /// Extend PDF text selection to the character under the cursor.
+    ViewerTextSelectionChanged { page: u16, char_index: usize },
+    /// Finish the active PDF text selection drag.
+    ViewerTextSelectionEnded,
+    /// Clear the current PDF text selection.
+    ClearViewerTextSelection,
+    /// Copy the currently selected PDF text.
+    CopyViewerTextSelection,
     /// Close the active overlay or panel.
     CloseOverlay,
     /// The jump-to-page input changed.
@@ -361,6 +378,8 @@ pub enum Message {
     LibraryDocumentOpened { entry_id: EntryId, doc: Arc<PdfDoc> },
     /// Return from the viewer to the library.
     BackToLibrary,
+    /// Return from the library to the already-open viewer document.
+    BackToViewer,
     /// Search query changed.
     SearchQueryChanged(String),
     /// Search debounce elapsed for a query.
@@ -570,6 +589,8 @@ pub enum Shortcut {
     DeleteSelected,
     /// Open the jump-to-page overlay.
     Jump,
+    /// Copy selected text.
+    Copy,
     /// Close overlays or panels.
     Escape,
 }

@@ -1,6 +1,7 @@
 //! Viewer outline/sidebar and jump dialog rendering.
 
 use crate::*;
+use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{column, container, row, scrollable, text, text_input};
 use iced::{Element, Length};
 use pdf_folio_core::OutlineNode;
@@ -25,8 +26,9 @@ pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
             &app.expanded_outline_paths,
             tokens,
         ))
+        .direction(sidebar_scroll_direction())
         .height(Length::Fill)
-        .style(move |_, status| scrollable_style(tokens, Class::Sidebar, status))
+        .style(move |_, status| sidebar_scrollable_style(tokens, status))
         .into()
     };
 
@@ -39,6 +41,15 @@ pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     .height(Length::Fill)
     .style(move |_| container_style(tokens, Class::Sidebar))
     .into()
+}
+
+fn sidebar_scroll_direction() -> Direction {
+    Direction::Vertical(
+        Scrollbar::new()
+            .width(4.0)
+            .scroller_width(2.0)
+            .anchor(Anchor::End),
+    )
 }
 
 fn outline_list<'a>(

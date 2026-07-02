@@ -19,6 +19,43 @@ pub struct RenderedPage {
     pub rgba: Vec<u8>,
 }
 
+/// A normalized top-left-origin rectangle in page coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextRect {
+    /// Left edge as a fraction of page width.
+    pub x: f32,
+    /// Top edge as a fraction of page height.
+    pub y: f32,
+    /// Width as a fraction of page width.
+    pub width: f32,
+    /// Height as a fraction of page height.
+    pub height: f32,
+}
+
+/// A single extracted text character and its page-relative bounds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageTextChar {
+    /// Zero-based Pdfium character index.
+    pub index: usize,
+    /// Character text.
+    pub text: String,
+    /// Loose glyph bounds suitable for hit-testing and selection highlighting.
+    pub bounds: TextRect,
+}
+
+/// Per-character text layer for one PDF page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageTextLayer {
+    /// Zero-based page index.
+    pub page: u16,
+    /// Page width in PDF points.
+    pub width_points: f32,
+    /// Page height in PDF points.
+    pub height_points: f32,
+    /// Characters in Pdfium text order.
+    pub chars: Vec<PageTextChar>,
+}
+
 /// A node in a PDF outline tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutlineNode {
@@ -153,6 +190,62 @@ impl PdfDoc {
 
             let text = page.text()?.all();
             Ok(text)
+        })
+    }
+
+    /// Returns per-character text and normalized character bounds for a page.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Pdfium cannot load the document, page, or page text.
+    pub fn text_layer(&self, index: u16) -> Result<PageTextLayer> {
+        self.with_document(|document| {
+            let page = document.pages().get(i32::from(index)).with_context(|| {
+                format!(
+                    "Could not read page {}: the page does not exist.",
+                    index + 1
+                )
+            })?;
+            let width_points = page.width().value.max(1.0);
+            let height_points = page.height().value.max(1.0);
+            let text = page.text()?;
+            let mut chars = Vec::with_capacity(text.chars().len());
+
+            for character in text.chars().iter() {
+                let bounds = character
+                    .loose_bounds()
+                    .or_else(|_| character.tight_bounds())
+                    .ok();
+                let Some(bounds) = bounds else {
+                    continue;
+                };
+                let text = character
+                    .unicode_char()
+                    .map(|character| character.to_string())
+                    .unwrap_or_default();
+                let x = bounds.left().value / width_points;
+                let y = (height_points - bounds.top().value) / height_points;
+                let width = bounds.width().value / width_points;
+                let height = bounds.height().value / height_points;
+
+                chars.push(PageTextChar {
+                    index: character.index(),
+                    text,
+                    bounds: TextRect {
+                        x: x.clamp(0.0, 1.0),
+                        y: y.clamp(0.0, 1.0),
+                        width: width.max(0.0).min(1.0),
+                        height: height.max(0.0).min(1.0),
+                    },
+                });
+            }
+
+            Ok(PageTextLayer {
+                page: index,
+                width_points,
+                height_points,
+                chars,
+            })
         })
     }
 

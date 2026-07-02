@@ -31,7 +31,6 @@ use std::time::SystemTime;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use iced::mouse;
 use iced::widget::text::Wrapping;
 use iced::widget::{
     button, container, image, mouse_area, pick_list, pin, scrollable, slider, text, text_input,
@@ -41,8 +40,9 @@ use iced::widget::{operation, Id};
 #[cfg(test)]
 use iced::Rectangle;
 use iced::{animation, font, keyboard, Animation, Color, ContentFit, Element, Font, Length, Point};
+use iced::{clipboard, mouse};
 use iced::{Task, Theme};
-use pdf_folio_core::{Annotation, OutlineNode, PdfDoc, TileCache, TileKey};
+use pdf_folio_core::{Annotation, OutlineNode, PageTextLayer, PdfDoc, TileCache, TileKey};
 #[cfg(test)]
 use pdf_folio_library::NewLibraryEntry;
 use pdf_folio_library::{
@@ -111,17 +111,17 @@ use crate::platform::{file_manager_command, file_uri};
 use crate::style::{
     container_style, display_font, empty_state, icon_button, master_checkbox, menu_style_for_class,
     mix_color, pick_list_style, progress_bar, scrollable_style, search_input_with_class,
-    section_heading, selection_checkbox, side_border, side_border_for_class, slider_style,
-    tag_pill, text_input_style, toc_entry, toolbar_button, ui_font, viewer_primitives, Class,
-    ComponentState, FontSize, FontWeight, LabelSection, MasterCheckboxState, Spacing, StyleBook,
-    ThemeTokens, VisualOverride, UI_FONT_FAMILY,
+    section_heading, selection_checkbox, side_border, side_border_for_class,
+    sidebar_scrollable_style, slider_style, tag_pill, text_input_style, toc_entry, toolbar_button,
+    ui_font, viewer_primitives, Class, ComponentState, FontSize, FontWeight, LabelSection,
+    MasterCheckboxState, Spacing, StyleBook, ThemeTokens, VisualOverride, UI_FONT_FAMILY,
 };
 #[cfg(test)]
 use crate::subscriptions::style_watch_event_should_reload;
 use crate::subscriptions::subscription;
 use crate::theme::AppTheme;
 use crate::viewer::canvas::ZoomRenderPolicy;
-use crate::viewer::state::RenderedPageView;
+use crate::viewer::state::{RenderedPageView, ViewerTextAnchor, ViewerTextSelection};
 use crate::viewer::tasks::{
     open_document_task, open_library_document_task, render_page, schedule_zoom_render,
 };
@@ -133,15 +133,10 @@ const CHEVRON_RIGHT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" wi
 const CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"##;
 const GRID_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>"##;
 const LIST_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>"##;
-const GEIST_MONO_PROPO_REGULAR: &[u8] =
-    include_bytes!("../assets/fonts/GeistMonoNerdFontPropo-Regular.otf");
-const GEIST_MONO_PROPO_MEDIUM: &[u8] =
-    include_bytes!("../assets/fonts/GeistMonoNerdFontPropo-Medium.otf");
-const GEIST_MONO_PROPO_SEMIBOLD: &[u8] =
-    include_bytes!("../assets/fonts/GeistMonoNerdFontPropo-SemiBold.otf");
-const GEIST_MONO_PROPO_BOLD: &[u8] =
-    include_bytes!("../assets/fonts/GeistMonoNerdFontPropo-Bold.otf");
-const FILE_TREE_FONT_FAMILY: &str = "GeistMono Nerd Font Propo";
+const IBM_PLEX_SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf");
+const IBM_PLEX_SANS_MEDIUM: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf");
+const IBM_PLEX_SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf");
+const IBM_PLEX_SANS_BOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Bold.ttf");
 const FILE_TREE_LABEL_SIZE: u32 = FontSize::MD;
 const FILE_TREE_ROW_HEIGHT: f32 = 26.0;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
@@ -172,11 +167,6 @@ const LIBRARY_METADATA_DENSITY_OPTIONS: [LibraryMetadataDensity; 3] = [
     LibraryMetadataDensity::Minimal,
     LibraryMetadataDensity::Standard,
     LibraryMetadataDensity::Detailed,
-];
-const LIBRARY_READING_FILTER_OPTIONS: [LibraryReadingFilter; 3] = [
-    LibraryReadingFilter::Unread,
-    LibraryReadingFilter::Reading,
-    LibraryReadingFilter::Finished,
 ];
 const BULK_TAG_ACTIONS: [SelectionToolbarAction; 2] = [
     SelectionToolbarAction::AddTag,
@@ -268,6 +258,14 @@ pub struct PDFolioApp {
     pub scale_factor: f32,
     /// Last known keyboard modifiers.
     pub modifiers: keyboard::Modifiers,
+    /// Current page-level text selection in the viewer.
+    pub viewer_text_selection: Option<ViewerTextSelection>,
+    /// Extracted text layers keyed by zero-based page index.
+    pub viewer_text_layers: HashMap<u16, Arc<PageTextLayer>>,
+    /// Text-layer extraction jobs currently in flight.
+    pub pending_text_layers: HashSet<u16>,
+    /// Whether copy was requested while selected page text was still loading.
+    pub viewer_copy_pending: bool,
     /// Tile render jobs currently in flight.
     pub pending_renders: HashSet<TileKey>,
     /// Whether the table-of-contents panel is open.
@@ -492,6 +490,10 @@ impl PDFolioApp {
             zoom_generation: 0,
             scale_factor: 1.0,
             modifiers: keyboard::Modifiers::default(),
+            viewer_text_selection: None,
+            viewer_text_layers: HashMap::new(),
+            pending_text_layers: HashSet::new(),
+            viewer_copy_pending: false,
             pending_renders: HashSet::new(),
             toc_open: true,
             outline: Vec::new(),
@@ -596,6 +598,10 @@ impl PDFolioApp {
         self.horizontal_offset = 0.0;
         self.zoom_preview_width_px = None;
         self.zoom_generation = self.zoom_generation.wrapping_add(1);
+        self.viewer_text_selection = None;
+        self.viewer_text_layers.clear();
+        self.pending_text_layers.clear();
+        self.viewer_copy_pending = false;
         self.document_error = None;
         self.jump_dialog_open = false;
         self.jump_input.clear();
@@ -605,24 +611,23 @@ impl PDFolioApp {
 
     fn return_to_library(&mut self) -> Task<Message> {
         self.mode = AppMode::Library;
-        self.doc = None;
-        self.current_entry_id = None;
-        self.rendered_pages.clear();
-        self.pending_renders.clear();
-        self.page_aspect_ratios.clear();
-        self.outline.clear();
-        self.expanded_outline_paths.clear();
         self.document_error = None;
         self.jump_dialog_open = false;
         self.jump_input.clear();
-        self.zoom_preview_width_px = None;
-        self.scroll_offset = 0.0;
-        self.horizontal_offset = 0.0;
         Task::batch([
             self.refresh_library(),
             self.refresh_folders(),
             self.request_visible_thumbnails(),
         ])
+    }
+
+    fn return_to_viewer(&mut self) -> Task<Message> {
+        if self.doc.is_none() {
+            return Task::none();
+        }
+
+        self.mode = AppMode::Viewer;
+        self.request_visible_pages()
     }
 
     fn open_library_document(&mut self, entry_id: EntryId, doc: Arc<PdfDoc>) -> Task<Message> {
@@ -693,7 +698,119 @@ impl PDFolioApp {
             ));
         }
 
+        Task::batch([Task::batch(tasks), self.request_visible_text_layers()])
+    }
+
+    fn request_visible_text_layers(&mut self) -> Task<Message> {
+        let Some(doc) = &self.doc else {
+            return Task::none();
+        };
+
+        let mut tasks = Vec::new();
+        for page in self.visible_page_range() {
+            if self.viewer_text_layers.contains_key(&page)
+                || self.pending_text_layers.contains(&page)
+            {
+                continue;
+            }
+
+            self.pending_text_layers.insert(page);
+            let doc = Arc::clone(doc);
+            tasks.push(Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || doc.text_layer(page))
+                        .await
+                        .map_err(anyhow::Error::from)?
+                },
+                move |result| match result {
+                    Ok(layer) => Message::ViewerTextLayerLoaded {
+                        page,
+                        layer: Arc::new(layer),
+                    },
+                    Err(error) => Message::ViewerTextLayerError {
+                        page,
+                        error: error.to_string(),
+                    },
+                },
+            ));
+        }
+
         Task::batch(tasks)
+    }
+
+    fn start_viewer_text_selection(&mut self, page: u16, char_index: usize) {
+        self.viewer_text_selection = Some(ViewerTextSelection::new(ViewerTextAnchor::new(
+            page, char_index,
+        )));
+        self.viewer_copy_pending = false;
+    }
+
+    fn update_viewer_text_selection(&mut self, page: u16, char_index: usize) {
+        let Some(selection) = &mut self.viewer_text_selection else {
+            return;
+        };
+
+        selection.focus = ViewerTextAnchor::new(page, char_index);
+        self.viewer_copy_pending = false;
+    }
+
+    fn finish_viewer_text_selection(&mut self) {
+        if let Some(selection) = &mut self.viewer_text_selection {
+            selection.dragging = false;
+        }
+    }
+
+    fn clear_viewer_text_selection(&mut self) {
+        self.viewer_text_selection = None;
+        self.viewer_copy_pending = false;
+    }
+
+    fn selected_text_layers_ready(&self) -> bool {
+        let Some(selection) = self.viewer_text_selection else {
+            return false;
+        };
+
+        let (start, end) = selection.ordered();
+        (start.page..=end.page).all(|page| self.viewer_text_layers.contains_key(&page))
+    }
+
+    fn selected_viewer_text(&self) -> Option<String> {
+        let selection = self.viewer_text_selection?;
+        let (start, end) = selection.ordered();
+        let mut text = String::new();
+
+        for page in start.page..=end.page {
+            let layer = self.viewer_text_layers.get(&page)?;
+            let Some(range) = selection.char_range_for_page(page, layer.chars.len()) else {
+                continue;
+            };
+
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            for index in range {
+                if let Some(character) = layer.chars.get(index) {
+                    text.push_str(&character.text);
+                }
+            }
+        }
+
+        (!text.is_empty()).then_some(text)
+    }
+
+    fn copy_selected_viewer_text(&mut self) -> Task<Message> {
+        if self.viewer_text_selection.is_none() {
+            return Task::none();
+        }
+
+        if self.selected_text_layers_ready() {
+            self.viewer_copy_pending = false;
+            self.selected_viewer_text()
+                .map_or_else(Task::none, clipboard::write)
+        } else {
+            self.viewer_copy_pending = true;
+            self.request_visible_text_layers()
+        }
     }
 
     fn visible_page_range(&self) -> std::ops::Range<u16> {
@@ -2102,6 +2219,10 @@ impl PDFolioApp {
     }
 
     fn title(&self) -> String {
+        if self.mode == AppMode::Library {
+            return String::from("PDF-Folio");
+        }
+
         self.doc
             .as_ref()
             .and_then(|doc| doc.path().file_name())
@@ -2147,10 +2268,10 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
         AppTheme::Light => Theme::Light,
         AppTheme::Dark => Theme::Dark,
     })
-    .font(GEIST_MONO_PROPO_REGULAR)
-    .font(GEIST_MONO_PROPO_MEDIUM)
-    .font(GEIST_MONO_PROPO_SEMIBOLD)
-    .font(GEIST_MONO_PROPO_BOLD)
+    .font(IBM_PLEX_SANS_REGULAR)
+    .font(IBM_PLEX_SANS_MEDIUM)
+    .font(IBM_PLEX_SANS_SEMIBOLD)
+    .font(IBM_PLEX_SANS_BOLD)
     .default_font(iced::Font::with_name(UI_FONT_FAMILY))
     .subscription(subscription)
     .scale_factor(|app| app.scale_factor)
@@ -2206,6 +2327,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return app.open_library_document(entry_id, doc);
         }
         Message::BackToLibrary => return app.return_to_library(),
+        Message::BackToViewer => return app.return_to_viewer(),
         Message::DocumentError(error) => {
             if !app.dismissed_document_errors.contains(&error) {
                 app.document_error = Some(error);
@@ -2414,9 +2536,11 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::BeginLibraryEntryDrag(entry_id) => {
             app.begin_library_drag(entry_id);
+            return scroll_library_to_offset_task(app.library_scroll_offset);
         }
         Message::BeginFolderDrag(folder_id) => {
             app.begin_folder_drag(folder_id);
+            return scroll_library_to_offset_task(app.library_scroll_offset);
         }
         Message::ClearLibrarySelection => {
             app.clear_library_selection();
@@ -3171,6 +3295,32 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.expanded_outline_paths.remove(&path);
             }
         }
+        Message::ViewerTextLayerLoaded { page, layer } => {
+            app.pending_text_layers.remove(&page);
+            app.viewer_text_layers.insert(page, layer);
+            if app.viewer_copy_pending && app.selected_text_layers_ready() {
+                return app.copy_selected_viewer_text();
+            }
+        }
+        Message::ViewerTextLayerError { page, error } => {
+            app.pending_text_layers.remove(&page);
+            app.document_error = Some(error);
+        }
+        Message::ViewerTextSelectionStarted { page, char_index } => {
+            app.start_viewer_text_selection(page, char_index);
+        }
+        Message::ViewerTextSelectionChanged { page, char_index } => {
+            app.update_viewer_text_selection(page, char_index);
+        }
+        Message::ViewerTextSelectionEnded => {
+            app.finish_viewer_text_selection();
+        }
+        Message::ClearViewerTextSelection => {
+            app.clear_viewer_text_selection();
+        }
+        Message::CopyViewerTextSelection => {
+            return app.copy_selected_viewer_text();
+        }
         Message::ScrollChanged(offset) => {
             app.scroll_offset = offset;
             app.clamp_scroll_offset();
@@ -3345,6 +3495,11 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.jump_dialog_open = true;
             app.jump_input = (u32::from(app.current_page()) + 1).to_string();
         }
+        Message::ShortcutPressed(Shortcut::Copy) => {
+            if app.mode == AppMode::Viewer {
+                return app.copy_selected_viewer_text();
+            }
+        }
         Message::ShortcutPressed(Shortcut::Escape) => {
             if app.pending_confirmation.is_some() {
                 app.pending_confirmation = None;
@@ -3352,6 +3507,8 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.open_app_menu = None;
             } else if app.open_selection_menu.is_some() {
                 app.open_selection_menu = None;
+            } else if app.mode == AppMode::Viewer && app.viewer_text_selection.is_some() {
+                app.clear_viewer_text_selection();
             } else if app.mode == AppMode::Library && !app.selected_library_entries.is_empty() {
                 app.clear_library_selection();
             } else if app.jump_dialog_open {
@@ -3550,7 +3707,7 @@ fn file_tree_label(label: &str, width: f32) -> String {
 
 fn file_tree_font(weight: iced::font::Weight) -> Font {
     Font {
-        family: font::Family::Name(FILE_TREE_FONT_FAMILY),
+        family: font::Family::Name(UI_FONT_FAMILY),
         weight,
         ..Font::DEFAULT
     }

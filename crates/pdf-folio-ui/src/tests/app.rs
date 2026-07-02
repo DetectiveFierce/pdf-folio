@@ -119,6 +119,20 @@ fn reading_state_uses_progress_and_known_page_count() {
 }
 
 #[test]
+fn viewer_text_selection_orders_character_ranges_from_drag_endpoints() {
+    let mut selection = ViewerTextSelection::new(ViewerTextAnchor::new(2, 9));
+    selection.focus = ViewerTextAnchor::new(1, 3);
+
+    assert_eq!(
+        selection.ordered(),
+        (ViewerTextAnchor::new(1, 3), ViewerTextAnchor::new(2, 9))
+    );
+    assert_eq!(selection.char_range_for_page(1, 12), Some(3..=11));
+    assert_eq!(selection.char_range_for_page(2, 12), Some(0..=9));
+    assert!(!selection.contains_page(3));
+}
+
+#[test]
 fn root_library_scope_shows_only_unfiled_entries() {
     let db = test_db("root-folder-scope");
     db.insert_entry(&test_new_entry("unfiled")).unwrap();

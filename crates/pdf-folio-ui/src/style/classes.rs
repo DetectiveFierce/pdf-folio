@@ -805,6 +805,51 @@ pub fn scrollable_style(
     }
 }
 
+/// Returns an iced scrollable style for sidebar scrollbars.
+pub fn sidebar_scrollable_style(
+    tokens: ThemeTokens,
+    status: scrollable::Status,
+) -> scrollable::Style {
+    let thumb = match status {
+        scrollable::Status::Active { .. } => mix_color(tokens.border, tokens.text_secondary, 0.35),
+        scrollable::Status::Hovered { .. } => mix_color(tokens.border, tokens.focus, 0.52),
+        scrollable::Status::Dragged { .. } => tokens.accent,
+    };
+    let rail = scrollable::Rail {
+        background: None,
+        border: Border {
+            width: BorderWidth::NONE,
+            color: Color::TRANSPARENT,
+            radius: 0.0.into(),
+        },
+        scroller: scrollable::Scroller {
+            background: Background::Color(thumb),
+            border: Border {
+                width: BorderWidth::NONE,
+                color: thumb,
+                radius: 999.0.into(),
+            },
+        },
+    };
+
+    scrollable::Style {
+        container: container::Style::default(),
+        vertical_rail: rail,
+        horizontal_rail: rail,
+        gap: None,
+        auto_scroll: scrollable::AutoScroll {
+            background: Background::Color(Color::TRANSPARENT),
+            border: Border {
+                width: BorderWidth::NONE,
+                color: Color::TRANSPARENT,
+                radius: 0.0.into(),
+            },
+            shadow: IcedShadow::default(),
+            icon: Color::TRANSPARENT,
+        },
+    }
+}
+
 /// Blends two colors by the provided amount.
 pub fn mix_color(base: Color, overlay: Color, amount: f32) -> Color {
     let amount = amount.clamp(0.0, 1.0);
