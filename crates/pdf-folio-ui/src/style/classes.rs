@@ -44,6 +44,14 @@ pub enum Class {
     SidebarDetailRow,
     /// Library sidebar action button.
     SidebarActionButton,
+    /// Selected-folder sidebar card.
+    SidebarFolderCard,
+    /// Selected-folder sidebar card title.
+    SidebarFolderCardTitle,
+    /// Selected-folder sidebar rename input.
+    SidebarFolderTextInput,
+    /// Selected-folder sidebar card action button.
+    SidebarFolderActionButton,
     /// Table-of-contents entry.
     TocEntry,
     /// Library grid card.
@@ -144,7 +152,7 @@ impl ComponentState {
 
 impl Class {
     /// Number of semantic classes represented in style files.
-    pub const COUNT: usize = 46;
+    pub const COUNT: usize = 50;
 
     /// Stable index for style arrays.
     pub const fn index(self) -> usize {
@@ -166,35 +174,39 @@ impl Class {
             Self::SidebarDetailPanel => 14,
             Self::SidebarDetailRow => 15,
             Self::SidebarActionButton => 16,
-            Self::TocEntry => 17,
-            Self::LibraryCard => 18,
-            Self::LibraryFolderCard => 19,
-            Self::LibraryRow => 20,
-            Self::LibraryControlBar => 21,
-            Self::LibrarySearchInput => 22,
-            Self::LibrarySortDropdown => 23,
-            Self::LibraryViewToggle => 24,
-            Self::LibraryImportButton => 25,
-            Self::LibraryGridZoomSlider => 26,
-            Self::TagPill => 27,
-            Self::SearchInput => 28,
-            Self::ProgressBar => 29,
-            Self::ErrorBanner => 30,
-            Self::ViewerCanvas => 31,
-            Self::PagePlaceholder => 32,
-            Self::JumpOverlay => 33,
-            Self::Tooltip => 34,
-            Self::AnnotationToolbar => 35,
-            Self::AnnotationPopover => 36,
-            Self::PresentationOverlay => 37,
-            Self::Minimap => 38,
-            Self::EmptyState => 39,
-            Self::DragInsertionMarker => 40,
-            Self::FileTreeFoldButton => 41,
-            Self::SelectionCheckbox => 42,
-            Self::MasterCheckbox => 43,
-            Self::DragStackGhost => 44,
-            Self::FolderDropTarget => 45,
+            Self::SidebarFolderCard => 17,
+            Self::SidebarFolderCardTitle => 18,
+            Self::SidebarFolderTextInput => 19,
+            Self::SidebarFolderActionButton => 20,
+            Self::TocEntry => 21,
+            Self::LibraryCard => 22,
+            Self::LibraryFolderCard => 23,
+            Self::LibraryRow => 24,
+            Self::LibraryControlBar => 25,
+            Self::LibrarySearchInput => 26,
+            Self::LibrarySortDropdown => 27,
+            Self::LibraryViewToggle => 28,
+            Self::LibraryImportButton => 29,
+            Self::LibraryGridZoomSlider => 30,
+            Self::TagPill => 31,
+            Self::SearchInput => 32,
+            Self::ProgressBar => 33,
+            Self::ErrorBanner => 34,
+            Self::ViewerCanvas => 35,
+            Self::PagePlaceholder => 36,
+            Self::JumpOverlay => 37,
+            Self::Tooltip => 38,
+            Self::AnnotationToolbar => 39,
+            Self::AnnotationPopover => 40,
+            Self::PresentationOverlay => 41,
+            Self::Minimap => 42,
+            Self::EmptyState => 43,
+            Self::DragInsertionMarker => 44,
+            Self::FileTreeFoldButton => 45,
+            Self::SelectionCheckbox => 46,
+            Self::MasterCheckbox => 47,
+            Self::DragStackGhost => 48,
+            Self::FolderDropTarget => 49,
         }
     }
 }
@@ -221,7 +233,8 @@ pub struct ViewerPrimitiveStyle {
     pub page_shadow: Shadow,
 }
 
-trait VisualOverride {
+/// Applies a parsed KDL visual override to an iced widget style.
+pub trait VisualOverride {
     fn with_visual_override(self, style: VisualStyle) -> Self;
 }
 
@@ -382,6 +395,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         | Class::LibraryRow
         | Class::SidebarDetailPanel
         | Class::SidebarDetailRow
+        | Class::SidebarFolderCard
         | Class::EmptyState => (
             tokens.surface_raised,
             tokens.text_primary,
@@ -440,6 +454,8 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         | Class::LibraryGridZoomSlider
         | Class::SidebarToggleButton
         | Class::SidebarActionButton
+        | Class::SidebarFolderCardTitle
+        | Class::SidebarFolderActionButton
         | Class::MenuButton
         | Class::MenuItem
         | Class::SidebarRow
@@ -448,6 +464,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         | Class::FileTreeFoldButton
         | Class::TocEntry
         | Class::LibrarySearchInput
+        | Class::SidebarFolderTextInput
         | Class::SearchInput
         | Class::ProgressBar => (
             tokens.background,
@@ -675,10 +692,12 @@ pub fn text_input_style(
         text_input::Status::Hovered | text_input::Status::Focused { is_hovered: true }
     );
     let background = match (class, is_focused || is_hovered) {
-        (Class::SearchInput | Class::LibrarySearchInput, true) => {
+        (Class::SearchInput | Class::LibrarySearchInput | Class::SidebarFolderTextInput, true) => {
             mix_color(tokens.surface_raised, tokens.accent, 0.16)
         }
-        (Class::SearchInput | Class::LibrarySearchInput, false) => tokens.surface_raised,
+        (Class::SearchInput | Class::LibrarySearchInput | Class::SidebarFolderTextInput, false) => {
+            tokens.surface_raised
+        }
         (_, true) => mix_color(tokens.surface, tokens.accent, 0.16),
         (_, false) => tokens.surface,
     };

@@ -12,7 +12,7 @@ pub use classes::{
     button_style, container_style, menu_style, menu_style_for_class, mix_color, pick_list_style,
     progress_bar_style, scrollable_style, side_border_for_class, side_border_for_style,
     slider_style, text_input_style, viewer_primitives, Class, ComponentState, Shadow,
-    ViewerPrimitiveStyle,
+    ViewerPrimitiveStyle, VisualOverride,
 };
 pub use components::{
     align_content_x, align_content_y, aligned_text, annotation_popover, annotation_toolbar,

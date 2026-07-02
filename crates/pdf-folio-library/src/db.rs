@@ -247,6 +247,8 @@ pub struct LibraryEntry {
     pub opened_at: Option<DateTime<Utc>>,
     /// Page count, if known.
     pub page_count: Option<u16>,
+    /// File size in bytes, if known.
+    pub file_size: Option<u64>,
     /// Last zero-based page read by the user.
     pub last_page: u16,
     /// User rating from 0 to 5.
@@ -278,6 +280,8 @@ pub struct NewLibraryEntry {
     pub page_count_attributed: bool,
     /// Page count, if known.
     pub page_count: Option<u16>,
+    /// File size in bytes, if known.
+    pub file_size: Option<u64>,
     /// Hash of the cached cover thumbnail bytes.
     pub cover_hash: Option<String>,
 }
@@ -331,8 +335,8 @@ impl Db {
         let manual_order = self.next_entry_manual_order_with_connection(&connection)?;
         connection.execute(
             "INSERT OR REPLACE INTO entries
-                (id, path, title, author, sort_title, sort_author, manual_order, author_attributed, page_count_attributed, added_at, page_count, cover_hash, missing)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0)
+                (id, path, title, author, sort_title, sort_author, manual_order, author_attributed, page_count_attributed, added_at, page_count, file_size, cover_hash, missing)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0)
              ON CONFLICT(id) DO UPDATE SET
                 path = excluded.path,
                 title = excluded.title,
@@ -348,6 +352,7 @@ impl Db {
                     ELSE entries.page_count_attributed
                 END,
                 page_count = COALESCE(excluded.page_count, entries.page_count),
+                file_size = COALESCE(excluded.file_size, entries.file_size),
                 cover_hash = COALESCE(excluded.cover_hash, entries.cover_hash),
                 missing = 0",
             params![
@@ -362,6 +367,7 @@ impl Db {
                 i64::from(entry.page_count_attributed),
                 now,
                 entry.page_count.map(i64::from),
+                entry.file_size.map(|value| value as i64),
                 entry.cover_hash,
             ],
         )?;
@@ -410,7 +416,7 @@ impl Db {
         };
         let mut statement = connection.prepare(
             &format!(
-                "SELECT id, path, title, author, display_title, display_author, sort_title, sort_author, metadata_locked, manual_order, author_attributed, page_count_attributed, added_at, opened_at, page_count, last_page, rating, cover_hash, missing
+                "SELECT id, path, title, author, display_title, display_author, sort_title, sort_author, metadata_locked, manual_order, author_attributed, page_count_attributed, added_at, opened_at, page_count, file_size, last_page, rating, cover_hash, missing
              FROM entries
              ORDER BY {order_by}"
             ),
@@ -656,6 +662,31 @@ impl Db {
         Ok(())
     }
 
+    /// Moves an entry into exactly one folder.
+    ///
+    /// Existing folder memberships for the entry are removed before the new membership is added.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write membership.
+    pub fn move_entry_to_folder(&self, entry_id: &EntryId, folder_id: &FolderId) -> Result<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let manual_order =
+            self.next_folder_entry_manual_order_with_connection(&transaction, folder_id)?;
+        transaction.execute(
+            "DELETE FROM entry_folders WHERE entry_id = ?1",
+            params![entry_id.as_str()],
+        )?;
+        transaction.execute(
+            "INSERT INTO entry_folders (entry_id, folder_id, manual_order)
+             VALUES (?1, ?2, ?3)",
+            params![entry_id.as_str(), folder_id.as_str(), manual_order],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Removes an entry from a folder.
     ///
     /// # Errors
@@ -678,7 +709,7 @@ impl Db {
     pub fn entries_in_folder(&self, folder_id: &FolderId) -> Result<Vec<LibraryEntry>> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT e.id, e.path, e.title, e.author, e.display_title, e.display_author, e.sort_title, e.sort_author, e.metadata_locked, e.manual_order, e.author_attributed, e.page_count_attributed, e.added_at, e.opened_at, e.page_count, e.last_page, e.rating, e.cover_hash, e.missing
+            "SELECT e.id, e.path, e.title, e.author, e.display_title, e.display_author, e.sort_title, e.sort_author, e.metadata_locked, e.manual_order, e.author_attributed, e.page_count_attributed, e.added_at, e.opened_at, e.page_count, e.file_size, e.last_page, e.rating, e.cover_hash, e.missing
              FROM entries e
              INNER JOIN entry_folders ef ON ef.entry_id = e.id
              WHERE ef.folder_id = ?1
@@ -1025,7 +1056,7 @@ impl Db {
         let connection = self.connection()?;
         let path = path.to_string_lossy();
         let mut statement = connection.prepare(
-            "SELECT id, path, title, author, display_title, display_author, sort_title, sort_author, metadata_locked, manual_order, author_attributed, page_count_attributed, added_at, opened_at, page_count, last_page, rating, cover_hash, missing
+            "SELECT id, path, title, author, display_title, display_author, sort_title, sort_author, metadata_locked, manual_order, author_attributed, page_count_attributed, added_at, opened_at, page_count, file_size, last_page, rating, cover_hash, missing
              FROM entries
              WHERE path = ?1",
         )?;
@@ -1192,6 +1223,7 @@ impl Db {
                 added_at    INTEGER NOT NULL,
                 opened_at   INTEGER,
                 page_count  INTEGER,
+                file_size   INTEGER,
                 last_page   INTEGER DEFAULT 0,
                 rating      INTEGER DEFAULT 0,
                 cover_hash  TEXT,
@@ -1261,6 +1293,7 @@ impl Db {
         let _ = connection.execute("ALTER TABLE entries ADD COLUMN display_author TEXT", []);
         let _ = connection.execute("ALTER TABLE entries ADD COLUMN sort_title TEXT", []);
         let _ = connection.execute("ALTER TABLE entries ADD COLUMN sort_author TEXT", []);
+        let _ = connection.execute("ALTER TABLE entries ADD COLUMN file_size INTEGER", []);
         let _ = connection.execute(
             "ALTER TABLE entries ADD COLUMN metadata_locked INTEGER DEFAULT 0 NOT NULL",
             [],
@@ -1287,16 +1320,38 @@ impl Db {
              WHERE sort_author IS NULL AND COALESCE(display_author, author) IS NOT NULL",
             [],
         )?;
+        backfill_file_sizes(&connection)?;
         Ok(())
     }
+}
+
+fn backfill_file_sizes(connection: &Connection) -> Result<()> {
+    let mut statement = connection
+        .prepare("SELECT id, path FROM entries WHERE file_size IS NULL AND missing = 0")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let entries = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+
+    for (id, path) in entries {
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            connection.execute(
+                "UPDATE entries SET file_size = ?1 WHERE id = ?2",
+                params![metadata.len() as i64, id],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryEntry> {
     let added_at: i64 = row.get(12)?;
     let opened_at: Option<i64> = row.get(13)?;
     let page_count: Option<i64> = row.get(14)?;
-    let last_page: i64 = row.get(15)?;
-    let rating: i64 = row.get(16)?;
+    let file_size: Option<i64> = row.get(15)?;
+    let last_page: i64 = row.get(16)?;
+    let rating: i64 = row.get(17)?;
 
     Ok(LibraryEntry {
         id: EntryId::new(row.get::<_, String>(0)?),
@@ -1314,12 +1369,13 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryEntry> {
         added_at: DateTime::from_timestamp(added_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
         opened_at: opened_at.and_then(|timestamp| DateTime::from_timestamp(timestamp, 0)),
         page_count: page_count.map(|value| value as u16),
+        file_size: file_size.map(|value| value as u64),
         last_page: last_page as u16,
         rating: rating as u8,
-        cover_hash: row.get(17)?,
+        cover_hash: row.get(18)?,
         tags: Vec::new(),
         folders: Vec::new(),
-        missing: row.get::<_, i64>(18)? != 0,
+        missing: row.get::<_, i64>(19)? != 0,
     })
 }
 
@@ -1395,6 +1451,7 @@ mod tests {
             author_attributed: false,
             page_count_attributed: false,
             page_count: Some(10),
+            file_size: Some(1024),
             cover_hash: None,
         }
     }
@@ -1571,6 +1628,29 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(folder_names.contains(&"Reading"));
         assert!(folder_names.contains(&"Research"));
+    }
+
+    #[test]
+    fn moving_entry_to_folder_replaces_existing_folder_memberships() {
+        let db = test_db();
+        let entry_id = EntryId::new("paper");
+        db.insert_entry(&entry("paper", "Paper")).unwrap();
+
+        let first = db.create_folder("Reading", None).unwrap();
+        let second = db.create_folder("Research", None).unwrap();
+        db.add_entry_to_folder(&entry_id, &first).unwrap();
+        db.move_entry_to_folder(&entry_id, &second).unwrap();
+
+        let entry = db
+            .entry_by_path(Path::new("/tmp/paper.pdf"))
+            .unwrap()
+            .unwrap();
+        let folder_names = entry
+            .folders
+            .iter()
+            .map(|folder| folder.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(folder_names, vec!["Research"]);
     }
 
     #[test]

@@ -10,17 +10,24 @@ component "Toolbar" {
 
 component "MenuBar" {
     normal background="#0E0904" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=0 theme="espresso"
+    active background="#180F06" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=0 theme="espresso"
+    selected background="#45331D" text="#DDD0BA" border="#45331D" border_width=0 radius=0 theme="espresso"
+
     normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=0 theme="light"
+    active background="#F9F6EF" text="#261E14" border="#D8CEBC" border_width=1 radius=0 theme="light"
+    selected background="#E3D8C8" text="#261E14" border="#E3D8C8" border_width=0 radius=0 theme="light"
 }
 
 component "MenuButton" {
     normal background="#0E0904" text="#8B6E52" border="#00000000" border_width=0 radius=0 theme="espresso"
     hovered background="#160F07" text="#DDD0BA" border="#00000000" border_width=0 theme="espresso"
     pressed background="#211609" text="#D4A853" border="#D4A853" border_width=0 theme="espresso"
+    active background="#0E0904" text="#D4A853" border="#00000000" border_width=0 radius=0 theme="espresso"
 
     normal background="#FCFAF5" text="#745F46" border="#00000000" border_width=0 radius=5 theme="light"
     hovered background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 theme="light"
     pressed background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
+    active background="#EFE3CF" text="#9C732B" border="#9C732B" border_width=1 radius=5 theme="light"
 }
 
 component "MenuPanel" {
@@ -31,10 +38,12 @@ component "MenuPanel" {
 component "MenuItem" {
     normal background="#23180C" text="#DDD0BA" border="#00000000" border_width=0 radius=4 theme="espresso"
     hovered background="#2B1D0E" text="#D4A853" border="#D4A85340" border_width=1 theme="espresso"
+    selected background="#23180C" text="#DDD0BA" border="#00000000" border_width=0 radius=4 theme="espresso"
     disabled background="#0F0A04" text="#7A6A58" border="#00000000" border_width=0 theme="espresso"
 
     normal background="#F6F2EA" text="#261E14" border="#00000000" border_width=0 radius=4 theme="light"
     hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" border_width=1 theme="light"
+    selected background="#F6F2EA" text="#261E14" border="#00000000" border_width=0 radius=4 theme="light"
     disabled background="#F1EFE9" text="#9E917F" border="#00000000" border_width=0 theme="light"
 }
 
@@ -96,4 +105,9 @@ component "PagePlaceholder" {
 component "ViewerCanvas" {
     normal background="#170E05" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
     normal background="#E8E2D8" text="#261E14" border="#00000000" border_width=0 radius=0 theme="light"
+}
+
+component "PresentationOverlay" {
+    normal background="#170E05B8" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal background="#E8E2D8B8" text="#261E14" border="#00000000" border_width=0 radius=0 theme="light"
 }

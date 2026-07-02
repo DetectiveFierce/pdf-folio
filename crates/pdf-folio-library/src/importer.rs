@@ -78,6 +78,7 @@ pub fn import_pdf(db: &Db, path: &Path) -> Result<ImportedEntry> {
         author_attributed: false,
         page_count_attributed: false,
         page_count: None,
+        file_size: file_size(path),
         cover_hash: None,
     })?;
 
@@ -86,6 +87,10 @@ pub fn import_pdf(db: &Db, path: &Path) -> Result<ImportedEntry> {
         path: path.to_path_buf(),
         inserted,
     })
+}
+
+fn file_size(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|metadata| metadata.len())
 }
 
 /// Returns the thumbnail cache directory.

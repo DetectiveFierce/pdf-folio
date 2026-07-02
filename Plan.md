@@ -1157,15 +1157,14 @@ Library features added in this phase must use the Phase 4 style system. Library 
        dwell delay used for drop-target activation, allowing the user to reach nested folders
      - Expanded-during-drag folder rows collapse back to their pre-drag state if the cursor leaves
        without dropping
-   - [x] On release over an active folder drop target, assign all dragged PDFs to that folder
-     - For single-card drag, assign the one dragged entry to the folder
-     - For multi-selection drag, assign all selected entries to the folder; preserve each entry's
-       existing folder memberships in other folders (folder assignment is additive, not exclusive)
-     - Call `Db::add_entry_to_folder` for each dragged entry; batch the writes in a single
-       transaction where the database API permits
+   - [x] On release over an active folder drop target, move all dragged PDFs to that folder
+     - For single-card drag, move the one dragged entry to the folder
+     - For multi-selection drag, move all selected entries to the folder; replace each entry's
+       existing folder memberships so drag-and-drop behaves like relocation, not copy
+     - Call `Db::move_entry_to_folder` for each dragged entry; each entry move is transactional
      - If the current library view is filtered to a specific folder and the drop target is a
-       different folder, the dragged entries remain visible in the current view because folder
-       membership is additive; no entries disappear from the current view on drop
+       different folder, the dragged entries disappear from the current folder after refresh because
+       folder drag-and-drop is a move
      - If the drop target is the same folder as the current view filter, the assignment is a no-op
        and the drag resolves as if the user dropped onto empty space (reorder or cancel)
    - [x] After a successful folder drop, briefly flash the folder card or sidebar row with a
@@ -1191,10 +1190,16 @@ Library features added in this phase must use the Phase 4 style system. Library 
      a drag tick promotes that pending target after the configured dwell delay, and
      `finish_library_drag` resolves an active folder target before reorder logic.
    - Drag-to-folder works for both single-entry and multi-selection drags. It calls
-     `Db::add_entry_to_folder` for each dragged entry through a background task, preserves existing
-     folder memberships, and reports partial failures through the existing bulk-operation completion
-     path. Library operation failures and partial bulk failures now populate a shared
-     `ErrorBanner` surface in the library view.
+     `Db::move_entry_to_folder` for each dragged entry through a background task, replacing existing
+     folder memberships so drag-and-drop moves rather than copies PDFs between folders. Explicit
+     bulk "Add to folder" actions continue to use additive `Db::add_entry_to_folder` semantics.
+     Library operation failures and partial bulk failures populate a shared `ErrorBanner` surface
+     in the library view.
+   - Updated after folder-card drag testing: PDF drag-to-folder now uses the same non-blocking
+     drag preview approach as folder-card drags. The full-screen PDF drag capture layer was removed,
+     and folder-card cursor hit testing now supplements hover events by setting a pending folder
+     target only when geometry confidently resolves one, without clearing valid hover targets on
+     movement misses.
    - Collapsed sidebar folders expand after the same dwell delay while dragging and collapse back
      when the drag resolves without a folder drop; this keeps newly revealed child rows reachable
      while the cursor moves through the expanded subtree. Folder card/sidebar highlighting uses the
@@ -1448,11 +1453,14 @@ Library features added in this phase must use the Phase 4 style system. Library 
     - [x] Add "Clear filters" action
 
     Implementation notes:
-    - Updated 2026-06-29: library visibility composes search results, tag filters, and selected
-      folder membership in `visible_library_entries()`. The breadcrumb row now shows active
-      Folder/Tag/Search filter chips and a `Clear filters` action that clears search, tag, and
-      folder state together, prunes selection to the restored visible set, resets scroll, and saves
-      the cleared folder preference.
+   - Updated 2026-06-29: library visibility composes search results, tag filters, and selected
+     folder membership in `visible_library_entries()`. The breadcrumb row now shows active
+     Folder/Tag/Search filter chips and a `Clear filters` action that clears search, tag, and
+     folder state together, prunes selection to the restored visible set, resets scroll, and saves
+     the cleared folder preference.
+   - Updated after drag-to-folder move testing: the root library scope now shows only unfiled PDFs.
+     PDFs moved into a folder no longer remain visible as root library cards; selecting the folder
+     shows those moved PDFs.
 
 11. **Native library manager affordances**
     - [ ] Add context menus or equivalent explicit actions for PDFs and folders
