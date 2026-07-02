@@ -1,0 +1,6 @@
+//! Viewer state, rendering, outline, and task modules.
+
+pub(crate) mod canvas;
+pub(crate) mod outline;
+pub(crate) mod state;
+pub(crate) mod tasks;

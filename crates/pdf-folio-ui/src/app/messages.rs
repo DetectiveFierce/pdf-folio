@@ -11,7 +11,8 @@ use pdf_folio_library::{
     EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
 };
 
-use crate::app::{LibraryMetadataDensity, LibraryReadingFilter, ThumbnailSize};
+use crate::library::state::{LibraryMetadataDensity, LibraryReadingFilter};
+use crate::library::thumbnails::ThumbnailSize;
 use crate::style::StyleBook;
 use crate::Settings;
 
