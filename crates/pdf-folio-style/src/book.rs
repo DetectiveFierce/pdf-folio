@@ -496,6 +496,11 @@ impl RawStyleBook {
                 "input_width" => self.layout.jump_input_width = value_as_f32(name, value)?,
                 other => return Err(format!("{name}: unknown JumpOverlay layout `{other}`")),
             },
+            Class::ContextMenuPanel => match property {
+                "width" => self.layout.context_menu_panel_width = value_as_f32(name, value)?,
+                "item_height" => self.layout.context_menu_item_height = value_as_f32(name, value)?,
+                other => return Err(format!("{name}: unknown ContextMenuPanel layout `{other}`")),
+            },
             _ => return Err(format!("{name}: unknown layout property `{property}`")),
         }
         Ok(())
@@ -1306,6 +1311,8 @@ fn parse_class(value: &str) -> Option<Class> {
         "MenuButton" => Class::MenuButton,
         "MenuPanel" => Class::MenuPanel,
         "MenuItem" => Class::MenuItem,
+        "ContextMenuPanel" => Class::ContextMenuPanel,
+        "ContextMenuItem" => Class::ContextMenuItem,
         "ToolbarGroup" => Class::ToolbarGroup,
         "ToolbarButton" => Class::ToolbarButton,
         "Sidebar" => Class::Sidebar,
@@ -1486,6 +1493,8 @@ fn set_layout_metric(tokens: &mut AppLayoutTokens, token: &str, value: f32) -> R
         "selection_context_row_height" => tokens.selection_context_row_height = value,
         "app_menu_panel_width" => tokens.app_menu_panel_width = value,
         "app_menu_item_height" => tokens.app_menu_item_height = value,
+        "context_menu_panel_width" => tokens.context_menu_panel_width = value,
+        "context_menu_item_height" => tokens.context_menu_item_height = value,
         "sidebar_tab_height" => tokens.sidebar_tab_height = value,
         other => return Err(format!("unknown layout metric `{other}`")),
     }
@@ -1698,6 +1707,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
         Class::LibraryRow,
         Class::EmptyState,
         Class::MenuPanel,
+        Class::ContextMenuPanel,
         Class::SidebarDetailPanel,
         Class::SidebarDetailRow,
         Class::SidebarFolderCard,
@@ -1735,6 +1745,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
         Class::SidebarActionButton,
         Class::MenuButton,
         Class::MenuItem,
+        Class::ContextMenuItem,
         Class::SidebarRow,
         Class::SidebarToggleButton,
         Class::FileTreeFoldButton,

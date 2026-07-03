@@ -120,6 +120,9 @@ pub(crate) fn library_entry_card<'a>(
         let area = mouse_area(lifted_surface)
             .on_enter(Message::LibraryEntryHoverChanged(entry_id.clone(), true))
             .on_exit(Message::LibraryEntryHoverChanged(entry_id.clone(), false))
+            .on_right_press(Message::ContextMenuOpened(ContextMenuTarget::LibraryEntry(
+                entry_id.clone(),
+            )))
             .on_press(Message::BeginLibraryEntryDrag(entry_id.clone()))
             .on_release(Message::EndLibraryEntryDrag);
         if app
@@ -245,6 +248,9 @@ pub(crate) fn library_entry_row<'a>(
         let area = mouse_area(lifted_surface)
             .on_enter(Message::LibraryEntryHoverChanged(entry_id.clone(), true))
             .on_exit(Message::LibraryEntryHoverChanged(entry_id.clone(), false))
+            .on_right_press(Message::ContextMenuOpened(ContextMenuTarget::LibraryEntry(
+                entry_id.clone(),
+            )))
             .on_press(Message::BeginLibraryEntryDrag(entry_id.clone()))
             .on_release(Message::EndLibraryEntryDrag);
         if app

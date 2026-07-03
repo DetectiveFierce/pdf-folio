@@ -143,6 +143,60 @@ pub enum SelectionMenu {
     Maintenance,
 }
 
+/// Right-click surfaces that can show contextual actions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContextMenuTarget {
+    /// A library PDF entry.
+    LibraryEntry(EntryId),
+    /// A library folder, or the library root when `None`.
+    Folder(Option<FolderId>),
+    /// Empty/library background space.
+    LibraryBackground,
+    /// The open document viewer canvas.
+    ViewerCanvas,
+}
+
+/// Actions launched from right-click contextual menus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextMenuAction {
+    Open,
+    SelectOnly,
+    AddToSelection,
+    ClearSelection,
+    AddTag,
+    RevealInFileManager,
+    OpenContainingFolder,
+    RelinkMissingFile,
+    SaveDetails,
+    ResetDetails,
+    RefreshMetadata,
+    ResetMetadata,
+    RebuildThumbnails,
+    Reindex,
+    DeleteFromLibrary,
+    SelectFolder,
+    NewFolder,
+    RenameFolder,
+    MoveFolderToRoot,
+    MoveFolderUp,
+    MoveFolderEarlier,
+    MoveFolderLater,
+    DeleteFolder,
+    ImportFolder,
+    RefreshLibrary,
+    ToggleLayout,
+    SortManual,
+    SortTitleAsc,
+    CopyViewerSelection,
+    FindInDocument,
+    JumpToPage,
+    ZoomIn,
+    ZoomOut,
+    ResetZoom,
+    ToggleToc,
+    BackToLibrary,
+}
+
 /// Confirmation-only actions that overwrite or delete user-visible library data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfirmationAction {
@@ -351,6 +405,19 @@ pub enum Message {
     CopyViewerTextSelection,
     /// Close the active overlay or panel.
     CloseOverlay,
+    /// Last known app-window cursor position changed.
+    CursorMoved(Point),
+    /// Open a contextual right-click menu.
+    ContextMenuOpened(ContextMenuTarget),
+    /// Open a contextual right-click menu at a known window position.
+    ContextMenuOpenedAt {
+        target: ContextMenuTarget,
+        position: Point,
+    },
+    /// Close the contextual right-click menu.
+    ContextMenuClosed,
+    /// A contextual menu action was chosen.
+    ContextMenuActionSelected(ContextMenuAction),
     /// Show the viewer find-in-text bar.
     OpenViewerFind,
     /// Hide the viewer find-in-text bar.

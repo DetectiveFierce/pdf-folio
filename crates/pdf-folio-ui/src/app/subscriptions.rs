@@ -18,6 +18,16 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
     let keyboard = event::listen_with(|event, status, _window| {
         shortcuts::keyboard_event_message(event, status)
     });
+    let cursor = if app.mode == AppMode::Library {
+        event::listen_with(|event, _status, _window| match event {
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                Some(Message::CursorMoved(position))
+            }
+            _ => None,
+        })
+    } else {
+        Subscription::none()
+    };
 
     let watcher = if app.settings.watch_directories.is_empty() {
         Subscription::none()
@@ -103,6 +113,7 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
 
     Subscription::batch([
         keyboard,
+        cursor,
         watcher,
         style_watcher,
         sidebar_resize,

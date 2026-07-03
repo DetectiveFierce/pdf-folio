@@ -120,6 +120,9 @@ pub(crate) fn folder_grid_card<'a>(
     }
 
     let area = mouse_area(card)
+        .on_right_press(Message::ContextMenuOpened(ContextMenuTarget::Folder(Some(
+            folder_id.clone(),
+        ))))
         .on_enter(Message::FolderDropTargetChanged(Some(folder_id)))
         .on_exit(Message::FolderDropTargetChanged(None));
     if mode == FolderCardRenderMode::Normal {

@@ -8,24 +8,35 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::AppMenuOpened(menu) => {
             app.chrome.open_selection_menu = None;
             app.chrome.open_view_menu_flyout = None;
+            app.chrome.open_context_menu = None;
             app.chrome.open_app_menu = if app.chrome.open_app_menu == Some(menu) {
                 None
             } else {
                 Some(menu)
             };
+            if app.mode == AppMode::Library {
+                return scroll_library_to_offset_task(app.library.library_scroll_offset);
+            }
         }
         Message::AppMenuClosed => {
             app.chrome.open_app_menu = None;
             app.chrome.open_view_menu_flyout = None;
+            if app.mode == AppMode::Library {
+                return scroll_library_to_offset_task(app.library.library_scroll_offset);
+            }
         }
         Message::ViewMenuFlyoutOpened(flyout) => {
             if app.chrome.open_app_menu == Some(AppMenu::View) {
                 app.chrome.open_view_menu_flyout = Some(flyout);
+                if app.mode == AppMode::Library {
+                    return scroll_library_to_offset_task(app.library.library_scroll_offset);
+                }
             }
         }
         Message::AppMenuActionSelected(action) => {
             app.chrome.open_app_menu = None;
             app.chrome.open_view_menu_flyout = None;
+            app.chrome.open_context_menu = None;
             match action {
                 AppMenuAction::SetViewerScrollMode(mode) => {
                     return app.set_viewer_scroll_mode(mode)
@@ -42,6 +53,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::SelectionMenuOpened(menu) => {
             app.chrome.open_app_menu = None;
             app.chrome.open_view_menu_flyout = None;
+            app.chrome.open_context_menu = None;
             app.chrome.open_selection_menu = if app.chrome.open_selection_menu == Some(menu) {
                 None
             } else {
@@ -50,6 +62,54 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::SelectionMenuClosed => {
             app.chrome.open_selection_menu = None;
+        }
+        Message::CursorMoved(position) => {
+            app.chrome.cursor_position = position;
+        }
+        Message::ContextMenuOpened(target) => {
+            app.open_context_menu(target);
+            if app.mode == AppMode::Library {
+                return scroll_library_to_offset_task(app.library.library_scroll_offset);
+            }
+        }
+        Message::ContextMenuOpenedAt { target, position } => {
+            app.chrome.cursor_position = position;
+            app.open_context_menu(target);
+            if app.mode == AppMode::Library {
+                return scroll_library_to_offset_task(app.library.library_scroll_offset);
+            }
+        }
+        Message::ContextMenuClosed => {
+            app.chrome.open_context_menu = None;
+            if app.mode == AppMode::Library {
+                return scroll_library_to_offset_task(app.library.library_scroll_offset);
+            }
+        }
+        Message::ContextMenuActionSelected(action) => {
+            if action == ContextMenuAction::SelectOnly {
+                if let Some(ContextMenuTarget::LibraryEntry(entry_id)) = app
+                    .chrome
+                    .open_context_menu
+                    .as_ref()
+                    .map(|menu| menu.target.clone())
+                {
+                    app.clear_library_selection();
+                    app.select_library_entry(entry_id);
+                }
+                app.chrome.open_context_menu = None;
+                if app.mode == AppMode::Library {
+                    return scroll_library_to_offset_task(app.library.library_scroll_offset);
+                }
+                return Task::none();
+            }
+            let message = app.context_menu_action_message(action);
+            app.chrome.open_context_menu = None;
+            if let Some(message) = message {
+                return Task::done(message);
+            }
+            if app.mode == AppMode::Library {
+                return scroll_library_to_offset_task(app.library.library_scroll_offset);
+            }
         }
         Message::OpenFileDialog => return open_file_dialog_task(),
         Message::FileDialogCanceled => {}
@@ -1111,6 +1171,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.chrome.open_view_menu_flyout = None;
             } else if app.chrome.open_selection_menu.is_some() {
                 app.chrome.open_selection_menu = None;
+            } else if app.chrome.open_context_menu.is_some() {
+                app.chrome.open_context_menu = None;
             } else {
                 app.viewer.toc_open = false;
             }
@@ -1346,6 +1408,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);
         }
         Message::ToggleZoomMenu => {
+            app.chrome.open_context_menu = None;
             app.viewer.zoom_menu_open = !app.viewer.zoom_menu_open;
             app.viewer.zoom_editing = false;
             app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);

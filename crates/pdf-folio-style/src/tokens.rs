@@ -93,6 +93,10 @@ pub struct AppLayoutTokens {
     pub app_menu_panel_width: f32,
     /// Dropdown menu item height.
     pub app_menu_item_height: f32,
+    /// Context menu panel width.
+    pub context_menu_panel_width: f32,
+    /// Context menu item height.
+    pub context_menu_item_height: f32,
     /// Library sidebar tab button height.
     pub sidebar_tab_height: f32,
     /// Viewer toolbar title minimum width.
@@ -177,6 +181,8 @@ impl Default for AppLayoutTokens {
             selection_context_row_height: 46.0,
             app_menu_panel_width: 270.0,
             app_menu_item_height: 30.0,
+            context_menu_panel_width: 250.0,
+            context_menu_item_height: 30.0,
             sidebar_tab_height: 30.0,
             viewer_toolbar_title_min_width: 28.0,
             viewer_toolbar_title_max_width: 360.0,

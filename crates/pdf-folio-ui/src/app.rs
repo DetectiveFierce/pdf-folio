@@ -26,6 +26,8 @@
 pub use pdf_folio_style as style;
 pub use pdf_folio_style::theme;
 
+#[path = "app/context_menu.rs"]
+mod app_context_menu;
 #[path = "app/library_data.rs"]
 mod app_library_data;
 #[path = "app/library_drag.rs"]
@@ -144,8 +146,9 @@ use crate::library::view::{
 };
 use crate::menu::{app_menu_action_message, app_menu_bar_height};
 use crate::messages::{
-    AppMenu, AppMenuAction, ConfirmationAction, LibrarySidebarTab, Message, SelectionMenu,
-    SelectionToolbarAction, Shortcut, ViewMenuFlyout, ViewerSidebarTab,
+    AppMenu, AppMenuAction, ConfirmationAction, ContextMenuAction, ContextMenuTarget,
+    LibrarySidebarTab, Message, SelectionMenu, SelectionToolbarAction, Shortcut, ViewMenuFlyout,
+    ViewerSidebarTab,
 };
 use crate::platform::file_manager_commands;
 #[cfg(test)]
@@ -406,6 +409,15 @@ pub struct ChromeRuntime {
     pub open_app_menu: Option<AppMenu>,
     pub open_view_menu_flyout: Option<ViewMenuFlyout>,
     pub open_selection_menu: Option<SelectionMenu>,
+    pub open_context_menu: Option<ContextMenu>,
+    pub cursor_position: Point,
+}
+
+/// Runtime state for a right-click contextual menu.
+#[derive(Debug, Clone)]
+pub struct ContextMenu {
+    pub target: ContextMenuTarget,
+    pub position: Point,
 }
 
 /// Runtime state for the active visual theme and loaded style book.

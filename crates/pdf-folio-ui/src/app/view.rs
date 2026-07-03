@@ -1,5 +1,6 @@
 //! App shell and viewer-surface rendering.
 
+use crate::app_context_menu::{context_menu_capture_layer, view_context_menu_dropdown};
 use crate::library::view::{
     chevron_button, floating_folder_drag_preview, floating_library_drag_preview,
     view_confirmation_dialog, view_create_folder_dialog, view_library,
@@ -102,6 +103,15 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
             base_content,
             zoom_menu_capture_layer(app),
             view_zoom_menu_dropdown(app, tokens)
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    } else if app.chrome.open_context_menu.is_some() {
+        stack![
+            base_content,
+            context_menu_capture_layer(app),
+            view_context_menu_dropdown(app, tokens)
         ]
         .width(Length::Fill)
         .height(Length::Fill)

@@ -1,0 +1,579 @@
+//! Right-click context menu rendering and action routing.
+
+use super::*;
+use iced::widget::{column, row, stack};
+use pdf_folio_ui_components::library::view::with_alpha;
+
+const CONTEXT_MENU_SEPARATOR_HEIGHT: f32 = 1.0;
+const CONTEXT_MENU_PANEL_SPACING: f32 = 2.0;
+
+#[derive(Debug, Clone, Copy)]
+struct ContextMenuItemSpec {
+    label: &'static str,
+    detail: &'static str,
+    enabled: bool,
+    action: ContextMenuAction,
+}
+
+impl PDFolioApp {
+    pub(super) fn open_context_menu(&mut self, target: ContextMenuTarget) {
+        self.chrome.open_app_menu = None;
+        self.chrome.open_view_menu_flyout = None;
+        self.chrome.open_selection_menu = None;
+        self.viewer.zoom_menu_open = false;
+
+        match &target {
+            ContextMenuTarget::LibraryEntry(entry_id) => {
+                if !self.library.selected_library_entries.contains(entry_id) {
+                    self.clear_library_selection();
+                    self.select_library_entry(entry_id.clone());
+                } else {
+                    self.library.details_entry_id = Some(entry_id.clone());
+                    self.sync_details_editor_to_selection();
+                }
+            }
+            ContextMenuTarget::Folder(folder_id) => {
+                self.library.selected_folder = folder_id.clone();
+                self.sync_folder_rename_input();
+            }
+            ContextMenuTarget::LibraryBackground | ContextMenuTarget::ViewerCanvas => {}
+        }
+
+        self.chrome.open_context_menu = Some(ContextMenu {
+            target,
+            position: self.chrome.cursor_position,
+        });
+    }
+
+    pub(super) fn context_menu_action_message(
+        &self,
+        action: ContextMenuAction,
+    ) -> Option<Message> {
+        let target = &self.chrome.open_context_menu.as_ref()?.target;
+        match action {
+            ContextMenuAction::Open => match target {
+                ContextMenuTarget::LibraryEntry(entry_id) => {
+                    Some(Message::OpenLibraryEntry(entry_id.clone()))
+                }
+                ContextMenuTarget::Folder(folder_id) => {
+                    Some(Message::FolderSelected(folder_id.clone()))
+                }
+                ContextMenuTarget::LibraryBackground => None,
+                ContextMenuTarget::ViewerCanvas => None,
+            },
+            ContextMenuAction::SelectOnly => None,
+            ContextMenuAction::AddToSelection => match target {
+                ContextMenuTarget::LibraryEntry(entry_id) => {
+                    Some(Message::EntryCheckboxToggled(entry_id.clone()))
+                }
+                _ => None,
+            },
+            ContextMenuAction::ClearSelection => Some(Message::ClearLibrarySelection),
+            ContextMenuAction::AddTag => match target {
+                ContextMenuTarget::LibraryEntry(entry_id) => {
+                    Some(Message::StartTagEntry(entry_id.clone()))
+                }
+                _ => None,
+            },
+            ContextMenuAction::RevealInFileManager => match target {
+                ContextMenuTarget::LibraryEntry(entry_id) => {
+                    Some(Message::RevealEntryInFileManager(entry_id.clone()))
+                }
+                _ => None,
+            },
+            ContextMenuAction::OpenContainingFolder => match target {
+                ContextMenuTarget::LibraryEntry(entry_id) => {
+                    Some(Message::OpenEntryContainingFolder(entry_id.clone()))
+                }
+                _ => None,
+            },
+            ContextMenuAction::RelinkMissingFile => match target {
+                ContextMenuTarget::LibraryEntry(entry_id) => {
+                    Some(Message::RelinkMissingEntry(entry_id.clone()))
+                }
+                _ => None,
+            },
+            ContextMenuAction::SaveDetails => Some(Message::SaveDetailsMetadata),
+            ContextMenuAction::ResetDetails => {
+                let entry_id = self.library.details_entry_id.clone()?;
+                Some(Message::RequestConfirmation(
+                    ConfirmationAction::ResetDetailsMetadata(entry_id),
+                ))
+            }
+            ContextMenuAction::RefreshMetadata => Some(Message::BulkRefreshPdfMetadata),
+            ContextMenuAction::ResetMetadata => Some(Message::RequestConfirmation(
+                ConfirmationAction::BulkResetDisplayMetadata,
+            )),
+            ContextMenuAction::RebuildThumbnails => Some(Message::BulkRebuildThumbnails),
+            ContextMenuAction::Reindex => Some(Message::BulkReindex),
+            ContextMenuAction::DeleteFromLibrary => Some(Message::RequestConfirmation(
+                ConfirmationAction::BulkDeleteFromLibrary,
+            )),
+            ContextMenuAction::SelectFolder => match target {
+                ContextMenuTarget::Folder(folder_id) => {
+                    Some(Message::FolderSelected(folder_id.clone()))
+                }
+                _ => None,
+            },
+            ContextMenuAction::NewFolder => Some(Message::OpenCreateFolderDialog),
+            ContextMenuAction::RenameFolder => Some(Message::RenameSelectedFolder),
+            ContextMenuAction::MoveFolderToRoot => Some(Message::MoveSelectedFolderToRoot),
+            ContextMenuAction::MoveFolderUp => Some(Message::MoveSelectedFolderUp),
+            ContextMenuAction::MoveFolderEarlier => Some(Message::MoveSelectedFolderEarlier),
+            ContextMenuAction::MoveFolderLater => Some(Message::MoveSelectedFolderLater),
+            ContextMenuAction::DeleteFolder => Some(Message::RequestDeleteSelectedFolder),
+            ContextMenuAction::ImportFolder => Some(Message::ImportFolderDialog),
+            ContextMenuAction::RefreshLibrary => Some(Message::LibraryRefresh),
+            ContextMenuAction::ToggleLayout => Some(Message::ToggleViewMode),
+            ContextMenuAction::SortManual => {
+                Some(Message::LibrarySortChanged(LibrarySortMode::Manual))
+            }
+            ContextMenuAction::SortTitleAsc => {
+                Some(Message::LibrarySortChanged(LibrarySortMode::TitleAsc))
+            }
+            ContextMenuAction::CopyViewerSelection => Some(Message::CopyViewerTextSelection),
+            ContextMenuAction::FindInDocument => Some(Message::OpenViewerFind),
+            ContextMenuAction::JumpToPage => Some(Message::OpenJumpDialog),
+            ContextMenuAction::ZoomIn => Some(Message::ZoomIn),
+            ContextMenuAction::ZoomOut => Some(Message::ZoomOut),
+            ContextMenuAction::ResetZoom => {
+                Some(Message::ZoomPresetSelected(ZoomPreset::Automatic))
+            }
+            ContextMenuAction::ToggleToc => Some(Message::ToggleSidebar),
+            ContextMenuAction::BackToLibrary => Some(Message::BackToLibrary),
+        }
+    }
+}
+
+pub(crate) fn context_menu_capture_layer<'a>(_app: &PDFolioApp) -> Element<'a, Message> {
+    pin(
+        mouse_area(container("").width(Length::Fill).height(Length::Fill))
+            .on_press(Message::ContextMenuClosed)
+            .on_right_press(Message::ContextMenuClosed),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+pub(crate) fn view_context_menu_dropdown(
+    app: &PDFolioApp,
+    tokens: ThemeTokens,
+) -> Element<'_, Message> {
+    let Some(menu) = app.chrome.open_context_menu.as_ref() else {
+        return container("").into();
+    };
+    let width = app.layout().context_menu_panel_width;
+    let max_x = app
+        .viewer
+        .viewport_width
+        .max(app.library.library_viewport_width)
+        .max(app.layout().window_width)
+        - width
+        - Spacing::SM;
+    let x = menu.position.x.clamp(Spacing::SM, max_x.max(Spacing::SM));
+    let y = menu.position.y.max(Spacing::SM);
+
+    stack![pin(context_menu_panel(app, &menu.target, tokens)).x(x).y(y)]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+fn context_menu_panel<'a>(
+    app: &'a PDFolioApp,
+    target: &'a ContextMenuTarget,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let mut panel = column![]
+        .spacing(CONTEXT_MENU_PANEL_SPACING)
+        .padding(Spacing::XS);
+    let groups = context_menu_groups(app, target);
+    for (group_index, group) in groups.iter().enumerate() {
+        if group_index > 0 {
+            panel = panel.push(context_menu_separator(tokens));
+        }
+        for item in group {
+            panel = panel.push(context_menu_item(
+                *item,
+                tokens,
+                app.layout().context_menu_item_height,
+            ));
+        }
+    }
+
+    container(panel)
+        .width(app.layout().context_menu_panel_width)
+        .style(move |_| {
+            let mut style = container_style(tokens, Class::ContextMenuPanel);
+            style.shadow = iced::Shadow {
+                color: tokens.shadow,
+                offset: iced::Vector::new(0.0, 8.0),
+                blur_radius: 18.0,
+            };
+            style
+        })
+        .into()
+}
+
+fn context_menu_groups(
+    app: &PDFolioApp,
+    target: &ContextMenuTarget,
+) -> Vec<Vec<ContextMenuItemSpec>> {
+    match target {
+        ContextMenuTarget::LibraryEntry(entry_id) => library_entry_context_groups(app, entry_id),
+        ContextMenuTarget::Folder(folder_id) => folder_context_groups(app, folder_id.as_ref()),
+        ContextMenuTarget::LibraryBackground => library_background_context_groups(app),
+        ContextMenuTarget::ViewerCanvas => viewer_context_groups(app),
+    }
+}
+
+fn library_entry_context_groups(
+    app: &PDFolioApp,
+    entry_id: &EntryId,
+) -> Vec<Vec<ContextMenuItemSpec>> {
+    let entry = app
+        .library
+        .library_entries
+        .iter()
+        .find(|entry| &entry.id == entry_id);
+    let has_selection = !app.library.selected_library_entries.is_empty();
+    let multi = app.library.selected_library_entries.len() > 1;
+    let missing = entry.is_some_and(|entry| entry.missing);
+
+    vec![
+        vec![
+            spec("Open PDF", "Enter", true, ContextMenuAction::Open),
+            spec("Select Only", "", true, ContextMenuAction::SelectOnly),
+            spec(
+                if app.library.selected_library_entries.contains(entry_id) {
+                    "Remove From Selection"
+                } else {
+                    "Add To Selection"
+                },
+                "",
+                has_selection,
+                ContextMenuAction::AddToSelection,
+            ),
+            spec(
+                "Clear Selection",
+                "Esc",
+                has_selection,
+                ContextMenuAction::ClearSelection,
+            ),
+        ],
+        vec![
+            spec("Add Tag...", "", true, ContextMenuAction::AddTag),
+            spec(
+                "Save Details",
+                "Enter",
+                !multi,
+                ContextMenuAction::SaveDetails,
+            ),
+            spec(
+                "Reset Details...",
+                "",
+                !multi,
+                ContextMenuAction::ResetDetails,
+            ),
+        ],
+        vec![
+            spec(
+                "Reveal in File Manager",
+                "",
+                true,
+                ContextMenuAction::RevealInFileManager,
+            ),
+            spec(
+                "Open Containing Folder",
+                "",
+                true,
+                ContextMenuAction::OpenContainingFolder,
+            ),
+            spec(
+                "Relink Missing File...",
+                "",
+                missing,
+                ContextMenuAction::RelinkMissingFile,
+            ),
+        ],
+        vec![
+            spec(
+                "Refresh Metadata",
+                "",
+                true,
+                ContextMenuAction::RefreshMetadata,
+            ),
+            spec(
+                "Reset Metadata...",
+                "",
+                true,
+                ContextMenuAction::ResetMetadata,
+            ),
+            spec(
+                "Rebuild Thumbnail",
+                "",
+                true,
+                ContextMenuAction::RebuildThumbnails,
+            ),
+            spec("Reindex Full Text", "", true, ContextMenuAction::Reindex),
+            spec(
+                "Delete From Library...",
+                "Del",
+                true,
+                ContextMenuAction::DeleteFromLibrary,
+            ),
+        ],
+    ]
+}
+
+fn folder_context_groups(
+    app: &PDFolioApp,
+    folder_id: Option<&FolderId>,
+) -> Vec<Vec<ContextMenuItemSpec>> {
+    let has_folder = folder_id.is_some();
+    let has_parent = app
+        .selected_folder()
+        .is_some_and(|folder| folder.parent_id.is_some());
+    let has_grandparent = app.selected_folder().is_some_and(|folder| {
+        folder.parent_id.as_ref().is_some_and(|parent_id| {
+            app.library
+                .library_folders
+                .iter()
+                .find(|candidate| &candidate.id == parent_id)
+                .and_then(|parent| parent.parent_id.as_ref())
+                .is_some()
+        })
+    });
+    let can_move_earlier = app
+        .selected_folder_sibling_order()
+        .is_some_and(|(_, _, index)| index > 0);
+    let can_move_later = app
+        .selected_folder_sibling_order()
+        .is_some_and(|(_, folder_ids, index)| index + 1 < folder_ids.len());
+
+    vec![
+        vec![
+            spec(
+                if has_folder {
+                    "Open Folder"
+                } else {
+                    "Open Library"
+                },
+                "",
+                true,
+                ContextMenuAction::SelectFolder,
+            ),
+            spec("New Folder...", "", true, ContextMenuAction::NewFolder),
+            spec(
+                "Refresh Library",
+                "F5",
+                true,
+                ContextMenuAction::RefreshLibrary,
+            ),
+        ],
+        vec![
+            spec(
+                "Rename Folder",
+                "Enter",
+                has_folder,
+                ContextMenuAction::RenameFolder,
+            ),
+            spec(
+                "Move To Root",
+                "",
+                has_parent,
+                ContextMenuAction::MoveFolderToRoot,
+            ),
+            spec(
+                "Move Up",
+                "",
+                has_grandparent,
+                ContextMenuAction::MoveFolderUp,
+            ),
+            spec(
+                "Move Earlier",
+                "",
+                can_move_earlier,
+                ContextMenuAction::MoveFolderEarlier,
+            ),
+            spec(
+                "Move Later",
+                "",
+                can_move_later,
+                ContextMenuAction::MoveFolderLater,
+            ),
+            spec(
+                "Delete Folder...",
+                "",
+                has_folder,
+                ContextMenuAction::DeleteFolder,
+            ),
+        ],
+    ]
+}
+
+fn library_background_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuItemSpec>> {
+    vec![
+        vec![
+            spec(
+                "Import Folder...",
+                "",
+                true,
+                ContextMenuAction::ImportFolder,
+            ),
+            spec("New Folder...", "", true, ContextMenuAction::NewFolder),
+            spec(
+                "Refresh Library",
+                "F5",
+                true,
+                ContextMenuAction::RefreshLibrary,
+            ),
+        ],
+        vec![
+            spec(
+                if app.library.compact_view_mode {
+                    "Switch To Grid"
+                } else {
+                    "Switch To List"
+                },
+                "",
+                true,
+                ContextMenuAction::ToggleLayout,
+            ),
+            spec("Sort Manually", "", true, ContextMenuAction::SortManual),
+            spec("Sort By Title", "", true, ContextMenuAction::SortTitleAsc),
+        ],
+    ]
+}
+
+fn viewer_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuItemSpec>> {
+    let has_selection = app.viewer.viewer_text_selection.is_some();
+    vec![
+        vec![
+            spec(
+                "Copy Selection",
+                "Ctrl+C",
+                has_selection,
+                ContextMenuAction::CopyViewerSelection,
+            ),
+            spec(
+                "Find In Document",
+                "Ctrl+F",
+                true,
+                ContextMenuAction::FindInDocument,
+            ),
+            spec(
+                "Jump To Page...",
+                "Ctrl+G",
+                true,
+                ContextMenuAction::JumpToPage,
+            ),
+        ],
+        vec![
+            spec("Zoom In", "Ctrl++", true, ContextMenuAction::ZoomIn),
+            spec("Zoom Out", "Ctrl+-", true, ContextMenuAction::ZoomOut),
+            spec("Reset Zoom", "Ctrl+0", true, ContextMenuAction::ResetZoom),
+        ],
+        vec![
+            spec(
+                if app.viewer.toc_open {
+                    "Hide Table Of Contents"
+                } else {
+                    "Show Table Of Contents"
+                },
+                "",
+                true,
+                ContextMenuAction::ToggleToc,
+            ),
+            spec(
+                "Back To Library",
+                "Esc",
+                true,
+                ContextMenuAction::BackToLibrary,
+            ),
+        ],
+    ]
+}
+
+fn spec(
+    label: &'static str,
+    detail: &'static str,
+    enabled: bool,
+    action: ContextMenuAction,
+) -> ContextMenuItemSpec {
+    ContextMenuItemSpec {
+        label,
+        detail,
+        enabled,
+        action,
+    }
+}
+
+fn context_menu_item<'a>(
+    item: ContextMenuItemSpec,
+    tokens: ThemeTokens,
+    item_height: f32,
+) -> Element<'a, Message> {
+    let label_color = if item.enabled {
+        tokens.text_primary
+    } else {
+        tokens.text_secondary
+    };
+    let detail_color = if item.enabled {
+        tokens.text_secondary
+    } else {
+        with_alpha(tokens.text_secondary, 0.58)
+    };
+    let content = row![
+        text(item.label)
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::REGULAR))
+            .color(label_color)
+            .wrapping(Wrapping::None)
+            .width(Length::Fill),
+        text(item.detail)
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::REGULAR))
+            .color(detail_color)
+            .wrapping(Wrapping::None),
+    ]
+    .spacing(Spacing::MD)
+    .align_y(iced::Alignment::Center);
+
+    if item.enabled {
+        button(content)
+            .height(item_height)
+            .width(Length::Fill)
+            .padding([Spacing::XS, Spacing::MD])
+            .on_press(Message::ContextMenuActionSelected(item.action))
+            .style(move |_, status| {
+                crate::style::button_style(tokens, Class::ContextMenuItem, status)
+            })
+            .into()
+    } else {
+        container(content)
+            .height(item_height)
+            .width(Length::Fill)
+            .padding([Spacing::XS, Spacing::MD])
+            .style(move |_| {
+                let disabled_style = tokens.class_styles[Class::ContextMenuItem.index()]
+                    .resolve(ComponentState::Disabled);
+                container_style(tokens, Class::ContextMenuItem).with_visual_override(disabled_style)
+            })
+            .into()
+    }
+}
+
+fn context_menu_separator(tokens: ThemeTokens) -> Element<'static, Message> {
+    container("")
+        .height(CONTEXT_MENU_SEPARATOR_HEIGHT)
+        .width(Length::Fill)
+        .style(move |_| {
+            let mut style = container_style(tokens, Class::ContextMenuPanel);
+            style.background = Some(iced::Background::Color(with_alpha(tokens.border, 0.7)));
+            style.border.width = 0.0;
+            style
+        })
+        .into()
+}

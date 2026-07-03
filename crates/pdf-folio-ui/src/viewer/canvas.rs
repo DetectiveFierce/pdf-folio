@@ -76,6 +76,16 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
                     None
                 }
             }
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                let position = cursor.position_over(bounds)?;
+                Some(
+                    canvas::Action::publish(Message::ContextMenuOpenedAt {
+                        target: ContextMenuTarget::ViewerCanvas,
+                        position,
+                    })
+                    .and_capture(),
+                )
+            }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 if let (Some(start), Some(position)) =
                     (state.pending_empty_click, cursor.position_in(bounds))

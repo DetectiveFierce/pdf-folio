@@ -231,7 +231,7 @@ pub(crate) fn view_file_tree_sidebar<'a>(
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     let library_counts = app.folder_smart_counts(None);
-    let mut tree = column![file_tree_row(
+    let root_row = file_tree_row(
         "Library",
         Some(folder_sidebar_count_label(library_counts)),
         0,
@@ -243,7 +243,9 @@ pub(crate) fn view_file_tree_sidebar<'a>(
         sidebar_width,
         tokens,
         false,
-    ),]
+    );
+    let mut tree = column![mouse_area(root_row)
+        .on_right_press(Message::ContextMenuOpened(ContextMenuTarget::Folder(None),)),]
     .spacing(0);
 
     if app.library.library_tree_root_expanded {
@@ -695,6 +697,9 @@ pub(crate) fn folder_sidebar_rows<'a>(
         );
         rows = rows.push(
             mouse_area(row)
+                .on_right_press(Message::ContextMenuOpened(ContextMenuTarget::Folder(Some(
+                    folder.id.clone(),
+                ))))
                 .on_enter(Message::FolderDropTargetChanged(Some(folder.id.clone())))
                 .on_exit(Message::FolderDropTargetChanged(None))
                 .on_press(Message::BeginFolderDrag(folder.id.clone()))

@@ -223,6 +223,9 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_| container_style(tokens, Class::AppShell));
+    let main_content = mouse_area(main_content).on_right_press(Message::ContextMenuOpened(
+        ContextMenuTarget::LibraryBackground,
+    ));
 
     let mut layout = row![].height(Length::Fill);
     if app.library.library_tag_sidebar_open {

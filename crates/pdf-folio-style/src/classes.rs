@@ -140,6 +140,10 @@ pub enum Class {
     DragStackGhost,
     /// Active folder target for PDF drag/drop assignment.
     FolderDropTarget,
+    /// Right-click contextual menu panel.
+    ContextMenuPanel,
+    /// Right-click contextual menu row.
+    ContextMenuItem,
 }
 
 /// Visual state shared by components that do not expose an iced status directly.
@@ -184,7 +188,7 @@ impl ComponentState {
 
 impl Class {
     /// Number of semantic classes represented in style files.
-    pub const COUNT: usize = 66;
+    pub const COUNT: usize = 68;
 
     /// Stable index for style arrays.
     pub const fn index(self) -> usize {
@@ -255,6 +259,8 @@ impl Class {
             Self::MasterCheckbox => 63,
             Self::DragStackGhost => 64,
             Self::FolderDropTarget => 65,
+            Self::ContextMenuPanel => 66,
+            Self::ContextMenuItem => 67,
         }
     }
 }
@@ -437,7 +443,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
             BorderWidth::HAIRLINE,
             Radius::NONE,
         ),
-        Class::MenuPanel => (
+        Class::MenuPanel | Class::ContextMenuPanel => (
             tokens.surface_raised,
             tokens.text_primary,
             tokens.border,
@@ -540,6 +546,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         | Class::SidebarFolderActionButton
         | Class::MenuButton
         | Class::MenuItem
+        | Class::ContextMenuItem
         | Class::SidebarRow
         | Class::ViewerSidebarTab
         | Class::ViewerOutlineEntry

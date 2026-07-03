@@ -169,6 +169,8 @@ impl PDFolioApp {
                 open_app_menu: None,
                 open_view_menu_flyout: None,
                 open_selection_menu: None,
+                open_context_menu: None,
+                cursor_position: Point::ORIGIN,
             },
             appearance: AppearanceRuntime {
                 theme: AppTheme::Dark,
