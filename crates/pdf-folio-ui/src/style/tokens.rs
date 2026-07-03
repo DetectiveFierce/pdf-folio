@@ -116,7 +116,7 @@ impl Default for AppLayoutTokens {
             library_sidebar_max_width: 340.0,
             sidebar_resize_handle_width: 8.0,
             sidebar_resize_handle_visual_width: 2.0,
-            toolbar_height: 58.0,
+            toolbar_height: 46.0,
             library_overscan_rows: 4,
             card_grid_columns: 2,
             library_grid_card_width,

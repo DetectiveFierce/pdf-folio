@@ -133,6 +133,22 @@ fn viewer_text_selection_orders_character_ranges_from_drag_endpoints() {
 }
 
 #[test]
+fn viewer_spread_groups_pair_odd_pages_on_left() {
+    assert_eq!(
+        viewer_spread_groups(5, ViewerSpreadMode::Odd),
+        vec![vec![0, 1], vec![2, 3], vec![4]]
+    );
+}
+
+#[test]
+fn viewer_spread_groups_leave_cover_alone_for_even_spreads() {
+    assert_eq!(
+        viewer_spread_groups(5, ViewerSpreadMode::Even),
+        vec![vec![0], vec![1, 2], vec![3, 4]]
+    );
+}
+
+#[test]
 fn root_library_scope_shows_only_unfiled_entries() {
     let db = test_db("root-folder-scope");
     db.insert_entry(&test_new_entry("unfiled")).unwrap();

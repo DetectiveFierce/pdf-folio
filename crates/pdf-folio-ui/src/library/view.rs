@@ -6,9 +6,20 @@ use crate::menu::{
 };
 use crate::viewer::canvas::{ViewerCanvas, ViewerSelectionOverlay};
 use crate::viewer::outline::{view_jump_dialog, view_sidebar};
+use crate::viewer::zoom::{zoom_control, zoom_menu, ZOOM_CONTROL_WIDTH, ZOOM_MENU_WIDTH};
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{canvas, column, row, stack};
+use std::time::Duration;
+
+const VIEWER_TOOLBAR_TITLE_MIN_WIDTH: f32 = 28.0;
+const VIEWER_TOOLBAR_TITLE_MAX_WIDTH: f32 = 360.0;
+const VIEWER_TOOLBAR_SELECTION_WIDTH: f32 = 116.0;
+const VIEWER_FIND_BAR_WIDTH: f32 = 600.0;
+const VIEWER_FIND_BAR_HEIGHT: f32 = 42.0;
+const VIEWER_PAGE_NUMBER_WIDTH: f32 = 42.0;
+const VIEWER_PAGE_CONTROL_WIDTH: f32 = 150.0;
+const VIEWER_PAGE_CHEVRON_SIZE: f32 = 28.0;
 
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens(&app.style_book);
@@ -25,9 +36,21 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         let selection_overlay = canvas(ViewerSelectionOverlay { app })
             .width(Length::Fill)
             .height(Length::Fill);
-        let viewer_stack = stack![viewer, selection_overlay]
+        let mut viewer_stack = stack![viewer, selection_overlay]
             .width(Length::Fill)
             .height(Length::Fill);
+        if !app.toc_open {
+            viewer_stack = viewer_stack.push(
+                pin(viewer_floating_sidebar_toggle(tokens))
+                    .x(Spacing::SM)
+                    .y(Spacing::SM),
+            );
+        }
+        if app.viewer_find.open {
+            let find_width = VIEWER_FIND_BAR_WIDTH
+                .min((app.viewer_viewport_width - Spacing::MD * 2.0).max(320.0));
+            viewer_stack = viewer_stack.push(viewer_find_anchor(app, tokens, find_width));
+        }
         let mut main = column![].spacing(0);
         if let Some(error) = app.document_error.as_deref() {
             main = main.push(dismissible_error_banner(
@@ -77,6 +100,15 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+    } else if app.zoom_menu_open {
+        stack![
+            base_content,
+            zoom_menu_capture_layer(app),
+            view_zoom_menu_dropdown(app, tokens)
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     } else {
         base_content
     };
@@ -105,10 +137,134 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         menu_content
     };
 
-    container(content)
+    let shell: Element<'_, Message> = container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_| container_style(tokens, Class::AppShell))
+        .into();
+
+    if app.pending_document_open {
+        stack![shell, loading_cursor_layer()]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else {
+        shell
+    }
+}
+
+fn viewer_find_anchor(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> Element<'_, Message> {
+    container(view_viewer_find_bar(app, tokens, width))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Right)
+        .align_y(iced::alignment::Vertical::Bottom)
+        .into()
+}
+
+fn view_viewer_find_bar(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> Element<'_, Message> {
+    let current = app.viewer_find.selected.map_or(0, |index| index + 1);
+    let total = app.viewer_find.matches.len();
+    let fraction = format!("{current}/{total}");
+
+    let content = row![
+        search_input_with_class(
+            "Find in Text",
+            &app.viewer_find.query,
+            tokens,
+            Class::SearchInput,
+            Message::ViewerFindQueryChanged,
+        )
+        .id(Id::new(VIEWER_FIND_INPUT_ID))
+        .on_submit(Message::ViewerFindNext)
+        .width(Length::Fixed(140.0)),
+        text(fraction)
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary)
+            .wrapping(Wrapping::None)
+            .width(Length::Fixed(44.0)),
+        viewer_find_icon_button(CHEVRON_UP_SVG, "Previous match", tokens)
+            .on_press(Message::ViewerFindPrevious),
+        viewer_find_icon_button(CHEVRON_DOWN_SVG, "Next match", tokens)
+            .on_press(Message::ViewerFindNext),
+        checkbox(app.viewer_find.highlight_all)
+            .label("Highlight All")
+            .on_toggle(Message::ViewerFindHighlightAllToggled)
+            .size(16.0)
+            .text_size(FontSize::SM),
+        checkbox(app.viewer_find.match_case)
+            .label("Match Case")
+            .on_toggle(Message::ViewerFindMatchCaseToggled)
+            .size(16.0)
+            .text_size(FontSize::SM),
+        checkbox(app.viewer_find.match_diacritics)
+            .label("Match Diacritics")
+            .on_toggle(Message::ViewerFindMatchDiacriticsToggled)
+            .size(16.0)
+            .text_size(FontSize::SM),
+        icon_button("x", tokens)
+            .on_press(Message::CloseViewerFind)
+            .width(Length::Fixed(30.0))
+            .height(Length::Fixed(30.0)),
+    ]
+    .spacing(Spacing::XS)
+    .padding([Spacing::XS, Spacing::SM])
+    .height(VIEWER_FIND_BAR_HEIGHT)
+    .align_y(iced::Alignment::Center);
+
+    container(content)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(VIEWER_FIND_BAR_HEIGHT))
+        .style(move |_| {
+            let mut style = container_style(tokens, Class::MenuPanel);
+            let top_left = style.border.radius.top_left;
+            style.border.radius = iced::border::Radius {
+                top_left,
+                top_right: 0.0,
+                bottom_right: 0.0,
+                bottom_left: 0.0,
+            };
+            style.shadow = iced::Shadow {
+                color: tokens.shadow,
+                offset: iced::Vector::new(0.0, 8.0),
+                blur_radius: 18.0,
+            };
+            style
+        })
+        .into()
+}
+
+fn viewer_find_icon_button<'a>(
+    icon: &'static [u8],
+    label: &'static str,
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
+    button(
+        tooltip(
+            container(
+                Svg::new(iced::widget::svg::Handle::from_memory(icon))
+                    .width(16.0)
+                    .height(16.0)
+                    .style(move |_, _| iced::widget::svg::Style {
+                        color: Some(tokens.text_primary),
+                    }),
+            )
+            .center(Length::Fill),
+            label,
+            tooltip::Position::Top,
+        )
+        .style(move |_| container_style(tokens, Class::Tooltip)),
+    )
+    .width(Length::Fixed(30.0))
+    .height(Length::Fixed(30.0))
+    .padding(0)
+    .style(move |_, status| crate::style::button_style(tokens, Class::ToolbarButton, status))
+}
+
+fn loading_cursor_layer() -> Element<'static, Message> {
+    mouse_area(container("").width(Length::Fill).height(Length::Fill))
+        .interaction(mouse::Interaction::Progress)
         .into()
 }
 
@@ -150,44 +306,19 @@ fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
         .and_then(|doc| doc.path().file_name())
         .and_then(|file_name| file_name.to_str())
         .unwrap_or("Open PDF");
-    let toc_label = if app.toc_open {
-        "Hide Contents"
-    } else {
-        "Contents"
-    };
     let theme_label = match app.theme {
         AppTheme::Light => "Dark",
         AppTheme::Dark => "Light",
     };
+    let title_width = viewer_toolbar_title_width(app);
 
     let mut toolbar = row![
-        toolbar_button("Library", tokens).on_press(Message::BackToLibrary),
+        viewer_library_back_button().on_press(Message::BackToLibrary),
         toolbar_button("Open PDF", tokens).on_press(Message::OpenFileDialog),
-        toolbar_button(toc_label, tokens).on_press(Message::ToggleSidebar),
-        container(
-            text(document_title)
-                .size(FontSize::MD)
-                .font(ui_font(FontWeight::MEDIUM))
-                .color(tokens.text_primary)
-                .wrapping(Wrapping::None)
-        )
-        .width(Length::Fill)
-        .center_y(Length::Shrink),
-        text(format!("{current_page} / {page_count}"))
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::MEDIUM))
-            .color(tokens.text_secondary)
-            .wrapping(Wrapping::None),
-        toolbar_button("Go to Page", tokens).on_press(Message::OpenJumpDialog),
+        viewer_toolbar_title(document_title, title_width, tokens),
+        viewer_page_control(app, current_page, page_count, tokens),
         icon_button("-", tokens).on_press(Message::ZoomOut),
-        text(format!(
-            "{}%",
-            (f32::from(app.zoom_width) / 8.0).round() as u16
-        ))
-        .size(FontSize::MD)
-        .font(ui_font(FontWeight::MEDIUM))
-        .color(tokens.text_secondary)
-        .wrapping(Wrapping::None),
+        zoom_control(app, tokens),
         icon_button("+", tokens).on_press(Message::ZoomIn),
     ];
 
@@ -200,13 +331,11 @@ fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
             format!("{} pages selected", end.page.saturating_sub(start.page) + 1)
         };
         toolbar = toolbar
-            .push(
-                text(label)
-                    .size(FontSize::SM)
-                    .font(ui_font(FontWeight::MEDIUM))
-                    .color(tokens.text_secondary)
-                    .wrapping(Wrapping::None),
-            )
+            .push(viewer_toolbar_status_label(
+                label,
+                VIEWER_TOOLBAR_SELECTION_WIDTH,
+                tokens,
+            ))
             .push(toolbar_button("Copy", tokens).on_press(Message::CopyViewerTextSelection))
             .push(toolbar_button("Clear", tokens).on_press(Message::ClearViewerTextSelection));
     }
@@ -222,6 +351,249 @@ fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
         .width(Length::Fill)
         .style(move |_| container_style(tokens, Class::Toolbar))
         .into()
+}
+
+fn viewer_library_back_button<'a>() -> iced::widget::Button<'a, Message> {
+    let brown = Color::from_rgb8(185, 156, 120);
+    let bright_brown = Color::from_rgb8(212, 168, 83);
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(CHEVRON_LEFT_SVG))
+        .width(16.0)
+        .height(16.0)
+        .style(move |_, status| iced::widget::svg::Style {
+            color: Some(match status {
+                iced::widget::svg::Status::Hovered => bright_brown,
+                _ => brown,
+            }),
+        });
+    let label = text("Library")
+        .size(FontSize::MD)
+        .font(ui_font(FontWeight::MEDIUM))
+        .wrapping(Wrapping::None);
+
+    button(
+        row![icon, label]
+            .spacing(Spacing::XS)
+            .align_y(iced::Alignment::Center),
+    )
+    .padding([Spacing::SM, Spacing::LG])
+    .style(move |_, status| transparent_brown_toolbar_button_style(brown, bright_brown, status))
+}
+
+fn transparent_brown_toolbar_button_style(
+    brown: Color,
+    bright_brown: Color,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    let text_color = match status {
+        iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed => {
+            bright_brown
+        }
+        _ => brown,
+    };
+
+    iced::widget::button::Style {
+        background: None,
+        text_color,
+        border: iced::Border {
+            width: 0.0,
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
+            radius: iced::border::Radius::from(4.0),
+        },
+        ..iced::widget::button::Style::default()
+    }
+}
+
+fn viewer_page_control<'a>(
+    app: &'a PDFolioApp,
+    current_page: u16,
+    page_count: u16,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let numerator: Element<'a, Message> = if app.page_input_editing {
+        text_input("", &app.jump_input)
+            .id(iced::widget::Id::new(PAGE_INPUT_ID))
+            .on_input(Message::JumpInputChanged)
+            .on_submit(Message::SubmitJump)
+            .padding([Spacing::XS, Spacing::SM])
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::MEDIUM))
+            .width(Length::Fixed(VIEWER_PAGE_NUMBER_WIDTH))
+            .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+            .into()
+    } else {
+        mouse_area(
+            container(
+                text(current_page.to_string())
+                    .size(FontSize::MD)
+                    .font(ui_font(FontWeight::MEDIUM))
+                    .color(tokens.text_secondary)
+                    .wrapping(Wrapping::None),
+            )
+            .width(Length::Fixed(VIEWER_PAGE_NUMBER_WIDTH))
+            .height(Length::Fixed(VIEWER_PAGE_CHEVRON_SIZE))
+            .center(Length::Fill),
+        )
+        .on_double_click(Message::StartPageInputEdit)
+        .into()
+    };
+
+    row![
+        viewer_page_chevron_button(CHEVRON_LEFT_SVG, tokens)
+            .on_press(Message::PreviousPage)
+            .width(Length::Fixed(VIEWER_PAGE_CHEVRON_SIZE))
+            .height(Length::Fixed(VIEWER_PAGE_CHEVRON_SIZE)),
+        numerator,
+        text(format!("/ {page_count}"))
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary)
+            .wrapping(Wrapping::None),
+        viewer_page_chevron_button(CHEVRON_RIGHT_SVG, tokens)
+            .on_press(Message::NextPage)
+            .width(Length::Fixed(VIEWER_PAGE_CHEVRON_SIZE))
+            .height(Length::Fixed(VIEWER_PAGE_CHEVRON_SIZE)),
+    ]
+    .spacing(Spacing::XS)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+fn viewer_page_chevron_button<'a>(
+    icon: &'static [u8],
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
+        .width(16.0)
+        .height(16.0)
+        .style(move |_, _| iced::widget::svg::Style {
+            color: Some(tokens.text_secondary),
+        });
+
+    button(container(icon).center(Length::Fill))
+        .padding(0)
+        .style(move |_, status| crate::style::button_style(tokens, Class::ToolbarButton, status))
+}
+
+fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Message> {
+    pin(
+        mouse_area(container("").width(Length::Fill).height(Length::Fill))
+            .on_press(Message::CloseZoomMenu),
+    )
+    .y(app_menu_bar_height(app) + app.layout().toolbar_height)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+fn view_zoom_menu_dropdown(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    pin(zoom_menu(app, tokens))
+        .x(viewer_zoom_menu_x(app))
+        .y(app_menu_bar_height(app) + app.layout().toolbar_height)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+fn viewer_toolbar_title<'a>(
+    title: &'a str,
+    width: f32,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let visible = truncate_for_width_with_font(title, width, 0.0, FontSize::MD);
+    let is_truncated = visible != title;
+    let label = text(visible)
+        .size(FontSize::MD)
+        .font(ui_font(FontWeight::MEDIUM))
+        .color(tokens.text_primary)
+        .wrapping(Wrapping::None)
+        .width(Length::Fill);
+
+    let content = container(label)
+        .width(Length::Fixed(width))
+        .center_y(Length::Shrink)
+        .clip(true);
+
+    if !is_truncated {
+        return content.into();
+    }
+
+    tooltip(
+        content,
+        container(
+            text(title)
+                .size(FontSize::SM)
+                .color(tokens.text_primary)
+                .wrapping(Wrapping::None),
+        )
+        .padding(Spacing::SM)
+        .style(move |_| container_style(tokens, Class::Tooltip)),
+        tooltip::Position::Bottom,
+    )
+    .delay(Duration::from_millis(600))
+    .into()
+}
+
+fn viewer_toolbar_status_label<'a>(
+    label: String,
+    width: f32,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    text(truncate_for_width_with_font(
+        &label,
+        width,
+        0.0,
+        FontSize::SM,
+    ))
+    .size(FontSize::SM)
+    .font(ui_font(FontWeight::MEDIUM))
+    .color(tokens.text_secondary)
+    .wrapping(Wrapping::None)
+    .width(Length::Fill)
+    .into()
+}
+
+fn viewer_toolbar_title_width(app: &PDFolioApp) -> f32 {
+    let selection_reserve = if app.viewer_text_selection.is_some() {
+        VIEWER_TOOLBAR_SELECTION_WIDTH + 2.0 * (76.0 + Spacing::SM)
+    } else {
+        0.0
+    };
+    let chrome_reserve = 470.0 + selection_reserve;
+    (app.viewport_width - chrome_reserve).clamp(
+        VIEWER_TOOLBAR_TITLE_MIN_WIDTH,
+        VIEWER_TOOLBAR_TITLE_MAX_WIDTH,
+    )
+}
+
+fn viewer_zoom_menu_x(app: &PDFolioApp) -> f32 {
+    const VIEWER_LIBRARY_BUTTON_WIDTH: f32 = 70.0;
+    const VIEWER_OPEN_BUTTON_WIDTH: f32 = 87.0;
+    const VIEWER_ZOOM_STEP_BUTTON_WIDTH: f32 = 30.0;
+
+    let zoom_control_right = Spacing::MD
+        + VIEWER_LIBRARY_BUTTON_WIDTH
+        + Spacing::SM
+        + VIEWER_OPEN_BUTTON_WIDTH
+        + Spacing::SM
+        + viewer_toolbar_title_width(app)
+        + Spacing::SM
+        + VIEWER_PAGE_CONTROL_WIDTH
+        + Spacing::SM
+        + VIEWER_ZOOM_STEP_BUTTON_WIDTH
+        + Spacing::SM
+        + ZOOM_CONTROL_WIDTH;
+
+    (zoom_control_right - ZOOM_MENU_WIDTH).max(Spacing::MD)
+}
+
+fn viewer_floating_sidebar_toggle<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
+    chevron_button(
+        CHEVRON_RIGHT_SVG,
+        "Show Contents",
+        Message::ToggleSidebar,
+        tokens,
+        true,
+    )
 }
 
 pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
@@ -2131,6 +2503,16 @@ pub(crate) fn sidebar_chevron_button<'a>(
     message: Message,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
+    chevron_button(icon, tooltip_label, message, tokens, false)
+}
+
+fn chevron_button<'a>(
+    icon: &'static [u8],
+    tooltip_label: &'a str,
+    message: Message,
+    tokens: ThemeTokens,
+    transparent: bool,
+) -> Element<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
         .width(18.0)
         .height(18.0)
@@ -2145,7 +2527,15 @@ pub(crate) fn sidebar_chevron_button<'a>(
     .width(28.0)
     .height(28.0)
     .padding(0)
-    .style(move |_, status| crate::style::button_style(tokens, Class::SidebarToggleButton, status))
+    .style(move |_, status| {
+        let mut style = crate::style::button_style(tokens, Class::SidebarToggleButton, status);
+        if transparent {
+            style.background = None;
+            style.border.width = 0.0;
+            style.shadow = iced::Shadow::default();
+        }
+        style
+    })
     .on_press(message);
 
     tooltip(

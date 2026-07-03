@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::library::view::with_alpha;
-use iced::widget::{column, row};
+use crate::viewer::state::{ViewerScrollMode, ViewerSpreadMode};
+use crate::viewer::zoom::ZoomPreset;
+use iced::widget::{column, row, stack};
 
 const APP_MENU_LABELS: [AppMenu; 7] = [
     AppMenu::File,
@@ -13,7 +15,18 @@ const APP_MENU_LABELS: [AppMenu; 7] = [
     AppMenu::Tools,
     AppMenu::Help,
 ];
+const APP_MENU_BUTTON_SPACING: f32 = 2.0;
+const APP_MENU_PANEL_SPACING: f32 = 2.0;
+const APP_MENU_SEPARATOR_HEIGHT: f32 = 1.0;
+
 pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -> Option<Message> {
+    if matches!(
+        action,
+        AppMenuAction::SetViewerScrollMode(_) | AppMenuAction::SetViewerSpreadMode(_)
+    ) {
+        return None;
+    }
+
     Some(match action {
         AppMenuAction::OpenFile => Message::OpenFileDialog,
         AppMenuAction::ImportFolder => Message::ImportFolderDialog,
@@ -38,9 +51,13 @@ pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -
         AppMenuAction::ReloadStyles => Message::ReloadStyles,
         AppMenuAction::ToggleToc => Message::ToggleSidebar,
         AppMenuAction::JumpToPage => Message::OpenJumpDialog,
+        AppMenuAction::FindInDocument => Message::OpenViewerFind,
         AppMenuAction::ZoomIn => Message::ZoomIn,
         AppMenuAction::ZoomOut => Message::ZoomOut,
-        AppMenuAction::ResetZoom => Message::ZoomSet(app.settings.default_zoom_width),
+        AppMenuAction::ResetZoom => Message::ZoomPresetSelected(ZoomPreset::Automatic),
+        AppMenuAction::SetViewerScrollMode(_) | AppMenuAction::SetViewerSpreadMode(_) => {
+            return None;
+        }
         AppMenuAction::SortLibrary(sort_mode) => Message::LibrarySortChanged(sort_mode),
         AppMenuAction::CreateFolder => Message::OpenCreateFolderDialog,
         AppMenuAction::ResetMetadata => {
@@ -57,7 +74,7 @@ pub(crate) fn view_app_menu_bar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.theme.tokens(&app.style_book);
     let labels = app.labels();
     let mut menus = row![]
-        .spacing(2.0)
+        .spacing(APP_MENU_BUTTON_SPACING)
         .padding([0.0, Spacing::MD])
         .height(app.layout().app_menu_bar_height)
         .align_y(iced::Alignment::Center);
@@ -112,6 +129,7 @@ pub(crate) fn app_menu_button<'a>(
         .center_y(Length::Shrink),
     )
     .padding([0.0, Spacing::MD])
+    .width(app_menu_button_width(menu))
     .height(24.0)
     .on_press(Message::AppMenuOpened(menu))
     .style(move |_, status| {
@@ -134,7 +152,7 @@ pub(crate) fn app_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Messag
         mouse_area(container("").width(Length::Fill).height(Length::Fill))
             .on_press(Message::AppMenuClosed),
     )
-    .y(app_menu_bar_height(app))
+    .y(app.layout().app_menu_bar_height)
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
@@ -158,18 +176,46 @@ pub(crate) fn view_app_menu_dropdown(
     let Some(menu) = app.open_app_menu else {
         return container("").into();
     };
-    let menu_index = APP_MENU_LABELS
-        .iter()
-        .position(|candidate| *candidate == menu)
-        .unwrap_or(0);
-    let x = 10.0 + menu_index as f32 * 76.0;
-
-    pin(app_menu_panel(app, menu, tokens))
-        .x(x)
-        .y(app_menu_bar_height(app))
+    let menu_x = app_menu_x(menu);
+    let menu_y = app.layout().app_menu_bar_height;
+    let mut dropdown = stack![pin(app_menu_panel(app, menu, tokens)).x(menu_x).y(menu_y)]
         .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        .height(Length::Fill);
+
+    if menu == AppMenu::View {
+        if let Some(flyout) = app.open_view_menu_flyout {
+            dropdown = dropdown.push(
+                pin(view_menu_flyout_panel(app, flyout, tokens))
+                    .x(menu_x + app.layout().app_menu_panel_width)
+                    .y(menu_y + view_menu_flyout_y_offset(app, flyout)),
+            );
+        }
+    }
+
+    dropdown.into()
+}
+
+pub(crate) fn app_menu_x(menu: AppMenu) -> f32 {
+    let mut x = Spacing::MD;
+    for candidate in APP_MENU_LABELS {
+        if candidate == menu {
+            break;
+        }
+        x += app_menu_button_width(candidate) + APP_MENU_BUTTON_SPACING;
+    }
+    x
+}
+
+pub(crate) fn app_menu_button_width(menu: AppMenu) -> f32 {
+    match menu {
+        AppMenu::File => 48.0,
+        AppMenu::Edit => 48.0,
+        AppMenu::View => 56.0,
+        AppMenu::Document => 88.0,
+        AppMenu::Library => 68.0,
+        AppMenu::Tools => 58.0,
+        AppMenu::Help => 56.0,
+    }
 }
 
 pub(crate) fn app_menu_panel<'a>(
@@ -332,11 +378,22 @@ pub(crate) fn app_menu_panel<'a>(
                     tokens,
                     app.layout().app_menu_item_height,
                 ))
-                .push(app_menu_item(
-                    app_menu_action_label(labels, "JumpToPage", "Jump to Page..."),
-                    "Ctrl+G",
+                .push(app_menu_separator(tokens))
+                .push(app_menu_submenu_item(
+                    app_menu_action_label(labels, "ViewerScrolling", "Scrolling"),
+                    app.viewer_scroll_mode.label(),
                     app.mode == AppMode::Viewer,
-                    AppMenuAction::JumpToPage,
+                    ViewMenuFlyout::Scrolling,
+                    app.open_view_menu_flyout == Some(ViewMenuFlyout::Scrolling),
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_submenu_item(
+                    app_menu_action_label(labels, "ViewerSpreads", "Spreads"),
+                    app.viewer_spread_mode.label(),
+                    app.mode == AppMode::Viewer,
+                    ViewMenuFlyout::Spreads,
+                    app.open_view_menu_flyout == Some(ViewMenuFlyout::Spreads),
                     tokens,
                     app.layout().app_menu_item_height,
                 ))
@@ -373,6 +430,14 @@ pub(crate) fn app_menu_panel<'a>(
                     "Ctrl+G",
                     app.mode == AppMode::Viewer,
                     AppMenuAction::JumpToPage,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "FindInDocument", "Find in Document"),
+                    "Ctrl+F",
+                    app.mode == AppMode::Viewer,
+                    AppMenuAction::FindInDocument,
                     tokens,
                     app.layout().app_menu_item_height,
                 ))
@@ -563,6 +628,74 @@ pub(crate) fn app_menu_panel<'a>(
         .into()
 }
 
+fn view_menu_flyout_y_offset(app: &PDFolioApp, flyout: ViewMenuFlyout) -> f32 {
+    let item_height = app.layout().app_menu_item_height;
+    let scrolling_y = Spacing::XS
+        + item_height * 4.0
+        + APP_MENU_SEPARATOR_HEIGHT * 2.0
+        + APP_MENU_PANEL_SPACING * 6.0;
+    match flyout {
+        ViewMenuFlyout::Scrolling => scrolling_y,
+        ViewMenuFlyout::Spreads => scrolling_y + item_height + APP_MENU_PANEL_SPACING,
+    }
+}
+
+fn view_menu_flyout_panel<'a>(
+    app: &'a PDFolioApp,
+    flyout: ViewMenuFlyout,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let mut panel = column![].spacing(2.0).padding(Spacing::XS);
+
+    match flyout {
+        ViewMenuFlyout::Scrolling => {
+            for mode in ViewerScrollMode::ALL {
+                panel = panel.push(app_menu_item(
+                    mode.label(),
+                    if app.viewer_scroll_mode == mode {
+                        "Selected"
+                    } else {
+                        mode.detail()
+                    },
+                    app.mode == AppMode::Viewer,
+                    AppMenuAction::SetViewerScrollMode(mode),
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ));
+            }
+        }
+        ViewMenuFlyout::Spreads => {
+            for mode in ViewerSpreadMode::ALL {
+                panel = panel.push(app_menu_item(
+                    mode.label(),
+                    if app.viewer_spread_mode == mode {
+                        "Selected"
+                    } else {
+                        ""
+                    },
+                    app.mode == AppMode::Viewer,
+                    AppMenuAction::SetViewerSpreadMode(mode),
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ));
+            }
+        }
+    }
+
+    container(panel)
+        .width(app.layout().app_menu_panel_width)
+        .style(move |_| {
+            let mut style = container_style(tokens, Class::MenuPanel);
+            style.shadow = iced::Shadow {
+                color: tokens.shadow,
+                offset: iced::Vector::new(0.0, 8.0),
+                blur_radius: 18.0,
+            };
+            style
+        })
+        .into()
+}
+
 pub(crate) fn app_menu_item<'a>(
     label: &'a str,
     shortcut: &'a str,
@@ -605,6 +738,79 @@ pub(crate) fn app_menu_item<'a>(
             .on_press(Message::AppMenuActionSelected(action))
             .style(move |_, status| crate::style::button_style(tokens, Class::MenuItem, status))
             .into()
+    } else {
+        container(content)
+            .height(item_height)
+            .width(Length::Fill)
+            .padding([Spacing::XS, Spacing::MD])
+            .style(move |_| {
+                let disabled_style =
+                    tokens.class_styles[Class::MenuItem.index()].resolve(ComponentState::Disabled);
+                container_style(tokens, Class::MenuItem).with_visual_override(disabled_style)
+            })
+            .into()
+    }
+}
+
+pub(crate) fn app_menu_submenu_item<'a>(
+    label: &'a str,
+    value: &'a str,
+    enabled: bool,
+    flyout: ViewMenuFlyout,
+    active: bool,
+    tokens: ThemeTokens,
+    item_height: f32,
+) -> Element<'a, Message> {
+    let label_color = if enabled {
+        tokens.text_primary
+    } else {
+        tokens.text_secondary
+    };
+    let value_color = if enabled {
+        tokens.text_secondary
+    } else {
+        with_alpha(tokens.text_secondary, 0.58)
+    };
+    let content = row![
+        text(label)
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::REGULAR))
+            .color(label_color)
+            .wrapping(Wrapping::None)
+            .width(Length::Fill),
+        text(value)
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::REGULAR))
+            .color(value_color)
+            .wrapping(Wrapping::None),
+        text(">")
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .color(value_color)
+            .wrapping(Wrapping::None),
+    ]
+    .spacing(Spacing::SM)
+    .align_y(iced::Alignment::Center);
+
+    if enabled {
+        mouse_area(
+            button(content)
+                .height(item_height)
+                .width(Length::Fill)
+                .padding([Spacing::XS, Spacing::MD])
+                .on_press(Message::ViewMenuFlyoutOpened(flyout))
+                .style(move |_, status| {
+                    let mut style = crate::style::button_style(tokens, Class::MenuItem, status);
+                    if active {
+                        let active_style = tokens.class_styles[Class::MenuItem.index()]
+                            .resolve(ComponentState::Active);
+                        style = style.with_visual_override(active_style);
+                    }
+                    style
+                }),
+        )
+        .on_enter(Message::ViewMenuFlyoutOpened(flyout))
+        .into()
     } else {
         container(content)
             .height(item_height)

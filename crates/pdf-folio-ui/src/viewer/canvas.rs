@@ -5,9 +5,16 @@ use iced::widget::canvas;
 use iced::{mouse, Point, Rectangle, Renderer, Size, Theme};
 use pdf_folio_core::{PageTextChar, PageTextLayer, TileKey};
 
+const EMPTY_CANVAS_CLICK_DRAG_THRESHOLD: f32 = 4.0;
+
 #[derive(Debug)]
 pub(crate) struct ViewerCanvas<'a> {
     pub(crate) app: &'a PDFolioApp,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ViewerCanvasState {
+    pending_empty_click: Option<Point>,
 }
 
 #[derive(Debug)]
@@ -22,11 +29,11 @@ pub(crate) enum ZoomRenderPolicy {
 }
 
 impl canvas::Program<Message> for ViewerCanvas<'_> {
-    type State = ();
+    type State = ViewerCanvasState;
 
     fn update(
         &self,
-        _state: &mut Self::State,
+        state: &mut Self::State,
         event: &canvas::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
@@ -51,17 +58,33 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
                     .and_capture(),
                 )
             }
-            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => cursor
-                .position_in(bounds)
-                .and_then(|position| char_at_position(self.app, bounds, position))
-                .map(|anchor| {
-                    canvas::Action::publish(Message::ViewerTextSelectionStarted {
-                        page: anchor.page,
-                        char_index: anchor.char_index,
-                    })
-                    .and_capture()
-                }),
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                let position = cursor.position_in(bounds)?;
+                state.pending_empty_click = None;
+                if let Some(anchor) = char_at_position(self.app, bounds, position) {
+                    Some(
+                        canvas::Action::publish(Message::ViewerTextSelectionStarted {
+                            page: anchor.page,
+                            char_index: anchor.char_index,
+                        })
+                        .and_capture(),
+                    )
+                } else if self.app.viewer_text_selection.is_some() {
+                    state.pending_empty_click = Some(position);
+                    Some(canvas::Action::capture())
+                } else {
+                    None
+                }
+            }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if let (Some(start), Some(position)) =
+                    (state.pending_empty_click, cursor.position_in(bounds))
+                {
+                    if point_distance(start, position) > EMPTY_CANVAS_CLICK_DRAG_THRESHOLD {
+                        state.pending_empty_click = None;
+                    }
+                }
+
                 if !self
                     .app
                     .viewer_text_selection
@@ -87,7 +110,10 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
                     .viewer_text_selection
                     .is_some_and(|selection| selection.dragging)
                 {
+                    state.pending_empty_click = None;
                     Some(canvas::Action::publish(Message::ViewerTextSelectionEnded).and_capture())
+                } else if state.pending_empty_click.take().is_some() {
+                    Some(canvas::Action::publish(Message::ViewerCanvasClicked).and_capture())
                 } else {
                     None
                 }
@@ -110,21 +136,17 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
         let viewer_style = viewer_primitives(tokens);
         frame.fill(&background, viewer_style.canvas);
 
-        let Some(doc) = &self.app.doc else {
+        if self.app.doc.is_none() {
             return vec![frame.into_geometry()];
         };
-        let page_width = f32::from(self.app.zoom_width);
-        let x = ((bounds.width - page_width) / 2.0).max(Spacing::PAGE_GUTTER)
-            - self.app.horizontal_offset;
-        let mut y = Spacing::PAGE_GUTTER - self.app.scroll_offset;
-
-        for page in 0..doc.page_count() {
-            let height = self.app.page_height(page);
+        for (page, rect) in self
+            .app
+            .viewer_page_rects_screen(bounds.width, bounds.height)
+        {
             let key = TileKey {
                 page,
                 width_px: self.app.render_width_px(),
             };
-            let rect = Rectangle::new(Point::new(x, y), Size::new(page_width, height));
 
             if let Some(rendered) = self.app.rendered_page_for_draw(key) {
                 frame.draw_image(rect, canvas::Image::new(rendered.handle.clone()).snap(true));
@@ -140,11 +162,26 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
                 let placeholder = canvas::Path::rectangle(rect.position(), rect.size());
                 frame.fill(&placeholder, viewer_style.placeholder);
             }
-
-            y += height + Spacing::PAGE_GAP;
         }
 
         vec![frame.into_geometry()]
+    }
+
+    fn mouse_interaction(
+        &self,
+        _state: &Self::State,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if cursor
+            .position_in(bounds)
+            .and_then(|position| char_at_position(self.app, bounds, position))
+            .is_some()
+        {
+            mouse::Interaction::Text
+        } else {
+            mouse::Interaction::default()
+        }
     }
 }
 
@@ -170,20 +207,16 @@ impl canvas::Program<Message> for ViewerSelectionOverlay<'_> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let Some(doc) = &self.app.doc else {
+        if self.app.doc.is_none() {
             return vec![frame.into_geometry()];
         };
 
-        let page_width = f32::from(self.app.zoom_width);
-        let x = ((bounds.width - page_width) / 2.0).max(Spacing::PAGE_GUTTER)
-            - self.app.horizontal_offset;
-        let mut y = Spacing::PAGE_GUTTER - self.app.scroll_offset;
-
-        for page in 0..doc.page_count() {
-            let height = self.app.page_height(page);
-            let rect = Rectangle::new(Point::new(x, y), Size::new(page_width, height));
+        for (page, rect) in self
+            .app
+            .viewer_page_rects_screen(bounds.width, bounds.height)
+        {
+            draw_find_highlights(self.app, &mut frame, page, rect);
             draw_text_selection(self.app, &mut frame, page, rect);
-            y += height + Spacing::PAGE_GAP;
         }
 
         vec![frame.into_geometry()]
@@ -195,14 +228,8 @@ fn char_at_position(
     bounds: Rectangle,
     position: Point,
 ) -> Option<crate::viewer::state::ViewerTextAnchor> {
-    let doc = app.doc.as_ref()?;
-    let page_width = f32::from(app.zoom_width);
-    let x = ((bounds.width - page_width) / 2.0).max(Spacing::PAGE_GUTTER) - app.horizontal_offset;
-    let mut y = Spacing::PAGE_GUTTER - app.scroll_offset;
-
-    for page in 0..doc.page_count() {
-        let height = app.page_height(page);
-        let rect = Rectangle::new(Point::new(x, y), Size::new(page_width, height));
+    app.doc.as_ref()?;
+    for (page, rect) in app.viewer_page_rects_screen(bounds.width, bounds.height) {
         if position.x >= rect.x
             && position.x <= rect.x + rect.width
             && position.y >= rect.y
@@ -214,8 +241,6 @@ fn char_at_position(
                 .and_then(|layer| char_in_page_at_position(layer, rect, position))
                 .map(|char_index| crate::viewer::state::ViewerTextAnchor::new(page, char_index));
         }
-
-        y += height + Spacing::PAGE_GAP;
     }
 
     None
@@ -258,6 +283,46 @@ fn char_in_page_at_position(
     }
 }
 
+fn draw_find_highlights(
+    app: &PDFolioApp,
+    frame: &mut canvas::Frame,
+    page: u16,
+    page_rect: Rectangle,
+) {
+    if app.viewer_find.query.is_empty() {
+        return;
+    }
+
+    let Some(layer) = app.viewer_text_layers.get(&page) else {
+        return;
+    };
+
+    let selected = app.viewer_find.selected;
+    for (index, matched) in app.viewer_find.matches.iter().enumerate() {
+        if matched.page != page {
+            continue;
+        }
+
+        let is_selected = Some(index) == selected;
+        if !app.viewer_find.highlight_all && !is_selected {
+            continue;
+        }
+
+        let Some(range) = matched.char_range() else {
+            continue;
+        };
+        let color = if is_selected {
+            viewer_find_selected_fill()
+        } else {
+            viewer_find_fill()
+        };
+        for rect in selected_line_highlights(layer, page_rect, range) {
+            let path = canvas::Path::rectangle(rect.position(), rect.size());
+            frame.fill(&path, color);
+        }
+    }
+}
+
 fn draw_text_selection(
     app: &PDFolioApp,
     frame: &mut canvas::Frame,
@@ -273,26 +338,27 @@ fn draw_text_selection(
         return;
     };
 
-    let color = viewer_selection_fill();
-    let outline = viewer_selection_outline();
+    let tokens = app.theme.tokens(&app.style_book);
+    let color = viewer_selection_fill(tokens);
     for rect in selected_line_highlights(layer, page_rect, range) {
         let path = canvas::Path::rectangle(rect.position(), rect.size());
         frame.fill(&path, color);
-        frame.stroke(
-            &path,
-            canvas::Stroke::default()
-                .with_color(outline)
-                .with_width(0.75),
-        );
     }
 }
 
-fn viewer_selection_fill() -> iced::Color {
-    iced::Color::from_rgba8(38, 132, 255, 0.58)
+fn viewer_find_fill() -> iced::Color {
+    iced::Color::from_rgba8(255, 185, 34, 0.52)
 }
 
-fn viewer_selection_outline() -> iced::Color {
-    iced::Color::from_rgba8(8, 73, 168, 0.36)
+fn viewer_find_selected_fill() -> iced::Color {
+    iced::Color::from_rgba8(222, 127, 0, 0.68)
+}
+
+fn viewer_selection_fill(tokens: ThemeTokens) -> iced::Color {
+    iced::Color {
+        a: 0.42,
+        ..mix_color(tokens.canvas, tokens.accent, 0.72)
+    }
 }
 
 fn selected_line_highlights(
@@ -352,6 +418,12 @@ fn character_screen_rect(character: &PageTextChar, page_rect: Rectangle) -> Rect
 
 fn rect_center_y(rect: Rectangle) -> f32 {
     rect.y + rect.height / 2.0
+}
+
+fn point_distance(a: Point, b: Point) -> f32 {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    (dx * dx + dy * dy).sqrt()
 }
 
 fn pad_rect(rect: Rectangle, horizontal: f32, vertical: f32) -> Rectangle {
@@ -425,10 +497,11 @@ mod tests {
 
     #[test]
     fn viewer_selection_fill_is_visible_on_light_pages() {
-        let fill = viewer_selection_fill();
+        let fill = viewer_selection_fill(crate::style::fallback_light_tokens());
 
-        assert!(fill.b > fill.r);
-        assert!(fill.a >= 0.5);
+        assert!(fill.r > fill.b);
+        assert!(fill.g > fill.b);
+        assert!(fill.a >= 0.4);
     }
 
     fn text_char(index: usize, text: &str, x: f32, y: f32) -> PageTextChar {

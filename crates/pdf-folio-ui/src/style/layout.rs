@@ -15,7 +15,7 @@ pub const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 8.0;
 /// Visible width of the sidebar resize handle when idle.
 pub const SIDEBAR_RESIZE_HANDLE_VISUAL_WIDTH: f32 = 2.0;
 /// Toolbar height used as a sizing token for future settings persistence.
-pub const TOOLBAR_HEIGHT: f32 = 58.0;
+pub const TOOLBAR_HEIGHT: f32 = 46.0;
 /// Overscan rows rendered above and below the visible library window.
 pub const LIBRARY_OVERSCAN_ROWS: usize = 4;
 /// Minimum number of columns in the masonry library view.

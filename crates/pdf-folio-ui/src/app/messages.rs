@@ -14,6 +14,8 @@ use pdf_folio_library::{
 use crate::library::state::{LibraryMetadataDensity, LibraryReadingFilter};
 use crate::library::thumbnails::ThumbnailSize;
 use crate::style::StyleBook;
+use crate::viewer::state::{ViewerScrollMode, ViewerSpreadMode};
+use crate::viewer::zoom::ZoomPreset;
 use crate::Settings;
 
 /// Top-level application menu groups.
@@ -89,12 +91,18 @@ pub enum AppMenuAction {
     ToggleToc,
     /// Open the jump-to-page dialog.
     JumpToPage,
+    /// Open find-in-document for the active PDF.
+    FindInDocument,
     /// Increase viewer zoom.
     ZoomIn,
     /// Decrease viewer zoom.
     ZoomOut,
     /// Reset viewer zoom.
     ResetZoom,
+    /// Change viewer page scrolling behavior.
+    SetViewerScrollMode(ViewerScrollMode),
+    /// Change viewer spread pairing behavior.
+    SetViewerSpreadMode(ViewerSpreadMode),
     /// Change the library sort mode.
     SortLibrary(LibrarySortMode),
     /// Create a folder under the active folder.
@@ -109,6 +117,15 @@ pub enum AppMenuAction {
     RebuildThumbnails,
     /// Reindex selected PDFs for full-text search.
     Reindex,
+}
+
+/// Right-opening submenus nested inside the View menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMenuFlyout {
+    /// Viewer scrolling behavior options.
+    Scrolling,
+    /// Viewer spread behavior options.
+    Spreads,
 }
 
 /// Contextual menus shown inside the selected-PDF menu strip.
@@ -213,6 +230,25 @@ impl LibrarySidebarTab {
     }
 }
 
+/// Navigation tabs inside the open-PDF viewer sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewerSidebarTab {
+    /// PDF outline/table of contents.
+    Contents,
+    /// Page thumbnail navigation.
+    Thumbnails,
+}
+
+impl ViewerSidebarTab {
+    /// User-facing tab label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Contents => "Contents",
+            Self::Thumbnails => "Thumbnails",
+        }
+    }
+}
+
 /// Messages handled by the PDF-Folio application update loop.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -269,10 +305,26 @@ pub enum Message {
     ZoomOut,
     /// Set rendered page width in pixels.
     ZoomSet(u16),
+    /// Open the zoom percentage as an editable text input.
+    StartZoomInputEdit,
+    /// The typed zoom percentage changed.
+    ZoomInputChanged(String),
+    /// Submit the typed zoom percentage.
+    SubmitZoomInput,
+    /// Open or close the zoom preset menu.
+    ToggleZoomMenu,
+    /// Close the zoom preset menu.
+    CloseZoomMenu,
+    /// Apply a named zoom preset.
+    ZoomPresetSelected(ZoomPreset),
     /// A wheel zoom gesture has been idle long enough to render the final zoom level.
     ZoomRenderSettled(u64),
     /// Jump to a zero-based page.
     JumpToPage(u16),
+    /// Jump to the previous page.
+    PreviousPage,
+    /// Jump to the next page.
+    NextPage,
     /// Expand or collapse a table-of-contents node.
     ToggleOutlineNode(Vec<usize>),
     /// Open the jump-to-page overlay.
@@ -290,20 +342,42 @@ pub enum Message {
     ViewerTextSelectionChanged { page: u16, char_index: usize },
     /// Finish the active PDF text selection drag.
     ViewerTextSelectionEnded,
+    /// A click landed in the viewer canvas without starting a text selection.
+    ViewerCanvasClicked,
     /// Clear the current PDF text selection.
     ClearViewerTextSelection,
     /// Copy the currently selected PDF text.
     CopyViewerTextSelection,
     /// Close the active overlay or panel.
     CloseOverlay,
+    /// Show the viewer find-in-text bar.
+    OpenViewerFind,
+    /// Hide the viewer find-in-text bar.
+    CloseViewerFind,
+    /// Viewer find-in-text query changed.
+    ViewerFindQueryChanged(String),
+    /// Select the previous viewer find match.
+    ViewerFindPrevious,
+    /// Select the next viewer find match.
+    ViewerFindNext,
+    /// Toggle highlighting all viewer find matches.
+    ViewerFindHighlightAllToggled(bool),
+    /// Toggle case-sensitive viewer find matching.
+    ViewerFindMatchCaseToggled(bool),
+    /// Toggle diacritic-sensitive viewer find matching.
+    ViewerFindMatchDiacriticsToggled(bool),
     /// The jump-to-page input changed.
     JumpInputChanged(String),
+    /// Edit the toolbar page number directly.
+    StartPageInputEdit,
     /// Submit the jump-to-page overlay.
     SubmitJump,
     /// Toggle the table-of-contents panel.
     ToggleTocPanel,
     /// Toggle the sidebar.
     ToggleSidebar,
+    /// Switch the active open-PDF viewer sidebar tab.
+    ViewerSidebarTabSelected(ViewerSidebarTab),
     /// Toggle the placeholder view mode control.
     ToggleViewMode,
     /// Change the library sort mode.
@@ -550,6 +624,8 @@ pub enum Message {
     AppMenuClosed,
     /// Run an action selected from the top-level menu.
     AppMenuActionSelected(AppMenuAction),
+    /// Open a right-side flyout from the View menu.
+    ViewMenuFlyoutOpened(ViewMenuFlyout),
     /// Open or switch the active selected-PDF contextual menu.
     SelectionMenuOpened(SelectionMenu),
     /// Close the active selected-PDF contextual menu.

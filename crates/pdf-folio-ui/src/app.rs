@@ -33,14 +33,13 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, container, image, mouse_area, pick_list, pin, scrollable, slider, text, text_input,
-    tooltip, Svg,
+    button, checkbox, container, image, mouse_area, pick_list, pin, scrollable, slider, text,
+    text_input, tooltip, Svg,
 };
 use iced::widget::{operation, Id};
-#[cfg(test)]
-use iced::Rectangle;
 use iced::{animation, font, keyboard, Animation, Color, ContentFit, Element, Font, Length, Point};
 use iced::{clipboard, mouse};
+use iced::{Rectangle, Size};
 use iced::{Task, Theme};
 use pdf_folio_core::{Annotation, OutlineNode, PageTextLayer, PdfDoc, TileCache, TileKey};
 #[cfg(test)]
@@ -103,7 +102,7 @@ use crate::library::view::{
 use crate::menu::{app_menu_action_message, app_menu_bar_height};
 use crate::messages::{
     AppMenu, AppMenuAction, ConfirmationAction, LibrarySidebarTab, Message, SelectionMenu,
-    SelectionToolbarAction, Shortcut,
+    SelectionToolbarAction, Shortcut, ViewMenuFlyout, ViewerSidebarTab,
 };
 use crate::platform::file_manager_commands;
 #[cfg(test)]
@@ -121,15 +120,24 @@ use crate::subscriptions::style_watch_event_should_reload;
 use crate::subscriptions::subscription;
 use crate::theme::AppTheme;
 use crate::viewer::canvas::ZoomRenderPolicy;
-use crate::viewer::state::{RenderedPageView, ViewerTextAnchor, ViewerTextSelection};
+use crate::viewer::state::{
+    RenderedPageView, ViewerFindMatch, ViewerFindState, ViewerScrollMode, ViewerSpreadMode,
+    ViewerTextAnchor, ViewerTextSelection,
+};
 use crate::viewer::tasks::{
     open_document_task, open_library_document_task, render_page, schedule_zoom_render,
+};
+use crate::viewer::zoom::{
+    width_from_percent_input, zoom_percent_label, ZoomPreset, MAX_ZOOM_WIDTH, MIN_ZOOM_WIDTH,
+    ZOOM_INPUT_ID,
 };
 #[cfg(test)]
 use notify::EventKind;
 
+const PAGE_INPUT_ID: &str = "viewer-toolbar-page-input";
 const CHEVRON_LEFT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"##;
 const CHEVRON_RIGHT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"##;
+const CHEVRON_UP_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>"##;
 const CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"##;
 const GRID_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>"##;
 const LIST_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>"##;
@@ -141,6 +149,7 @@ const FILE_TREE_LABEL_SIZE: u32 = FontSize::MD;
 const FILE_TREE_ROW_HEIGHT: f32 = 26.0;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
 const LIBRARY_SEARCH_INPUT_ID: &str = "library-search-input";
+const VIEWER_FIND_INPUT_ID: &str = "viewer-find-input";
 const LIBRARY_FOLDER_RENAME_INPUT_ID: &str = "library-folder-rename-input";
 const LIBRARY_DETAILS_TITLE_INPUT_ID: &str = "library-details-title-input";
 const LIBRARY_CARD_HOVER_TICK_MS: u64 = 16;
@@ -149,6 +158,7 @@ const LIBRARY_CARD_HOVER_LIFT: f32 = 2.0;
 const LIBRARY_ROW_HOVER_LIFT: f32 = 1.0;
 const LIBRARY_GRID_ZOOM_MIN: f32 = 0.25;
 const LIBRARY_GRID_ZOOM_MAX: f32 = 12.0;
+const VIEWER_THUMBNAIL_WIDTH_PX: u16 = 128;
 const LIBRARY_GRID_ZOOM_STEP: f32 = 0.05;
 const LIBRARY_GRID_ZOOM_DENSE_COLUMN_CAP: usize = 28;
 const LIBRARY_SORT_OPTIONS: [LibrarySortMode; 10] = [
@@ -238,8 +248,14 @@ pub struct PDFolioApp {
     pub viewport_height: f32,
     /// Last known viewer viewport width.
     pub viewport_width: f32,
+    /// Last known PDF canvas viewport height.
+    pub viewer_viewport_height: f32,
+    /// Last known PDF canvas viewport width.
+    pub viewer_viewport_width: f32,
     /// Last document error shown in the viewer.
     pub document_error: Option<String>,
+    /// Whether a PDF open operation has started and has not resolved yet.
+    pub pending_document_open: bool,
     /// Document errors dismissed for the current app session.
     pub dismissed_document_errors: HashSet<String>,
     /// Rendered tile cache.
@@ -248,8 +264,20 @@ pub struct PDFolioApp {
     pub scroll_offset: f32,
     /// Current horizontal pan offset for wide/zoomed pages.
     pub horizontal_offset: f32,
+    /// Page arrangement and wheel behavior in the open-PDF viewer.
+    pub viewer_scroll_mode: ViewerScrollMode,
+    /// Two-page spread pairing behavior in the open-PDF viewer.
+    pub viewer_spread_mode: ViewerSpreadMode,
     /// Current rendered page width.
     pub zoom_width: u16,
+    /// Current semantic zoom preset when zoom should follow viewport dimensions.
+    pub active_zoom_preset: Option<ZoomPreset>,
+    /// Whether the toolbar zoom percentage is currently editable.
+    pub zoom_editing: bool,
+    /// Current toolbar zoom percentage input.
+    pub zoom_input: String,
+    /// Whether the toolbar zoom preset menu is open.
+    pub zoom_menu_open: bool,
     /// Render width used as the stable preview source during an active zoom gesture.
     pub zoom_preview_width_px: Option<u16>,
     /// Monotonic token used to debounce wheel zoom rendering.
@@ -266,10 +294,14 @@ pub struct PDFolioApp {
     pub pending_text_layers: HashSet<u16>,
     /// Whether copy was requested while selected page text was still loading.
     pub viewer_copy_pending: bool,
+    /// Find-in-text UI and match state for the open PDF.
+    pub viewer_find: ViewerFindState,
     /// Tile render jobs currently in flight.
     pub pending_renders: HashSet<TileKey>,
     /// Whether the table-of-contents panel is open.
     pub toc_open: bool,
+    /// Active navigation tab in the viewer sidebar.
+    pub viewer_sidebar_tab: ViewerSidebarTab,
     /// Loaded table-of-contents outline for the open document.
     pub outline: Vec<OutlineNode>,
     /// Expanded table-of-contents node paths.
@@ -282,6 +314,8 @@ pub struct PDFolioApp {
     pub library_metadata_density: LibraryMetadataDensity,
     /// Whether the jump-to-page overlay is open.
     pub jump_dialog_open: bool,
+    /// Whether the toolbar page number is currently editable.
+    pub page_input_editing: bool,
     /// Current jump-to-page input text.
     pub jump_input: String,
     /// In-memory annotations for the open document.
@@ -386,6 +420,8 @@ pub struct PDFolioApp {
     pub style_load_error: Option<String>,
     /// Open top-level application menu.
     pub open_app_menu: Option<AppMenu>,
+    /// Open right-side flyout in the View menu.
+    pub open_view_menu_flyout: Option<ViewMenuFlyout>,
     /// Open selected-PDF contextual menu.
     pub open_selection_menu: Option<SelectionMenu>,
     /// User settings.
@@ -455,6 +491,38 @@ impl PDFolioApp {
         self.style_book.labels()
     }
 
+    fn estimated_viewer_viewport_width(&self) -> f32 {
+        let sidebar_width = if self.toc_open {
+            self.layout().viewer_sidebar_width
+        } else {
+            0.0
+        };
+        (self.viewport_width - sidebar_width).max(1.0)
+    }
+
+    fn estimated_viewer_viewport_height(&self) -> f32 {
+        (self.viewport_height - app_menu_bar_height(self) - self.layout().toolbar_height).max(1.0)
+    }
+
+    fn apply_active_dimension_zoom(&mut self) -> Task<Message> {
+        let Some(preset) = self.active_zoom_preset else {
+            return Task::none();
+        };
+        if !preset.is_dimension_dependent() {
+            return Task::none();
+        }
+
+        let width = preset.width_for(self);
+        self.zoom_input = zoom_percent_label(width);
+        let task = self.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+        if matches!(preset, ZoomPreset::PageWidth) {
+            self.horizontal_offset = 0.0;
+        }
+        self.clamp_horizontal_offset();
+        self.clamp_scroll_offset();
+        task
+    }
+
     /// Creates application state using the default database location.
     ///
     /// # Errors
@@ -480,12 +548,21 @@ impl PDFolioApp {
             page_aspect_ratios: Vec::new(),
             viewport_height: 900.0,
             viewport_width: 960.0,
+            viewer_viewport_height: 900.0,
+            viewer_viewport_width: 732.0,
             document_error: None,
+            pending_document_open: false,
             dismissed_document_errors: HashSet::new(),
             cache: TileCache::with_default_capacity(),
             scroll_offset: 0.0,
             horizontal_offset: 0.0,
+            viewer_scroll_mode: ViewerScrollMode::Vertical,
+            viewer_spread_mode: ViewerSpreadMode::None,
             zoom_width: settings.default_zoom_width,
+            active_zoom_preset: None,
+            zoom_editing: false,
+            zoom_input: zoom_percent_label(settings.default_zoom_width),
+            zoom_menu_open: false,
             zoom_preview_width_px: None,
             zoom_generation: 0,
             scale_factor: 1.0,
@@ -494,8 +571,10 @@ impl PDFolioApp {
             viewer_text_layers: HashMap::new(),
             pending_text_layers: HashSet::new(),
             viewer_copy_pending: false,
+            viewer_find: ViewerFindState::default(),
             pending_renders: HashSet::new(),
             toc_open: true,
+            viewer_sidebar_tab: ViewerSidebarTab::Contents,
             outline: Vec::new(),
             expanded_outline_paths: HashSet::new(),
             compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),
@@ -506,6 +585,7 @@ impl PDFolioApp {
                 &preferences.visible_metadata_fields,
             ),
             jump_dialog_open: false,
+            page_input_editing: false,
             jump_input: String::new(),
             annotations: Vec::new(),
             library_entries: Vec::new(),
@@ -564,6 +644,7 @@ impl PDFolioApp {
             style_book,
             style_load_error,
             open_app_menu: None,
+            open_view_menu_flyout: None,
             open_selection_menu: None,
             settings,
             db,
@@ -579,12 +660,14 @@ impl PDFolioApp {
 
         app.mode = AppMode::Viewer;
         app.document_error = Some(format!("Opening {}...", path.display()));
+        app.pending_document_open = true;
 
         Ok(app)
     }
 
     fn open_document(&mut self, doc: Arc<PdfDoc>) -> Task<Message> {
         self.mode = AppMode::Viewer;
+        self.clear_library_transient_interactions();
         self.doc = Some(Arc::clone(&doc));
         self.cache.clear();
         self.rendered_pages.clear();
@@ -592,18 +675,29 @@ impl PDFolioApp {
             .map(|page| doc.page_aspect_ratio(page).unwrap_or(11.0 / 8.5))
             .collect();
         self.outline = doc.outline().unwrap_or_default();
+        self.viewer_sidebar_tab = ViewerSidebarTab::Contents;
         self.expanded_outline_paths.clear();
         self.pending_renders.clear();
         self.scroll_offset = 0.0;
         self.horizontal_offset = 0.0;
+        self.viewer_viewport_width = self.estimated_viewer_viewport_width();
+        self.viewer_viewport_height = self.estimated_viewer_viewport_height();
+        self.active_zoom_preset = Some(ZoomPreset::Automatic);
+        self.zoom_width = ZoomPreset::Automatic.width_for(self);
+        self.zoom_editing = false;
+        self.zoom_input = zoom_percent_label(self.zoom_width);
+        self.zoom_menu_open = false;
         self.zoom_preview_width_px = None;
         self.zoom_generation = self.zoom_generation.wrapping_add(1);
         self.viewer_text_selection = None;
         self.viewer_text_layers.clear();
         self.pending_text_layers.clear();
         self.viewer_copy_pending = false;
+        self.viewer_find = ViewerFindState::default();
+        self.pending_document_open = false;
         self.document_error = None;
         self.jump_dialog_open = false;
+        self.page_input_editing = false;
         self.jump_input.clear();
 
         self.request_visible_pages()
@@ -613,6 +707,7 @@ impl PDFolioApp {
         self.mode = AppMode::Library;
         self.document_error = None;
         self.jump_dialog_open = false;
+        self.page_input_editing = false;
         self.jump_input.clear();
         Task::batch([
             self.refresh_library(),
@@ -627,6 +722,7 @@ impl PDFolioApp {
         }
 
         self.mode = AppMode::Viewer;
+        self.clear_library_transient_interactions();
         self.request_visible_pages()
     }
 
@@ -683,7 +779,7 @@ impl PDFolioApp {
             }
 
             self.pending_renders.insert(key);
-            let doc = Arc::clone(doc);
+            let doc = Arc::clone(&doc);
             tasks.push(Task::perform(
                 render_page(doc, key),
                 |result| match result {
@@ -701,13 +797,96 @@ impl PDFolioApp {
         Task::batch([Task::batch(tasks), self.request_visible_text_layers()])
     }
 
-    fn request_visible_text_layers(&mut self) -> Task<Message> {
+    fn request_viewer_thumbnail_pages(&mut self) -> Task<Message> {
+        if self.viewer_sidebar_tab != ViewerSidebarTab::Thumbnails {
+            return Task::none();
+        }
+
         let Some(doc) = &self.doc else {
             return Task::none();
         };
 
         let mut tasks = Vec::new();
-        for page in self.visible_page_range() {
+        for page in 0..doc.page_count() {
+            let key = TileKey {
+                page,
+                width_px: VIEWER_THUMBNAIL_WIDTH_PX,
+            };
+
+            if self.rendered_pages.contains_key(&key) || self.pending_renders.contains(&key) {
+                continue;
+            }
+
+            if let Some(data) = self.cache.get(&key) {
+                let height = (f32::from(key.width_px) * self.page_aspect_ratios[usize::from(page)])
+                    .round()
+                    .clamp(1.0, f32::from(u16::MAX)) as u16;
+                let expected_len = usize::from(key.width_px) * usize::from(height) * 4;
+
+                if data.len() == expected_len {
+                    let handle = image::Handle::from_rgba(
+                        u32::from(key.width_px),
+                        u32::from(height),
+                        data.as_ref().clone(),
+                    );
+                    self.rendered_pages.insert(
+                        key,
+                        RenderedPageView {
+                            width: key.width_px,
+                            height,
+                            handle,
+                        },
+                    );
+                    continue;
+                }
+            }
+
+            self.pending_renders.insert(key);
+            let doc = Arc::clone(&doc);
+            tasks.push(Task::perform(
+                render_page(doc, key),
+                |result| match result {
+                    Ok((key, page)) => Message::PageRendered {
+                        key,
+                        data: page.rgba,
+                        width: page.width,
+                        height: page.height,
+                    },
+                    Err(error) => Message::DocumentError(error.to_string()),
+                },
+            ));
+        }
+
+        Task::batch(tasks)
+    }
+
+    fn request_visible_text_layers(&mut self) -> Task<Message> {
+        let Some(doc) = &self.doc else {
+            return Task::none();
+        };
+        let doc = Arc::clone(doc);
+        let pages = self.visible_page_range();
+
+        self.request_text_layers(pages, doc)
+    }
+
+    fn request_all_text_layers(&mut self) -> Task<Message> {
+        let Some(doc) = &self.doc else {
+            return Task::none();
+        };
+        let doc = Arc::clone(doc);
+        let page_count = doc.page_count();
+
+        self.request_text_layers(0..page_count, doc)
+    }
+
+    fn request_text_layers(
+        &mut self,
+        pages: std::ops::Range<u16>,
+        doc: Arc<PdfDoc>,
+    ) -> Task<Message> {
+        let mut tasks = Vec::new();
+        for page in pages {
             if self.viewer_text_layers.contains_key(&page)
                 || self.pending_text_layers.contains(&page)
             {
@@ -715,7 +894,7 @@ impl PDFolioApp {
             }
 
             self.pending_text_layers.insert(page);
-            let doc = Arc::clone(doc);
+            let doc = Arc::clone(&doc);
             tasks.push(Task::perform(
                 async move {
                     tokio::task::spawn_blocking(move || doc.text_layer(page))
@@ -736,6 +915,62 @@ impl PDFolioApp {
         }
 
         Task::batch(tasks)
+    }
+
+    fn refresh_viewer_find_matches(&mut self) {
+        self.viewer_find.refresh_matches(
+            self.viewer_text_layers
+                .iter()
+                .map(|(page, layer)| (page, layer.as_ref())),
+        );
+    }
+
+    fn open_viewer_find(&mut self) -> Task<Message> {
+        if self.mode != AppMode::Viewer || self.doc.is_none() {
+            return Task::none();
+        }
+
+        self.viewer_find.open = true;
+        self.open_app_menu = None;
+        self.open_selection_menu = None;
+        self.zoom_menu_open = false;
+        self.refresh_viewer_find_matches();
+
+        Task::batch([
+            self.request_all_text_layers(),
+            operation::focus(Id::new(VIEWER_FIND_INPUT_ID)),
+        ])
+    }
+
+    fn set_viewer_find_query(&mut self, query: String) -> Task<Message> {
+        self.viewer_find.query = query;
+        self.refresh_viewer_find_matches();
+        Task::batch([
+            self.request_all_text_layers(),
+            self.scroll_to_selected_viewer_find_match(),
+        ])
+    }
+
+    fn scroll_to_selected_viewer_find_match(&mut self) -> Task<Message> {
+        let Some(selected) = self.viewer_find.selected_match() else {
+            return Task::none();
+        };
+
+        self.scroll_to_viewer_find_match(selected)
+    }
+
+    fn scroll_to_viewer_find_match(&mut self, selected: ViewerFindMatch) -> Task<Message> {
+        let Some(layer) = self.viewer_text_layers.get(&selected.page) else {
+            return Task::none();
+        };
+        let Some(character) = layer.chars.get(selected.start) else {
+            return Task::none();
+        };
+
+        self.scroll_to_page_rect(selected.page, character.bounds.x, character.bounds.y);
+        self.clamp_scroll_offset();
+        self.clamp_horizontal_offset();
+        self.request_visible_pages()
     }
 
     fn start_viewer_text_selection(&mut self, page: u16, char_index: usize) {
@@ -818,28 +1053,23 @@ impl PDFolioApp {
             return 0..0;
         };
 
-        let page_count = doc.page_count();
-        let top = self.scroll_offset.max(0.0);
-        let bottom = top + self.viewport_height.max(1.0) + Spacing::PAGE_GAP;
-        let mut y = Spacing::PAGE_GUTTER;
+        let viewport = Rectangle {
+            x: self.horizontal_offset.max(0.0),
+            y: self.scroll_offset.max(0.0),
+            width: self.viewer_viewport_width.max(1.0),
+            height: self.viewer_viewport_height.max(1.0),
+        };
         let mut first = None;
         let mut end = 0;
 
-        for page in 0..page_count {
-            let height = self.page_height(page);
-            let page_top = y;
-            let page_bottom = y + height;
-
-            if page_bottom >= top && page_top <= bottom {
+        for (page, rect) in self.viewer_page_rects_content(self.viewer_viewport_width) {
+            if rects_intersect(rect, viewport) {
                 first.get_or_insert(page);
                 end = page.saturating_add(1);
-            } else if page_top > bottom && first.is_some() {
-                break;
             }
-
-            y = page_bottom + Spacing::PAGE_GAP;
         }
 
+        let page_count = doc.page_count();
         first.unwrap_or(0)..end.max(first.unwrap_or(0).saturating_add(1).min(page_count))
     }
 
@@ -866,17 +1096,230 @@ impl PDFolioApp {
     }
 
     fn content_height(&self) -> f32 {
-        let pages: f32 = (0..self.doc.as_ref().map_or(0, |doc| doc.page_count()))
-            .map(|page| self.page_height(page) + Spacing::PAGE_GAP)
-            .sum();
-        pages + Spacing::PAGE_GUTTER * 2.0
+        self.viewer_content_size(self.viewer_viewport_width).height
     }
 
     fn content_width(&self) -> f32 {
-        f32::from(self.zoom_width) + Spacing::PAGE_GUTTER * 2.0
+        self.viewer_content_size(self.viewer_viewport_width).width
     }
 
-    fn current_page(&self) -> u16 {
+    pub(crate) fn viewer_page_rects_screen(
+        &self,
+        viewport_width: f32,
+        viewport_height: f32,
+    ) -> Vec<(u16, Rectangle)> {
+        self.viewer_page_rects_content(viewport_width)
+            .into_iter()
+            .map(|(page, rect)| {
+                (
+                    page,
+                    Rectangle::new(
+                        Point::new(rect.x - self.horizontal_offset, rect.y - self.scroll_offset),
+                        rect.size(),
+                    ),
+                )
+            })
+            .filter(|(_, rect)| {
+                rects_intersect(
+                    *rect,
+                    Rectangle {
+                        x: 0.0,
+                        y: 0.0,
+                        width: viewport_width.max(1.0),
+                        height: viewport_height.max(1.0),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn viewer_page_rect_for_page(&self, target_page: u16) -> Option<Rectangle> {
+        self.viewer_page_rects_content(self.viewer_viewport_width)
+            .into_iter()
+            .find_map(|(page, rect)| (page == target_page).then_some(rect))
+    }
+
+    fn viewer_page_rects_content(&self, viewport_width: f32) -> Vec<(u16, Rectangle)> {
+        let Some(doc) = &self.doc else {
+            return Vec::new();
+        };
+
+        let groups = viewer_spread_groups(doc.page_count(), self.viewer_spread_mode);
+        match self.viewer_scroll_mode {
+            ViewerScrollMode::Horizontal => self.horizontal_page_rects(&groups),
+            ViewerScrollMode::Wrapped => self.wrapped_page_rects(&groups, viewport_width),
+            ViewerScrollMode::Page | ViewerScrollMode::Vertical => {
+                self.vertical_page_rects(&groups)
+            }
+        }
+    }
+
+    fn vertical_page_rects(&self, groups: &[Vec<u16>]) -> Vec<(u16, Rectangle)> {
+        let content_width = viewer_groups_max_width(self, groups)
+            .max(self.viewer_viewport_width)
+            .max(1.0);
+        let mut rects = Vec::new();
+        let mut y = Spacing::PAGE_GUTTER;
+
+        for group in groups {
+            let group_width = viewer_group_width(self, group);
+            let group_height = viewer_group_height(self, group);
+            let mut x = ((content_width - group_width) / 2.0).max(Spacing::PAGE_GUTTER);
+
+            for &page in group {
+                let height = self.page_height(page);
+                rects.push((
+                    page,
+                    Rectangle::new(
+                        Point::new(x, y + (group_height - height) / 2.0),
+                        Size::new(f32::from(self.zoom_width), height),
+                    ),
+                ));
+                x += f32::from(self.zoom_width) + Spacing::PAGE_GAP;
+            }
+
+            y += group_height + Spacing::PAGE_GAP;
+        }
+
+        rects
+    }
+
+    fn horizontal_page_rects(&self, groups: &[Vec<u16>]) -> Vec<(u16, Rectangle)> {
+        let content_size = self.viewer_content_size_for_groups(groups, self.viewer_viewport_width);
+        let total_width = viewer_groups_inline_width(self, groups);
+        let mut rects = Vec::new();
+        let mut x = ((content_size.width - total_width) / 2.0).max(Spacing::PAGE_GUTTER);
+
+        for group in groups {
+            let group_height = viewer_group_height(self, group);
+            let mut page_x = x;
+            for &page in group {
+                let height = self.page_height(page);
+                rects.push((
+                    page,
+                    Rectangle::new(
+                        Point::new(page_x, (content_size.height - height) / 2.0),
+                        Size::new(f32::from(self.zoom_width), height),
+                    ),
+                ));
+                page_x += f32::from(self.zoom_width) + Spacing::PAGE_GAP;
+            }
+            x += viewer_group_width(self, group).max(group_height * 0.0) + Spacing::PAGE_GAP;
+        }
+
+        rects
+    }
+
+    fn wrapped_page_rects(
+        &self,
+        groups: &[Vec<u16>],
+        viewport_width: f32,
+    ) -> Vec<(u16, Rectangle)> {
+        let max_row_width = (viewport_width - Spacing::PAGE_GUTTER * 2.0)
+            .max(viewer_groups_max_width(self, groups))
+            .max(f32::from(self.zoom_width));
+        let content_width = (max_row_width + Spacing::PAGE_GUTTER * 2.0)
+            .max(self.viewer_viewport_width)
+            .max(1.0);
+        let mut rects = Vec::new();
+        let mut x = Spacing::PAGE_GUTTER;
+        let mut y = Spacing::PAGE_GUTTER;
+        let mut row_height: f32 = 0.0;
+
+        for group in groups {
+            let group_width = viewer_group_width(self, group);
+            let group_height = viewer_group_height(self, group);
+            if x > Spacing::PAGE_GUTTER && x + group_width > Spacing::PAGE_GUTTER + max_row_width {
+                y += row_height + Spacing::PAGE_GAP;
+                x = Spacing::PAGE_GUTTER;
+                row_height = 0.0;
+            }
+
+            let mut page_x = x;
+            for &page in group {
+                let height = self.page_height(page);
+                rects.push((
+                    page,
+                    Rectangle::new(
+                        Point::new(page_x, y + (group_height - height) / 2.0),
+                        Size::new(f32::from(self.zoom_width), height),
+                    ),
+                ));
+                page_x += f32::from(self.zoom_width) + Spacing::PAGE_GAP;
+            }
+
+            x += group_width + Spacing::PAGE_GAP;
+            row_height = row_height.max(group_height);
+        }
+
+        let horizontal_padding = if content_width > max_row_width + Spacing::PAGE_GUTTER * 2.0 {
+            (content_width - (max_row_width + Spacing::PAGE_GUTTER * 2.0)) / 2.0
+        } else {
+            0.0
+        };
+
+        if horizontal_padding > 0.0 {
+            for (_, rect) in &mut rects {
+                rect.x += horizontal_padding;
+            }
+        }
+
+        rects
+    }
+
+    fn viewer_content_size(&self, viewport_width: f32) -> Size {
+        let Some(doc) = &self.doc else {
+            return Size::new(
+                viewport_width.max(1.0),
+                self.viewer_viewport_height.max(1.0),
+            );
+        };
+        let groups = viewer_spread_groups(doc.page_count(), self.viewer_spread_mode);
+        self.viewer_content_size_for_groups(&groups, viewport_width)
+    }
+
+    fn viewer_content_size_for_groups(&self, groups: &[Vec<u16>], viewport_width: f32) -> Size {
+        match self.viewer_scroll_mode {
+            ViewerScrollMode::Horizontal => Size::new(
+                viewer_groups_inline_width(self, groups)
+                    .max(viewport_width)
+                    .max(1.0),
+                (viewer_groups_max_height(self, groups) + Spacing::PAGE_GUTTER * 2.0)
+                    .max(self.viewer_viewport_height)
+                    .max(1.0),
+            ),
+            ViewerScrollMode::Wrapped => {
+                let rects = self.wrapped_page_rects(groups, viewport_width);
+                let height = rects
+                    .iter()
+                    .map(|(_, rect)| rect.y + rect.height)
+                    .fold(0.0, f32::max)
+                    + Spacing::PAGE_GUTTER;
+                Size::new(
+                    viewport_width
+                        .max(viewer_groups_max_width(self, groups))
+                        .max(1.0),
+                    height.max(self.viewer_viewport_height).max(1.0),
+                )
+            }
+            ViewerScrollMode::Page | ViewerScrollMode::Vertical => {
+                let height: f32 = groups
+                    .iter()
+                    .map(|group| viewer_group_height(self, group) + Spacing::PAGE_GAP)
+                    .sum();
+                Size::new(
+                    viewer_groups_max_width(self, groups)
+                        .max(viewport_width)
+                        .max(1.0),
+                    (height + Spacing::PAGE_GUTTER * 2.0)
+                        .max(self.viewer_viewport_height)
+                        .max(1.0),
+                )
+            }
+        }
+    }
+
+    pub(crate) fn current_page(&self) -> u16 {
         self.visible_page_range().start
     }
 
@@ -1530,6 +1973,14 @@ impl PDFolioApp {
             .any(|animation| animation.is_animating(self.animation_now))
     }
 
+    fn clear_library_transient_interactions(&mut self) {
+        self.library_card_hover_animations.clear();
+        self.folder_drop_flash = None;
+        self.library_drag = None;
+        self.folder_drag = None;
+        self.resizing_library_tag_sidebar = false;
+    }
+
     fn can_drag_reorder_library(&self) -> bool {
         can_drag_reorder_library_for_state(
             self.library_sort_mode,
@@ -2100,11 +2551,8 @@ impl PDFolioApp {
     }
 
     fn page_top(&self, target_page: u16) -> f32 {
-        let mut y = Spacing::PAGE_GUTTER;
-        for page in 0..target_page {
-            y += self.page_height(page) + Spacing::PAGE_GAP;
-        }
-        y
+        self.viewer_page_rect_for_page(target_page)
+            .map_or(Spacing::PAGE_GUTTER, |rect| rect.y)
     }
 
     fn jump_to_page(&mut self, page: u16) -> Task<Message> {
@@ -2113,19 +2561,49 @@ impl PDFolioApp {
         };
 
         let page = page.min(doc.page_count().saturating_sub(1));
-        self.scroll_offset = self.page_top(page);
+        if let Some(rect) = self.viewer_page_rect_for_page(page) {
+            if matches!(self.viewer_scroll_mode, ViewerScrollMode::Horizontal) {
+                self.horizontal_offset = rect.x;
+                self.scroll_offset = 0.0;
+            } else {
+                self.scroll_offset = rect.y;
+                if matches!(self.viewer_scroll_mode, ViewerScrollMode::Wrapped) {
+                    self.horizontal_offset = 0.0;
+                }
+            }
+        }
         self.clamp_scroll_offset();
+        self.clamp_horizontal_offset();
         self.jump_dialog_open = false;
+        self.page_input_editing = false;
         self.jump_input.clear();
         self.request_visible_pages()
     }
 
+    fn scroll_to_page_rect(&mut self, page: u16, x_fraction: f32, y_fraction: f32) {
+        let Some(rect) = self.viewer_page_rect_for_page(page) else {
+            return;
+        };
+        let target_x = rect.x + rect.width * x_fraction - self.viewer_viewport_width * 0.25;
+        let target_y = rect.y + rect.height * y_fraction - self.viewer_viewport_height * 0.25;
+
+        if matches!(self.viewer_scroll_mode, ViewerScrollMode::Horizontal) {
+            self.horizontal_offset = target_x.max(0.0);
+            self.scroll_offset = 0.0;
+        } else {
+            self.scroll_offset = target_y.max(0.0);
+            if matches!(self.viewer_scroll_mode, ViewerScrollMode::Wrapped) {
+                self.horizontal_offset = 0.0;
+            }
+        }
+    }
+
     fn max_horizontal_offset(&self) -> f32 {
-        (self.content_width() - self.viewport_width.max(1.0)).max(0.0)
+        (self.content_width() - self.viewer_viewport_width.max(1.0)).max(0.0)
     }
 
     fn max_scroll_offset(&self) -> f32 {
-        (self.content_height() - self.viewport_height.max(1.0)).max(0.0)
+        (self.content_height() - self.viewer_viewport_height.max(1.0)).max(0.0)
     }
 
     fn clamp_horizontal_offset(&mut self) {
@@ -2143,9 +2621,45 @@ impl PDFolioApp {
         self.request_visible_pages()
     }
 
+    fn scroll_page_mode_by(&mut self, direction: i16) -> Task<Message> {
+        let Some(doc) = &self.doc else {
+            return Task::none();
+        };
+        let current = i32::from(self.current_page());
+        let page_count = i32::from(doc.page_count());
+        let next = (current + i32::from(direction)).clamp(0, page_count.saturating_sub(1));
+        self.jump_to_page(next as u16)
+    }
+
     fn pan_horizontally_by(&mut self, delta: f32) {
         self.horizontal_offset =
             (self.horizontal_offset + delta).clamp(0.0, self.max_horizontal_offset());
+    }
+
+    fn set_viewer_scroll_mode(&mut self, mode: ViewerScrollMode) -> Task<Message> {
+        if self.viewer_scroll_mode == mode {
+            return Task::none();
+        }
+        let current_page = self.current_page();
+        self.viewer_scroll_mode = mode;
+        self.horizontal_offset = 0.0;
+        self.scroll_offset = 0.0;
+        let zoom_task = self.apply_active_dimension_zoom();
+        let page_task = self.jump_to_page(current_page);
+        Task::batch([zoom_task, page_task])
+    }
+
+    fn set_viewer_spread_mode(&mut self, mode: ViewerSpreadMode) -> Task<Message> {
+        if self.viewer_spread_mode == mode {
+            return Task::none();
+        }
+        let current_page = self.current_page();
+        self.viewer_spread_mode = mode;
+        self.horizontal_offset = 0.0;
+        self.scroll_offset = 0.0;
+        let zoom_task = self.apply_active_dimension_zoom();
+        let page_task = self.jump_to_page(current_page);
+        Task::batch([zoom_task, page_task])
     }
 
     fn zoom_to_width(
@@ -2155,7 +2669,7 @@ impl PDFolioApp {
         render_policy: ZoomRenderPolicy,
     ) -> Task<Message> {
         let previous_width = self.zoom_width;
-        let new_width = width.clamp(240, 2400);
+        let new_width = width.clamp(MIN_ZOOM_WIDTH, MAX_ZOOM_WIDTH);
 
         if new_width == previous_width {
             return Task::none();
@@ -2176,6 +2690,10 @@ impl PDFolioApp {
         });
 
         self.zoom_width = new_width;
+        if !self.zoom_editing {
+            self.zoom_input = zoom_percent_label(new_width);
+        }
+        self.zoom_menu_open = false;
         self.pending_renders.clear();
         self.zoom_generation = self.zoom_generation.wrapping_add(1);
         let generation = self.zoom_generation;
@@ -2230,6 +2748,90 @@ impl PDFolioApp {
             .map(|name| format!("{name} - PDF-Folio"))
             .unwrap_or_else(|| String::from("PDF-Folio"))
     }
+}
+
+fn viewer_spread_groups(page_count: u16, spread_mode: ViewerSpreadMode) -> Vec<Vec<u16>> {
+    match spread_mode {
+        ViewerSpreadMode::None => (0..page_count).map(|page| vec![page]).collect(),
+        ViewerSpreadMode::Odd => {
+            let mut groups = Vec::new();
+            let mut page = 0;
+            while page < page_count {
+                let mut group = vec![page];
+                if page + 1 < page_count {
+                    group.push(page + 1);
+                }
+                groups.push(group);
+                page = page.saturating_add(2);
+            }
+            groups
+        }
+        ViewerSpreadMode::Even => {
+            let mut groups = Vec::new();
+            if page_count > 0 {
+                groups.push(vec![0]);
+            }
+            let mut page = 1;
+            while page < page_count {
+                let mut group = vec![page];
+                if page + 1 < page_count {
+                    group.push(page + 1);
+                }
+                groups.push(group);
+                page = page.saturating_add(2);
+            }
+            groups
+        }
+    }
+}
+
+fn viewer_group_width(app: &PDFolioApp, group: &[u16]) -> f32 {
+    if group.is_empty() {
+        return 0.0;
+    }
+
+    f32::from(app.zoom_width) * group.len() as f32
+        + Spacing::PAGE_GAP * group.len().saturating_sub(1) as f32
+}
+
+fn viewer_group_height(app: &PDFolioApp, group: &[u16]) -> f32 {
+    group
+        .iter()
+        .map(|&page| app.page_height(page))
+        .fold(0.0, f32::max)
+}
+
+fn viewer_groups_max_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
+    groups
+        .iter()
+        .map(|group| viewer_group_width(app, group))
+        .fold(0.0, f32::max)
+        + Spacing::PAGE_GUTTER * 2.0
+}
+
+fn viewer_groups_max_height(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
+    groups
+        .iter()
+        .map(|group| viewer_group_height(app, group))
+        .fold(0.0, f32::max)
+}
+
+fn viewer_groups_inline_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
+    if groups.is_empty() {
+        return app.viewer_viewport_width.max(1.0);
+    }
+
+    let groups_width: f32 = groups
+        .iter()
+        .map(|group| viewer_group_width(app, group))
+        .sum();
+    groups_width
+        + Spacing::PAGE_GAP * groups.len().saturating_sub(1) as f32
+        + Spacing::PAGE_GUTTER * 2.0
+}
+
+fn rects_intersect(a: Rectangle, b: Rectangle) -> bool {
+    a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y
 }
 
 /// Launches the PDF-Folio UI.
@@ -2293,6 +2895,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
     match message {
         Message::AppMenuOpened(menu) => {
             app.open_selection_menu = None;
+            app.open_view_menu_flyout = None;
             app.open_app_menu = if app.open_app_menu == Some(menu) {
                 None
             } else {
@@ -2301,15 +2904,32 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::AppMenuClosed => {
             app.open_app_menu = None;
+            app.open_view_menu_flyout = None;
+        }
+        Message::ViewMenuFlyoutOpened(flyout) => {
+            if app.open_app_menu == Some(AppMenu::View) {
+                app.open_view_menu_flyout = Some(flyout);
+            }
         }
         Message::AppMenuActionSelected(action) => {
             app.open_app_menu = None;
+            app.open_view_menu_flyout = None;
+            match action {
+                AppMenuAction::SetViewerScrollMode(mode) => {
+                    return app.set_viewer_scroll_mode(mode)
+                }
+                AppMenuAction::SetViewerSpreadMode(mode) => {
+                    return app.set_viewer_spread_mode(mode)
+                }
+                _ => {}
+            }
             if let Some(message) = app_menu_action_message(app, action) {
                 return Task::done(message);
             }
         }
         Message::SelectionMenuOpened(menu) => {
             app.open_app_menu = None;
+            app.open_view_menu_flyout = None;
             app.open_selection_menu = if app.open_selection_menu == Some(menu) {
                 None
             } else {
@@ -2321,7 +2941,10 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::OpenFileDialog => return open_file_dialog_task(),
         Message::FileDialogCanceled => {}
-        Message::FileSelected(path) => return open_document_task(path),
+        Message::FileSelected(path) => {
+            app.pending_document_open = true;
+            return open_document_task(path);
+        }
         Message::DocumentOpened(doc) => return app.open_document(doc),
         Message::LibraryDocumentOpened { entry_id, doc } => {
             return app.open_library_document(entry_id, doc);
@@ -2329,6 +2952,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::BackToLibrary => return app.return_to_library(),
         Message::BackToViewer => return app.return_to_viewer(),
         Message::DocumentError(error) => {
+            app.pending_document_open = false;
             if !app.dismissed_document_errors.contains(&error) {
                 app.document_error = Some(error);
             }
@@ -2385,6 +3009,13 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         },
         Message::ToggleSidebar | Message::ToggleTocPanel => {
             app.toc_open = !app.toc_open;
+            app.viewer_viewport_width = app.estimated_viewer_viewport_width();
+            app.viewer_viewport_height = app.estimated_viewer_viewport_height();
+            return app.apply_active_dimension_zoom();
+        }
+        Message::ViewerSidebarTabSelected(tab) => {
+            app.viewer_sidebar_tab = tab;
+            return app.request_viewer_thumbnail_pages();
         }
         Message::ToggleViewMode => {
             app.compact_view_mode = !app.compact_view_mode;
@@ -2496,6 +3127,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 .find(|entry| entry.id == entry_id)
                 .cloned()
             {
+                app.pending_document_open = true;
                 return open_library_document_task(entry.id, entry.path);
             }
         }
@@ -3258,6 +3890,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ProgressSaved | Message::LibraryPreferencesSaved => {}
         Message::OpenJumpDialog => {
+            app.page_input_editing = false;
             app.jump_dialog_open = true;
             app.jump_input = app
                 .doc
@@ -3265,16 +3898,52 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 .map(|_| (u32::from(app.current_page()) + 1).to_string())
                 .unwrap_or_default();
         }
+        Message::OpenViewerFind => {
+            return app.open_viewer_find();
+        }
+        Message::CloseViewerFind => {
+            app.viewer_find.open = false;
+        }
+        Message::ViewerFindQueryChanged(query) => {
+            return app.set_viewer_find_query(query);
+        }
+        Message::ViewerFindPrevious => {
+            app.viewer_find.select_previous();
+            return app.scroll_to_selected_viewer_find_match();
+        }
+        Message::ViewerFindNext => {
+            app.viewer_find.select_next();
+            return app.scroll_to_selected_viewer_find_match();
+        }
+        Message::ViewerFindHighlightAllToggled(value) => {
+            app.viewer_find.highlight_all = value;
+        }
+        Message::ViewerFindMatchCaseToggled(value) => {
+            app.viewer_find.match_case = value;
+            app.refresh_viewer_find_matches();
+            return app.scroll_to_selected_viewer_find_match();
+        }
+        Message::ViewerFindMatchDiacriticsToggled(value) => {
+            app.viewer_find.match_diacritics = value;
+            app.refresh_viewer_find_matches();
+            return app.scroll_to_selected_viewer_find_match();
+        }
         Message::CloseOverlay => {
             if app.jump_dialog_open {
                 app.jump_dialog_open = false;
                 app.jump_input.clear();
+            } else if app.page_input_editing {
+                app.page_input_editing = false;
+                app.jump_input.clear();
+            } else if app.viewer_find.open {
+                app.viewer_find.open = false;
             } else if app.create_folder_dialog_open {
                 app.create_folder_dialog_open = false;
             } else if app.pending_confirmation.is_some() {
                 app.pending_confirmation = None;
             } else if app.open_app_menu.is_some() {
                 app.open_app_menu = None;
+                app.open_view_menu_flyout = None;
             } else if app.open_selection_menu.is_some() {
                 app.open_selection_menu = None;
             } else {
@@ -3284,12 +3953,37 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::JumpInputChanged(value) => {
             app.jump_input = value.chars().filter(char::is_ascii_digit).take(5).collect();
         }
+        Message::StartPageInputEdit => {
+            app.jump_dialog_open = false;
+            app.page_input_editing = true;
+            app.jump_input = app
+                .doc
+                .as_ref()
+                .map(|_| (u32::from(app.current_page()) + 1).to_string())
+                .unwrap_or_default();
+            return operation::focus(Id::new(PAGE_INPUT_ID));
+        }
         Message::SubmitJump => {
             if let Ok(page) = app.jump_input.parse::<u16>() {
                 return app.jump_to_page(page.saturating_sub(1));
             }
+            app.page_input_editing = false;
+            app.jump_input.clear();
         }
         Message::JumpToPage(page) => return app.jump_to_page(page),
+        Message::PreviousPage => {
+            let page = app.current_page().saturating_sub(1);
+            return app.jump_to_page(page);
+        }
+        Message::NextPage => {
+            if let Some(doc) = &app.doc {
+                let page = app
+                    .current_page()
+                    .saturating_add(1)
+                    .min(doc.page_count().saturating_sub(1));
+                return app.jump_to_page(page);
+            }
+        }
         Message::ToggleOutlineNode(path) => {
             if !app.expanded_outline_paths.insert(path.clone()) {
                 app.expanded_outline_paths.remove(&path);
@@ -3298,8 +3992,22 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::ViewerTextLayerLoaded { page, layer } => {
             app.pending_text_layers.remove(&page);
             app.viewer_text_layers.insert(page, layer);
+            let mut tasks = Vec::new();
+            if app.viewer_find.open {
+                let previous_match = app.viewer_find.selected_match();
+                app.refresh_viewer_find_matches();
+                if !app.viewer_find.query.is_empty()
+                    && previous_match != app.viewer_find.selected_match()
+                    && app.viewer_find.selected_match().is_some()
+                {
+                    tasks.push(app.scroll_to_selected_viewer_find_match());
+                }
+            }
             if app.viewer_copy_pending && app.selected_text_layers_ready() {
-                return app.copy_selected_viewer_text();
+                tasks.push(app.copy_selected_viewer_text());
+            }
+            if !tasks.is_empty() {
+                return Task::batch(tasks);
             }
         }
         Message::ViewerTextLayerError { page, error } => {
@@ -3314,6 +4022,9 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ViewerTextSelectionEnded => {
             app.finish_viewer_text_selection();
+        }
+        Message::ViewerCanvasClicked => {
+            app.clear_viewer_text_selection();
         }
         Message::ClearViewerTextSelection => {
             app.clear_viewer_text_selection();
@@ -3342,21 +4053,27 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             height,
         } => {
             app.scroll_offset = scroll_offset;
-            app.viewport_width = width;
-            app.viewport_height = height;
+            app.viewer_viewport_width = width.max(1.0);
+            app.viewer_viewport_height = height.max(1.0);
             app.clamp_horizontal_offset();
             app.clamp_scroll_offset();
-            return app.request_visible_pages();
+            return Task::batch([
+                app.apply_active_dimension_zoom(),
+                app.request_visible_pages(),
+            ]);
         }
         Message::WindowResized { width, height } => {
             app.viewport_width = width.max(1.0);
             app.viewport_height = height.max(1.0);
+            app.viewer_viewport_width = app.estimated_viewer_viewport_width();
+            app.viewer_viewport_height = app.estimated_viewer_viewport_height();
             if app.mode == AppMode::Library {
                 app.recalculate_library_viewport_width();
                 app.library_viewport_height =
                     (app.viewport_height - app_menu_bar_height(app) - Spacing::LG * 2.0).max(1.0);
                 return app.request_visible_thumbnails();
             }
+            return app.apply_active_dimension_zoom();
         }
         Message::ViewportWheelScrolled {
             delta_x,
@@ -3365,20 +4082,39 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             viewport_width,
             viewport_height,
         } => {
-            app.viewport_width = viewport_width;
-            app.viewport_height = viewport_height;
+            app.viewer_viewport_width = viewport_width.max(1.0);
+            app.viewer_viewport_height = viewport_height.max(1.0);
             app.clamp_horizontal_offset();
             app.clamp_scroll_offset();
 
             if app.modifiers.control() {
+                app.active_zoom_preset = None;
                 let direction = if delta_y.abs() >= delta_x.abs() {
                     delta_y
                 } else {
                     -delta_x
                 };
                 let step = if direction > 0.0 { 100 } else { -100 };
-                let width = (i32::from(app.zoom_width) + step).clamp(240, 2400) as u16;
+                let width = (i32::from(app.zoom_width) + step)
+                    .clamp(i32::from(MIN_ZOOM_WIDTH), i32::from(MAX_ZOOM_WIDTH))
+                    as u16;
                 return app.zoom_to_width(width, Some(cursor), ZoomRenderPolicy::Debounced);
+            }
+
+            if app.viewer_scroll_mode == ViewerScrollMode::Page {
+                let direction = if delta_y < 0.0 || delta_x > 0.0 {
+                    1
+                } else {
+                    -1
+                };
+                return app.scroll_page_mode_by(direction);
+            }
+
+            if app.viewer_scroll_mode == ViewerScrollMode::Horizontal {
+                let delta = if delta_x != 0.0 { delta_x } else { delta_y };
+                app.horizontal_offset =
+                    (app.horizontal_offset - delta).clamp(0.0, app.max_horizontal_offset());
+                return app.request_visible_pages();
             }
 
             if app.modifiers.shift() || delta_x != 0.0 {
@@ -3400,6 +4136,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             }
         }
         Message::ZoomIn => {
+            app.active_zoom_preset = None;
             return app.zoom_to_width(
                 app.zoom_width.saturating_add(100),
                 None,
@@ -3407,6 +4144,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             );
         }
         Message::ZoomOut => {
+            app.active_zoom_preset = None;
             return app.zoom_to_width(
                 app.zoom_width.saturating_sub(100),
                 None,
@@ -3414,6 +4152,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             );
         }
         Message::ShortcutPressed(Shortcut::In) => {
+            app.active_zoom_preset = None;
             return app.zoom_to_width(
                 app.zoom_width.saturating_add(100),
                 None,
@@ -3421,6 +4160,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             );
         }
         Message::ShortcutPressed(Shortcut::Out) => {
+            app.active_zoom_preset = None;
             return app.zoom_to_width(
                 app.zoom_width.saturating_sub(100),
                 None,
@@ -3428,11 +4168,9 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             );
         }
         Message::ShortcutPressed(Shortcut::Reset) => {
-            return app.zoom_to_width(
-                app.settings.default_zoom_width,
-                None,
-                ZoomRenderPolicy::Immediate,
-            );
+            app.active_zoom_preset = Some(ZoomPreset::Automatic);
+            let width = ZoomPreset::Automatic.width_for(app);
+            return app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
         }
         Message::ShortcutPressed(Shortcut::ToggleTheme) => {
             app.theme = app.theme.toggled();
@@ -3441,12 +4179,22 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return Task::done(Message::ReloadStyles);
         }
         Message::ShortcutPressed(Shortcut::PageDown) => {
-            return app.scroll_by(app.viewport_height * 0.86);
+            if app.viewer_scroll_mode == ViewerScrollMode::Page {
+                return app.scroll_page_mode_by(1);
+            }
+            return app.scroll_by(app.viewer_viewport_height * 0.86);
         }
         Message::ShortcutPressed(Shortcut::PageUp) => {
-            return app.scroll_by(-(app.viewport_height * 0.86));
+            if app.viewer_scroll_mode == ViewerScrollMode::Page {
+                return app.scroll_page_mode_by(-1);
+            }
+            return app.scroll_by(-(app.viewer_viewport_height * 0.86));
         }
         Message::ShortcutPressed(Shortcut::FineScroll(delta)) => {
+            if app.viewer_scroll_mode == ViewerScrollMode::Horizontal {
+                app.pan_horizontally_by(f32::from(delta));
+                return Task::none();
+            }
             return app.scroll_by(f32::from(delta));
         }
         Message::ShortcutPressed(Shortcut::HorizontalPan(delta)) => {
@@ -3467,6 +4215,9 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::ShortcutPressed(Shortcut::FocusSearch) => {
             if app.mode == AppMode::Library {
                 return operation::focus(Id::new(LIBRARY_SEARCH_INPUT_ID));
+            }
+            if app.mode == AppMode::Viewer {
+                return app.open_viewer_find();
             }
         }
         Message::ShortcutPressed(Shortcut::RenameSelected) => {
@@ -3492,6 +4243,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             }
         }
         Message::ShortcutPressed(Shortcut::Jump) => {
+            app.page_input_editing = false;
             app.jump_dialog_open = true;
             app.jump_input = (u32::from(app.current_page()) + 1).to_string();
         }
@@ -3505,8 +4257,19 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.pending_confirmation = None;
             } else if app.open_app_menu.is_some() {
                 app.open_app_menu = None;
+                app.open_view_menu_flyout = None;
             } else if app.open_selection_menu.is_some() {
                 app.open_selection_menu = None;
+            } else if app.zoom_menu_open {
+                app.zoom_menu_open = false;
+            } else if app.zoom_editing {
+                app.zoom_editing = false;
+                app.zoom_input = zoom_percent_label(app.zoom_width);
+            } else if app.page_input_editing {
+                app.page_input_editing = false;
+                app.jump_input.clear();
+            } else if app.mode == AppMode::Viewer && app.viewer_find.open {
+                app.viewer_find.open = false;
             } else if app.mode == AppMode::Viewer && app.viewer_text_selection.is_some() {
                 app.clear_viewer_text_selection();
             } else if app.mode == AppMode::Library && !app.selected_library_entries.is_empty() {
@@ -3521,7 +4284,46 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             }
         }
         Message::ZoomSet(width) => {
+            app.active_zoom_preset = None;
             return app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+        }
+        Message::StartZoomInputEdit => {
+            app.zoom_editing = true;
+            app.zoom_menu_open = false;
+            app.zoom_input = zoom_percent_label(app.zoom_width);
+            return operation::focus(Id::new(ZOOM_INPUT_ID));
+        }
+        Message::ZoomInputChanged(value) => {
+            app.zoom_input = value;
+        }
+        Message::SubmitZoomInput => {
+            let width = width_from_percent_input(&app.zoom_input);
+            app.zoom_editing = false;
+            if let Some(width) = width {
+                app.active_zoom_preset = None;
+                return app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+            }
+            app.zoom_input = zoom_percent_label(app.zoom_width);
+        }
+        Message::ToggleZoomMenu => {
+            app.zoom_menu_open = !app.zoom_menu_open;
+            app.zoom_editing = false;
+            app.zoom_input = zoom_percent_label(app.zoom_width);
+        }
+        Message::CloseZoomMenu => {
+            app.zoom_menu_open = false;
+        }
+        Message::ZoomPresetSelected(preset) => {
+            app.zoom_menu_open = false;
+            app.zoom_editing = false;
+            app.active_zoom_preset = Some(preset);
+            let width = preset.width_for(app);
+            app.zoom_input = zoom_percent_label(width);
+            let task = app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+            if matches!(preset, ZoomPreset::PageWidth) {
+                app.horizontal_offset = 0.0;
+            }
+            return task;
         }
         _ => {}
     }
