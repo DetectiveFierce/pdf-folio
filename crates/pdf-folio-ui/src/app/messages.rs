@@ -7,7 +7,7 @@ use std::time::Instant;
 use iced::keyboard;
 use iced::Point;
 use pdf_folio_core::{Annotation, AnnotationId, PageTextLayer, PdfDoc, TileKey};
-use pdf_folio_library::{
+use pdf_folio_db::{
     EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
 };
 

@@ -67,14 +67,17 @@ pdf-folio/
 │   │       ├── document.rs     ← PdfDoc wrapper around pdfium-render
 │   │       ├── renderer.rs     ← background render pool, TileKey, tile cache
 │   │       └── annotations.rs  ← annotation data model (no UI)
-│   ├── pdf-folio-library/          ← SQLite store, tantivy index, filesystem watcher
+│   ├── pdf-folio-db/          ← SQLite store, tantivy index, filesystem watcher
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── db.rs           ← rusqlite schema and queries
 │   │       ├── indexer.rs      ← tantivy index management
 │   │       └── watcher.rs      ← notify-based filesystem watcher
-│   ├── pdf-folio-ui/               ← iced Application, all views and messages
+│   ├── pdf-folio-style/          ← KDL style book, tokens, classes, fonts
+│   ├── pdf-folio-viewer/         ← viewer state and viewer-domain logic
+│   ├── pdf-folio-ui-components/  ← library UI component logic and reusable helpers
+│   ├── pdf-folio-ui/             ← app shell, orchestration, menus, dialogs
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
@@ -103,8 +106,11 @@ pdf-folio/
 ### Crate dependency rules
 
 - `pdf-folio-core` must have **zero** UI dependencies. No iced, no wgpu, no winit.
-- `pdf-folio-library` must have **zero** UI dependencies.
-- `pdf-folio-ui` may depend on `pdf-folio-core` and `pdf-folio-library`.
+- `pdf-folio-db` must have **zero** UI dependencies.
+- `pdf-folio-style` may depend on `iced` and `kdl`, but not app or domain state.
+- `pdf-folio-viewer` may depend on `pdf-folio-core`, `pdf-folio-style`, and `iced`.
+- `pdf-folio-ui-components` may depend on `pdf-folio-core`, `pdf-folio-db`, `pdf-folio-style`, and `iced`.
+- `pdf-folio-ui` may depend on `pdf-folio-core`, `pdf-folio-db`, `pdf-folio-style`, `pdf-folio-viewer`, and `pdf-folio-ui-components`.
 - `pdf-folio-main` depends only on `pdf-folio-ui` (plus CLI parsing).
 - Cross-crate communication uses plain Rust types and `Arc<T>`. No shared mutable globals.
 
@@ -130,7 +136,7 @@ tracing = "0.1.44"
 blake3 = "1.8.5"      # content hashing for dedup
 ```
 
-### pdf-folio-library
+### pdf-folio-db
 
 ```toml
 [dependencies]
@@ -151,7 +157,7 @@ chrono = { version = "0.4.45", features = ["serde"] }
 [dependencies]
 iced = { version = "0.14.0", features = ["canvas", "tokio", "image", "svg"] }
 pdf-folio-core = { path = "../pdf-folio-core" }
-pdf-folio-library = { path = "../pdf-folio-library" }
+pdf-folio-db = { path = "../pdf-folio-db" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0.103"
 tracing = "0.1.44"
@@ -616,7 +622,7 @@ Index one document per PDF page. Search returns `(entry_id, page)` hits so the U
 
 ### Tasks in order
 
-1. **Database setup** (`pdf-folio-library/src/db.rs`)
+1. **Database setup** (`pdf-folio-db/src/db.rs`)
    - [x] On first run, create SQLite database at `$XDG_DATA_HOME/pdf-folio/library.db`
    - [x] Run schema migrations using a simple version table (no ORM, raw SQL)
    - [x] Implement: `insert_entry`, `get_all_entries`, `update_last_page`, `add_tag`, `remove_tag`, `delete_entry`
@@ -727,7 +733,7 @@ This phase exists to prevent the UI from becoming a maze of one-off `container`,
 
 ### Tasks in order
 
-1. **Style module architecture** (`pdf-folio-ui/src/style/`)
+1. **Style module architecture** (`pdf-folio-style/src/`)
    - [x] Create a dedicated `style` module owned by the UI crate
    - [x] Split style concerns into clear files:
      - `tokens.rs` — colors, spacing, radii, typography, shadows, borders
@@ -920,7 +926,7 @@ Library features added in this phase must use the Phase 4 style system. Library 
 
 ### Tasks in order
 
-1. **Library data model expansion** (`pdf-folio-library/src/db.rs`)
+1. **Library data model expansion** (`pdf-folio-db/src/db.rs`)
    - [x] Add stable manual ordering support for PDFs
      - `manual_order INTEGER NOT NULL`
      - preserve gaps between order values where practical so reordering does not require rewriting the whole table every time
@@ -1814,4 +1820,4 @@ These apply to every file the agent generates.
 - **Error messages are user-visible.** Write them in plain English, sentence case, no Rust type names. "Could not open file: the path does not exist." not "No such file or directory (os error 2)".
 - **Feature flags for optional backends.** Any alternative implementation (e.g. a future mupdf backend) lives behind a Cargo feature flag, not `cfg(target_os)`.
 - **Tests live next to the code.** Use `#[cfg(test)] mod tests { ... }` in the same file. Integration tests go in `tests/`.
-- **Style through the style system.** Reusable UI polish belongs in `pdf-folio-ui/src/style/` as tokens, classes, layout primitives, or styled helpers. Do not scatter hard-coded colors, spacing, radii, or typography through ordinary view code.
+- **Style through the style system.** Reusable UI polish belongs in `pdf-folio-style/src/` as tokens, classes, layout primitives, or styled helpers. Do not scatter hard-coded colors, spacing, radii, or typography through ordinary view code.

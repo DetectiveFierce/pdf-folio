@@ -1,7 +1,7 @@
 # PDF-Folio Style System
 
-PDF-Folio routes repeated visual decisions through `pdf-folio-ui/src/style/` and external KDL
-style files in `pdf-folio-ui/styles/`. Views should describe structure and message flow; colors,
+PDF-Folio routes repeated visual decisions through the `pdf-folio-style` crate and external KDL
+style files in `crates/pdf-folio-style/styles/`. Views should describe structure and message flow; colors,
 radii, borders, shadows, primitive drawing values, and reusable widget states should live in the
 style system.
 
@@ -20,7 +20,7 @@ style system.
 ## KDL Styles
 
 Bundled style files are compiled in as fallbacks, but in a development checkout PDF-Folio reads
-`crates/pdf-folio-ui/styles/` from disk at runtime so edits can hot reload without relaunching.
+`crates/pdf-folio-style/styles/` from disk at runtime so edits can hot reload without relaunching.
 User overrides are layered from:
 
 ```text
@@ -47,6 +47,11 @@ component "LibraryCard" {
     selected background="#30230F" border="#D4A853"
 }
 ```
+
+Viewer-specific styling lives in `styles/components/viewer/viewer.kdl`. Use viewer-specific
+classes such as `ViewerToolbar`, `ViewerSidebar`, `ViewerFindBar`, `ViewerZoomMenuItem`,
+`ViewerCanvas`, `ViewerPagePlaceholder`, and `ViewerPresentationOverlay` when styling the PDF
+viewer so global toolbar, sidebar, and search styles are not changed accidentally.
 
 Supported component states are `normal`, `hovered`, `pressed`, `focused`, `disabled`, `selected`,
 `active`, and `error`. State nodes can include `theme="espresso"` or `theme="light"` to target one
@@ -124,10 +129,11 @@ to remain visible in both light and dark themes.
 
 ## Viewer And Overlays
 
-Viewer canvas primitives use `viewer_primitives(tokens)` so the page background, placeholder, and
-shadow can evolve without touching scroll or render math. Annotation toolbars, annotation
-popovers, presentation overlays, and minimap controls should reuse `Class::AnnotationToolbar`,
-`Class::AnnotationPopover`, `Class::PresentationOverlay`, and `Class::Minimap`.
+Viewer canvas primitives use `viewer_primitives(tokens)` so the page background, placeholder,
+shadow, find highlights, and text-selection fill can evolve without touching scroll or render math.
+Annotation toolbars, annotation popovers, presentation overlays, and minimap controls should reuse
+`Class::AnnotationToolbar`, `Class::AnnotationPopover`, `Class::ViewerPresentationOverlay`, and
+`Class::Minimap`.
 
 ## Library Interaction Patterns
 

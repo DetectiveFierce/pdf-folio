@@ -69,7 +69,7 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
                         })
                         .and_capture(),
                     )
-                } else if self.app.viewer_text_selection.is_some() {
+                } else if self.app.viewer.viewer_text_selection.is_some() {
                     state.pending_empty_click = Some(position);
                     Some(canvas::Action::capture())
                 } else {
@@ -87,6 +87,7 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
 
                 if !self
                     .app
+                    .viewer
                     .viewer_text_selection
                     .is_some_and(|selection| selection.dragging)
                 {
@@ -107,6 +108,7 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if self
                     .app
+                    .viewer
                     .viewer_text_selection
                     .is_some_and(|selection| selection.dragging)
                 {
@@ -132,11 +134,15 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let background = canvas::Path::rectangle(Point::ORIGIN, bounds.size());
-        let tokens = self.app.theme.tokens(&self.app.style_book);
+        let tokens = self
+            .app
+            .appearance
+            .theme
+            .tokens(&self.app.appearance.style_book);
         let viewer_style = viewer_primitives(tokens);
         frame.fill(&background, viewer_style.canvas);
 
-        if self.app.doc.is_none() {
+        if self.app.viewer.doc.is_none() {
             return vec![frame.into_geometry()];
         };
         for (page, rect) in self
@@ -229,7 +235,7 @@ impl canvas::Program<Message> for ViewerSelectionOverlay<'_> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        if self.app.doc.is_none() {
+        if self.app.viewer.doc.is_none() {
             return vec![frame.into_geometry()];
         };
 
@@ -250,7 +256,7 @@ fn char_at_position(
     bounds: Rectangle,
     position: Point,
 ) -> Option<crate::viewer::state::ViewerTextAnchor> {
-    app.doc.as_ref()?;
+    app.viewer.doc.as_ref()?;
     for (page, rect) in app.viewer_page_rects_screen(bounds.width, bounds.height) {
         if position.x >= rect.x
             && position.x <= rect.x + rect.width
@@ -258,6 +264,7 @@ fn char_at_position(
             && position.y <= rect.y + rect.height
         {
             return app
+                .viewer
                 .viewer_text_layers
                 .get(&page)
                 .and_then(|layer| char_in_page_at_position(layer, rect, position))
@@ -311,32 +318,34 @@ fn draw_find_highlights(
     page: u16,
     page_rect: Rectangle,
 ) {
-    if app.viewer_find.query.is_empty() {
+    if app.viewer.viewer_find.query.is_empty() {
         return;
     }
 
-    let Some(layer) = app.viewer_text_layers.get(&page) else {
+    let Some(layer) = app.viewer.viewer_text_layers.get(&page) else {
         return;
     };
 
-    let selected = app.viewer_find.selected;
-    for (index, matched) in app.viewer_find.matches.iter().enumerate() {
+    let selected = app.viewer.viewer_find.selected;
+    for (index, matched) in app.viewer.viewer_find.matches.iter().enumerate() {
         if matched.page != page {
             continue;
         }
 
         let is_selected = Some(index) == selected;
-        if !app.viewer_find.highlight_all && !is_selected {
+        if !app.viewer.viewer_find.highlight_all && !is_selected {
             continue;
         }
 
         let Some(range) = matched.char_range() else {
             continue;
         };
+        let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+        let viewer_style = viewer_primitives(tokens);
         let color = if is_selected {
-            viewer_find_selected_fill()
+            viewer_style.find_selected_fill
         } else {
-            viewer_find_fill()
+            viewer_style.find_fill
         };
         for rect in selected_line_highlights(layer, page_rect, range) {
             let path = canvas::Path::rectangle(rect.position(), rect.size());
@@ -351,36 +360,27 @@ fn draw_text_selection(
     page: u16,
     page_rect: Rectangle,
 ) {
-    let (Some(selection), Some(layer)) =
-        (app.viewer_text_selection, app.viewer_text_layers.get(&page))
-    else {
+    let (Some(selection), Some(layer)) = (
+        app.viewer.viewer_text_selection,
+        app.viewer.viewer_text_layers.get(&page),
+    ) else {
         return;
     };
     let Some(range) = selection.char_range_for_page(page, layer.chars.len()) else {
         return;
     };
 
-    let tokens = app.theme.tokens(&app.style_book);
-    let color = viewer_selection_fill(tokens);
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let color = viewer_primitives(tokens).text_selection_fill;
     for rect in selected_line_highlights(layer, page_rect, range) {
         let path = canvas::Path::rectangle(rect.position(), rect.size());
         frame.fill(&path, color);
     }
 }
 
-fn viewer_find_fill() -> iced::Color {
-    iced::Color::from_rgba8(255, 185, 34, 0.52)
-}
-
-fn viewer_find_selected_fill() -> iced::Color {
-    iced::Color::from_rgba8(222, 127, 0, 0.68)
-}
-
+#[cfg(test)]
 fn viewer_selection_fill(tokens: ThemeTokens) -> iced::Color {
-    iced::Color {
-        a: 0.42,
-        ..mix_color(tokens.canvas, tokens.accent, 0.72)
-    }
+    viewer_primitives(tokens).text_selection_fill
 }
 
 fn selected_line_highlights(

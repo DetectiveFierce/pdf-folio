@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use iced::widget::image;
 use iced::Task;
 use pdf_folio_core::{PdfDoc, RenderedPage};
-use pdf_folio_library::{thumbnail_path, EntryId, LibraryEntry};
+use pdf_folio_db::{thumbnail_path, EntryId, LibraryEntry};
 
 use crate::library::metadata::entry_title;
 use crate::messages::Message;

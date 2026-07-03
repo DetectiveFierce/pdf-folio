@@ -17,13 +17,10 @@ use crate::PDFolioApp;
 const CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"##;
 
 pub(crate) const ZOOM_INPUT_ID: &str = "viewer-zoom-input";
-pub(crate) const ZOOM_CONTROL_WIDTH: f32 = 98.0;
-pub(crate) const ZOOM_MENU_WIDTH: f32 = 118.0;
 
 const ACTUAL_SIZE_WIDTH: u16 = 800;
 pub(crate) const MIN_ZOOM_WIDTH: u16 = 240;
 pub(crate) const MAX_ZOOM_WIDTH: u16 = 3200;
-const ZOOM_MENU_ROW_HEIGHT: f32 = 22.0;
 const READING_WIDTH_FILL: f32 = 0.86;
 const READING_HEIGHT_MULTIPLIER: f32 = 1.75;
 
@@ -101,8 +98,8 @@ pub(crate) fn width_from_percent_input(input: &str) -> Option<u16> {
 }
 
 pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element<'a, Message> {
-    let value: Element<'a, Message> = if app.zoom_editing {
-        text_input("", &app.zoom_input)
+    let value: Element<'a, Message> = if app.viewer.zoom_editing {
+        text_input("", &app.viewer.zoom_input)
             .id(iced::widget::Id::new(ZOOM_INPUT_ID))
             .on_input(Message::ZoomInputChanged)
             .on_submit(Message::SubmitZoomInput)
@@ -110,12 +107,12 @@ pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Elem
             .size(FontSize::MD)
             .font(ui_font(FontWeight::MEDIUM))
             .width(Length::Fixed(58.0))
-            .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+            .style(move |_, status| text_input_style(tokens, Class::ViewerFindInput, status))
             .into()
     } else {
         mouse_area(
             container(
-                text(zoom_percent_label(app.zoom_width))
+                text(zoom_percent_label(app.viewer.zoom_width))
                     .size(FontSize::MD)
                     .font(ui_font(FontWeight::MEDIUM))
                     .color(tokens.text_secondary)
@@ -138,7 +135,7 @@ pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Elem
     ]
     .spacing(0)
     .align_y(Alignment::Center)
-    .width(Length::Fixed(ZOOM_CONTROL_WIDTH))
+    .width(Length::Fixed(app.layout().viewer_zoom_control_width))
     .into()
 }
 
@@ -147,13 +144,19 @@ pub(crate) fn zoom_menu<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element
 
     for (index, preset) in ZoomPreset::ALL.into_iter().enumerate() {
         let active = preset_matches_current(preset, app);
-        options = options.push(zoom_menu_row(preset, index % 2 == 1, active, tokens));
+        options = options.push(zoom_menu_row(
+            preset,
+            index % 2 == 1,
+            active,
+            tokens,
+            app.layout().viewer_zoom_menu_row_height,
+        ));
     }
 
     container(options)
-        .width(Length::Fixed(ZOOM_MENU_WIDTH))
+        .width(Length::Fixed(app.layout().viewer_zoom_menu_width))
         .style(move |_| {
-            let menu = menu_style_for_class(tokens, Class::MenuPanel);
+            let menu = menu_style_for_class(tokens, Class::ViewerZoomMenu);
             container::Style {
                 background: Some(menu.background),
                 border: menu.border,
@@ -174,7 +177,7 @@ fn zoom_chevron_button<'a>(tokens: ThemeTokens) -> iced::widget::Button<'a, Mess
 
     button(container(icon).center(Length::Fill))
         .padding(0)
-        .style(move |_, status| button_style(tokens, Class::ToolbarButton, status))
+        .style(move |_, status| button_style(tokens, Class::ViewerToolbarButton, status))
 }
 
 fn zoom_menu_row<'a>(
@@ -182,6 +185,7 @@ fn zoom_menu_row<'a>(
     striped: bool,
     active: bool,
     tokens: ThemeTokens,
+    row_height: f32,
 ) -> Element<'a, Message> {
     let mut label = text(preset.to_string())
         .size(FontSize::MD)
@@ -196,16 +200,16 @@ fn zoom_menu_row<'a>(
     button(
         container(label)
             .width(Length::Fill)
-            .height(Length::Fixed(ZOOM_MENU_ROW_HEIGHT))
+            .height(Length::Fixed(row_height))
             .padding([0.0, Spacing::SM])
             .align_y(alignment::Vertical::Center),
     )
     .width(Length::Fill)
-    .height(Length::Fixed(ZOOM_MENU_ROW_HEIGHT))
+    .height(Length::Fixed(row_height))
     .padding(0)
     .on_press(Message::ZoomPresetSelected(preset))
     .style(move |_, status| {
-        let mut style = button_style(tokens, Class::MenuItem, status);
+        let mut style = button_style(tokens, Class::ViewerZoomMenuItem, status);
         let row_base = if striped {
             mix_color(tokens.surface_raised, tokens.accent, 0.08)
         } else {
@@ -220,8 +224,8 @@ fn zoom_menu_row<'a>(
         };
         style.background = Some(Background::Color(row_background));
         if active {
-            let active_style =
-                tokens.class_styles[Class::MenuItem.index()].resolve(ComponentState::Active);
+            let active_style = tokens.class_styles[Class::ViewerZoomMenuItem.index()]
+                .resolve(ComponentState::Active);
             style = style.with_visual_override(active_style);
             style.background = Some(Background::Color(mix_color(
                 row_background,
@@ -238,8 +242,8 @@ fn zoom_menu_row<'a>(
 
 fn preset_matches_current(preset: ZoomPreset, app: &PDFolioApp) -> bool {
     match preset {
-        ZoomPreset::Percent(percent) => zoom_percent(app.zoom_width) == percent,
-        _ => preset.width_for(app) == app.zoom_width,
+        ZoomPreset::Percent(percent) => zoom_percent(app.viewer.zoom_width) == percent,
+        _ => preset.width_for(app) == app.viewer.zoom_width,
     }
 }
 
@@ -286,7 +290,12 @@ fn current_spread_metrics(app: &PDFolioApp) -> SpreadZoomMetrics {
     let pages = current_spread_pages(app);
     let min_aspect_ratio = pages
         .iter()
-        .filter_map(|&page| app.page_aspect_ratios.get(usize::from(page)).copied())
+        .filter_map(|&page| {
+            app.viewer
+                .page_aspect_ratios
+                .get(usize::from(page))
+                .copied()
+        })
         .fold(f32::INFINITY, f32::min);
 
     SpreadZoomMetrics {
@@ -301,15 +310,18 @@ fn current_spread_metrics(app: &PDFolioApp) -> SpreadZoomMetrics {
 
 fn current_spread_pages(app: &PDFolioApp) -> Vec<u16> {
     let page_count = app
+        .viewer
         .doc
         .as_ref()
-        .map_or(app.page_aspect_ratios.len() as u16, |doc| doc.page_count());
+        .map_or(app.viewer.page_aspect_ratios.len() as u16, |doc| {
+            doc.page_count()
+        });
     if page_count == 0 {
         return vec![0];
     }
 
     let page = app.current_page().min(page_count.saturating_sub(1));
-    match app.viewer_spread_mode {
+    match app.viewer.viewer_spread_mode {
         ViewerSpreadMode::None => vec![page],
         ViewerSpreadMode::Odd => {
             let left = page - (page % 2);
@@ -341,9 +353,9 @@ fn page_width_for_group(total_width: f32, page_count: usize) -> f32 {
 }
 
 fn available_page_width(app: &PDFolioApp) -> f32 {
-    (app.viewer_viewport_width - Spacing::PAGE_GUTTER * 2.0).max(f32::from(MIN_ZOOM_WIDTH))
+    (app.viewer.viewer_viewport_width - Spacing::PAGE_GUTTER * 2.0).max(f32::from(MIN_ZOOM_WIDTH))
 }
 
 fn available_page_height(app: &PDFolioApp) -> f32 {
-    (app.viewer_viewport_height - Spacing::PAGE_GUTTER * 2.0).max(f32::from(MIN_ZOOM_WIDTH))
+    (app.viewer.viewer_viewport_height - Spacing::PAGE_GUTTER * 2.0).max(f32::from(MIN_ZOOM_WIDTH))
 }

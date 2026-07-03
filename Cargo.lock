@@ -3501,7 +3501,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdf-folio-library"
+name = "pdf-folio-db"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3528,18 +3528,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-folio-style"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "kdl",
+]
+
+[[package]]
 name = "pdf-folio-ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "iced",
- "kdl",
  "notify",
  "pdf-folio-core",
- "pdf-folio-library",
+ "pdf-folio-db",
+ "pdf-folio-style",
+ "pdf-folio-ui-components",
+ "pdf-folio-viewer",
  "rfd",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "pdf-folio-ui-components"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "pdf-folio-core",
+ "pdf-folio-db",
+ "pdf-folio-style",
+]
+
+[[package]]
+name = "pdf-folio-viewer"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "pdf-folio-core",
 ]
 
 [[package]]

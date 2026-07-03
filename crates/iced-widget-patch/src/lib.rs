@@ -2,6 +2,15 @@
 //!
 //! Everything is re-exported from upstream, except `scrollable`, where the
 //! sidebar needs a left scrollbar without reversed vertical scroll behavior.
+//!
+//! This crate exists so the workspace can apply a targeted local override to
+//! a single widget while keeping the rest of the iced widget tree identical
+//! to the pinned upstream revision.
+//!
+//! The workspace `[patch.crates-io]` table points `iced_widget` at this crate,
+//! so any `iced::widget::*` usage transparently resolves to the patched
+//! implementation. Only [`scrollable()`] is replaced; all other widgets pass
+//! through unchanged via `pub use iced_widget_upstream::*`.
 
 pub use iced_widget_upstream::*;
 

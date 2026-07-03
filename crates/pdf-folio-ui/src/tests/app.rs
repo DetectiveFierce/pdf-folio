@@ -230,8 +230,8 @@ fn stale_page_render_completion_is_discarded() {
         page: 0,
         width_px: 800,
     };
-    app.zoom_generation = 2;
-    app.pending_renders.insert(key, Some(1));
+    app.viewer.zoom_generation = 2;
+    app.viewer.pending_renders.insert(key, Some(1));
 
     let _ = update(
         &mut app,
@@ -244,9 +244,9 @@ fn stale_page_render_completion_is_discarded() {
         },
     );
 
-    assert!(!app.rendered_pages.contains_key(&key));
-    assert!(app.cache.is_empty());
-    assert!(!app.pending_renders.contains_key(&key));
+    assert!(!app.viewer.rendered_pages.contains_key(&key));
+    assert!(app.viewer.cache.is_empty());
+    assert!(!app.viewer.pending_renders.contains_key(&key));
 }
 
 #[test]

@@ -1,0 +1,1372 @@
+use super::*;
+
+#[path = "update/shortcuts.rs"]
+mod shortcuts;
+
+pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
+    match message {
+        Message::AppMenuOpened(menu) => {
+            app.chrome.open_selection_menu = None;
+            app.chrome.open_view_menu_flyout = None;
+            app.chrome.open_app_menu = if app.chrome.open_app_menu == Some(menu) {
+                None
+            } else {
+                Some(menu)
+            };
+        }
+        Message::AppMenuClosed => {
+            app.chrome.open_app_menu = None;
+            app.chrome.open_view_menu_flyout = None;
+        }
+        Message::ViewMenuFlyoutOpened(flyout) => {
+            if app.chrome.open_app_menu == Some(AppMenu::View) {
+                app.chrome.open_view_menu_flyout = Some(flyout);
+            }
+        }
+        Message::AppMenuActionSelected(action) => {
+            app.chrome.open_app_menu = None;
+            app.chrome.open_view_menu_flyout = None;
+            match action {
+                AppMenuAction::SetViewerScrollMode(mode) => {
+                    return app.set_viewer_scroll_mode(mode)
+                }
+                AppMenuAction::SetViewerSpreadMode(mode) => {
+                    return app.set_viewer_spread_mode(mode)
+                }
+                _ => {}
+            }
+            if let Some(message) = app_menu_action_message(app, action) {
+                return Task::done(message);
+            }
+        }
+        Message::SelectionMenuOpened(menu) => {
+            app.chrome.open_app_menu = None;
+            app.chrome.open_view_menu_flyout = None;
+            app.chrome.open_selection_menu = if app.chrome.open_selection_menu == Some(menu) {
+                None
+            } else {
+                Some(menu)
+            };
+        }
+        Message::SelectionMenuClosed => {
+            app.chrome.open_selection_menu = None;
+        }
+        Message::OpenFileDialog => return open_file_dialog_task(),
+        Message::FileDialogCanceled => {}
+        Message::FileSelected(path) => {
+            app.viewer.pending_document_open = true;
+            return open_document_task(path);
+        }
+        Message::DocumentOpened(doc) => return app.open_document(doc),
+        Message::LibraryDocumentOpened { entry_id, doc } => {
+            return app.open_library_document(entry_id, doc);
+        }
+        Message::BackToLibrary => return app.return_to_library(),
+        Message::BackToViewer => return app.return_to_viewer(),
+        Message::DocumentError(error) => {
+            app.viewer.pending_document_open = false;
+            if !app.viewer.dismissed_document_errors.contains(&error) {
+                app.viewer.document_error = Some(error);
+            }
+            app.viewer.pending_renders.clear();
+            app.viewer.page_fade_started.clear();
+        }
+        Message::DismissDocumentError => {
+            if let Some(error) = app.viewer.document_error.take() {
+                app.viewer.dismissed_document_errors.insert(error);
+            }
+            app.viewer.document_error = None;
+            return app.request_visible_pages();
+        }
+        Message::PageRendered {
+            key,
+            data,
+            width,
+            height,
+            generation,
+        } => {
+            if app.viewer.pending_renders.get(&key) == Some(&generation) {
+                app.viewer.pending_renders.remove(&key);
+            }
+            if generation.is_some_and(|generation| generation != app.viewer.zoom_generation) {
+                return Task::none();
+            }
+
+            let had_fallback = generation.is_some()
+                && key.width_px == app.render_width_px()
+                && app.fallback_rendered_page_for_draw(key).is_some();
+            app.viewer.cache.insert(key, data.clone());
+            let handle = image::Handle::from_rgba(u32::from(width), u32::from(height), data);
+            app.viewer.rendered_pages.insert(
+                key,
+                RenderedPageView {
+                    width,
+                    height,
+                    handle,
+                },
+            );
+            if had_fallback {
+                app.viewer.page_fade_started.insert(key, Instant::now());
+            }
+
+            if key.width_px == app.render_width_px()
+                && app.all_visible_pages_rendered_at_current_zoom()
+            {
+                app.viewer.zoom_preview_width_px = None;
+            }
+        }
+        Message::ThemeToggled => {
+            app.appearance.theme = app.appearance.theme.toggled();
+        }
+        Message::ReloadStyles => {
+            return Task::perform(async { StyleBook::load() }, Message::StylesReloaded);
+        }
+        Message::StylesReloaded(result) => match result {
+            Ok(style_book) => {
+                app.appearance.style_book = style_book;
+                app.appearance.style_load_error = None;
+                app.library.library_status = Some(String::from("Styles reloaded."));
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Failed to reload PDF-Folio styles");
+                app.appearance.style_load_error = Some(error.clone());
+                app.library.library_status = Some(format!("Style reload failed: {error}"));
+            }
+        },
+        Message::ToggleSidebar | Message::ToggleTocPanel => {
+            app.viewer.toc_open = !app.viewer.toc_open;
+            app.viewer.viewer_viewport_width = app.estimated_viewer_viewport_width();
+            app.viewer.viewer_viewport_height = app.estimated_viewer_viewport_height();
+            return app.apply_active_dimension_zoom();
+        }
+        Message::ViewerSidebarTabSelected(tab) => {
+            app.viewer.viewer_sidebar_tab = tab;
+            return app.request_viewer_thumbnail_pages();
+        }
+        Message::ToggleViewMode => {
+            app.library.compact_view_mode = !app.library.compact_view_mode;
+            return save_library_preferences_task(app);
+        }
+        Message::LibrarySortChanged(sort_mode) => {
+            app.library.library_sort_mode = sort_mode;
+            app.library.library_scroll_offset = 0.0;
+            app.library.library_drag = None;
+            return Task::batch([save_library_preferences_task(app), app.refresh_library()]);
+        }
+        Message::LibraryGridZoomChanged(zoom) => {
+            app.library.library_grid_zoom =
+                zoom.clamp(LIBRARY_GRID_ZOOM_MIN, LIBRARY_GRID_ZOOM_MAX);
+            app.library.library_scroll_offset = app
+                .library
+                .library_scroll_offset
+                .min(app.max_library_scroll_offset());
+            app.update_library_drag_target_from_cursor();
+            return Task::batch([
+                save_library_preferences_task(app),
+                app.request_visible_thumbnails(),
+            ]);
+        }
+        Message::LibraryMetadataDensityChanged(density) => {
+            app.library.library_metadata_density = density;
+            return save_library_preferences_task(app);
+        }
+        Message::LibraryLoaded(entries) => {
+            app.library.library_entries = entries;
+            app.library.library_error = None;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            app.sync_details_editor_to_selection();
+            app.library.library_status = Some(format!(
+                "{} PDFs in library",
+                app.library.library_entries.len()
+            ));
+            if !app.library.search_query.trim().is_empty() {
+                return Task::done(Message::SearchDebounced(app.library.search_query.clone()));
+            }
+            return Task::batch([
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(app.library.library_scroll_offset),
+            ]);
+        }
+        Message::LibraryFoldersLoaded(folders) => {
+            app.library.library_folders = folders;
+            if app
+                .library
+                .selected_folder
+                .as_ref()
+                .is_some_and(|selected| {
+                    !app.library
+                        .library_folders
+                        .iter()
+                        .any(|folder| &folder.id == selected)
+                })
+            {
+                app.library.selected_folder = None;
+                app.sync_folder_rename_input();
+                return save_library_preferences_task(app);
+            }
+            app.sync_folder_rename_input();
+        }
+        Message::LibraryRefresh => return app.refresh_library(),
+        Message::LibraryError(error) => {
+            app.library.library_status = Some(String::from("Library operation failed."));
+            if !app.library.dismissed_library_errors.contains(&error) {
+                app.library.library_error = Some(error);
+            }
+            app.library.bulk_operation_progress = None;
+            app.library.pending_thumbnails.clear();
+        }
+        Message::DismissLibraryError => {
+            if let Some(error) = app.library.library_error.take() {
+                app.library.dismissed_library_errors.insert(error);
+            }
+            return scroll_library_to_offset_task(app.library.library_scroll_offset);
+        }
+        Message::LibraryStatus(status) => {
+            app.library.library_status = Some(status);
+            app.library.library_error = None;
+        }
+        Message::ImportFolderDialog => return import_folder_dialog_task(),
+        Message::ImportFolderSelected(path) => {
+            app.library.library_status = Some(format!("Importing {}...", path.display()));
+            let db = Arc::clone(&app.db);
+            app.settings.watch_directories.push(path.clone());
+            app.settings.watch_directories.sort();
+            app.settings.watch_directories.dedup();
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || import_folder_with_index(&db, &path))
+                        .await?
+                },
+                |result| match result {
+                    Ok(summary) => Message::ImportFinished(summary),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::ImportFinished(summary) => {
+            app.library.library_status = Some(format!(
+                "Imported {} PDFs{}",
+                summary.entries.len(),
+                if summary.errors.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({} skipped)", summary.errors.len())
+                }
+            ));
+            return app.refresh_library();
+        }
+        Message::AuthorAttributionFinished => return app.refresh_library(),
+        Message::OpenLibraryEntry(entry_id) => {
+            if let Some(entry) = app
+                .library
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            {
+                app.viewer.pending_document_open = true;
+                return open_library_document_task(entry.id, entry.path);
+            }
+        }
+        Message::LibraryEntryClicked(entry_id) => {
+            if app.library.library_drag.is_some() {
+                return Task::none();
+            }
+            app.select_library_entry(entry_id.clone());
+            let now = Instant::now();
+            let is_double_click =
+                app.library
+                    .last_library_click
+                    .as_ref()
+                    .is_some_and(|(last_id, last_click)| {
+                        last_id == &entry_id
+                            && now.duration_since(*last_click) <= Duration::from_millis(500)
+                    });
+
+            app.library.last_library_click = Some((entry_id.clone(), now));
+
+            if is_double_click {
+                return Task::done(Message::OpenLibraryEntry(entry_id));
+            }
+        }
+        Message::EntryCheckboxToggled(entry_id) => {
+            app.toggle_library_entry_selection(entry_id);
+        }
+        Message::MasterCheckboxClicked => match app.master_checkbox_state() {
+            MasterCheckboxState::All => app.clear_library_selection(),
+            MasterCheckboxState::None | MasterCheckboxState::Partial => {
+                app.select_all_visible_library_entries();
+            }
+        },
+        Message::LibraryEntryHoverChanged(entry_id, hovered) => {
+            app.set_library_card_hover(entry_id, hovered);
+        }
+        Message::AnimationFrame(now) => {
+            app.tick_animations(now);
+        }
+        Message::BeginLibraryEntryDrag(entry_id) => {
+            app.begin_library_drag(entry_id);
+            return scroll_library_to_offset_task(app.library.library_scroll_offset);
+        }
+        Message::BeginFolderDrag(folder_id) => {
+            app.begin_folder_drag(folder_id);
+            return scroll_library_to_offset_task(app.library.library_scroll_offset);
+        }
+        Message::ClearLibrarySelection => {
+            app.clear_library_selection();
+        }
+        Message::SelectAllVisibleLibraryEntries => {
+            app.select_all_visible_library_entries();
+        }
+        Message::LibraryEntryDragMoved(position) => {
+            app.update_library_drag_target(position);
+        }
+        Message::FolderDragMoved(position) => {
+            app.update_folder_drag_target(position);
+        }
+        Message::FolderDropTargetChanged(folder_id) => {
+            app.set_folder_drop_hover_target(folder_id, Instant::now());
+        }
+        Message::LibraryAutoScrollTick(tick) => {
+            return app.auto_scroll_library_drag(tick);
+        }
+        Message::EndLibraryEntryDrag => {
+            return app.finish_library_drag();
+        }
+        Message::EndFolderDrag => {
+            return app.finish_folder_drag();
+        }
+        Message::ManualEntryOrderSaved => {
+            app.library.library_status = Some(String::from("Manual PDF order saved."));
+            return Task::batch([
+                app.refresh_library(),
+                scroll_library_to_offset_task(app.library.library_scroll_offset),
+            ]);
+        }
+        Message::SearchQueryChanged(query) => {
+            app.library.search_query = query;
+            app.library.library_drag = None;
+            app.library.search_generation = app.library.search_generation.wrapping_add(1);
+            let query = app.library.search_query.clone();
+            if query.trim().is_empty() {
+                app.library.search_results = None;
+                app.library.search_hit_pages.clear();
+                return app.request_visible_thumbnails();
+            }
+            return schedule_search(query);
+        }
+        Message::SearchDebounced(query) => {
+            if query == app.library.search_query {
+                let db = Arc::clone(&app.db);
+                let sort_mode = app.library.library_sort_mode;
+                return Task::perform(search_library_task(db, query, sort_mode), |result| {
+                    match result {
+                        Ok((entries, hit_pages)) => Message::SearchResults { entries, hit_pages },
+                        Err(error) => Message::LibraryError(error.to_string()),
+                    }
+                });
+            }
+        }
+        Message::SearchResults { entries, hit_pages } => {
+            app.library.search_results = Some(entries);
+            app.library.search_hit_pages = hit_pages;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return app.request_visible_thumbnails();
+        }
+        Message::LibraryScrolled {
+            offset_y,
+            viewport_x,
+            viewport_y,
+            viewport_width,
+            viewport_height,
+        } => {
+            app.library.library_scroll_offset = offset_y.max(0.0);
+            app.library.library_viewport_x = viewport_x;
+            app.library.library_viewport_y = viewport_y;
+            app.library.library_viewport_width = viewport_width.max(1.0);
+            app.library.library_viewport_height = viewport_height.max(1.0);
+            app.update_library_drag_target_from_cursor();
+            return app.request_visible_thumbnails();
+        }
+        Message::CollapseLibrarySidebar => {
+            let columns = app.library_entries_per_row();
+            app.library.library_tag_sidebar_open = false;
+            app.library.resizing_library_tag_sidebar = false;
+            app.recalculate_library_viewport_width();
+            app.fit_library_grid_zoom_to_columns(columns);
+            return app.request_visible_thumbnails();
+        }
+        Message::ExpandLibrarySidebar => {
+            let columns = app.library_entries_per_row();
+            app.library.library_tag_sidebar_open = true;
+            app.recalculate_library_viewport_width();
+            app.fit_library_grid_zoom_to_columns(columns);
+            return app.request_visible_thumbnails();
+        }
+        Message::BeginTagSidebarResize => {
+            app.library.resizing_library_tag_sidebar = true;
+        }
+        Message::TagSidebarResizeDragged(width) => {
+            if app.library.resizing_library_tag_sidebar {
+                app.library.library_tag_sidebar_width = width.clamp(
+                    app.layout().library_sidebar_min_width,
+                    app.layout().library_sidebar_max_width,
+                );
+                app.recalculate_library_viewport_width();
+            }
+        }
+        Message::EndTagSidebarResize => {
+            app.library.resizing_library_tag_sidebar = false;
+            return save_library_preferences_task(app);
+        }
+        Message::LibrarySidebarTabChanged(tab) => {
+            app.library.library_sidebar_tab = tab;
+        }
+        Message::ToggleLibraryTreeRoot => {
+            app.library.library_tree_root_expanded = !app.library.library_tree_root_expanded;
+            return save_library_preferences_task(app);
+        }
+        Message::ToggleLibraryTreeFolder(folder_id) => {
+            if !app
+                .library
+                .collapsed_library_tree_folders
+                .insert(folder_id.clone())
+            {
+                app.library
+                    .collapsed_library_tree_folders
+                    .remove(&folder_id);
+            }
+            return save_library_preferences_task(app);
+        }
+        Message::LibraryWatchEvent(event) => {
+            let db = Arc::clone(&app.db);
+            app.library.library_status = Some(match &event {
+                LibraryWatchEvent::PdfCreated(path) => format!("Importing {}...", path.display()),
+                LibraryWatchEvent::PdfRemoved(path) => {
+                    format!("Marking missing: {}", path.display())
+                }
+            });
+            return Task::perform(
+                async move { tokio::task::spawn_blocking(move || apply_watch_event(&db, event)).await? },
+                |result| match result {
+                    Ok(()) => Message::LibraryRefresh,
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::TagFilterChanged(tag) => {
+            app.library.active_tag_filter = tag;
+            app.library.library_drag = None;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return app.request_visible_thumbnails();
+        }
+        Message::ReadingFilterChanged(filter) => {
+            app.library.active_reading_filter = filter;
+            app.library.library_drag = None;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return app.request_visible_thumbnails();
+        }
+        Message::MissingFilterChanged(active) => {
+            app.library.missing_filter_active = active;
+            app.library.library_drag = None;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return app.request_visible_thumbnails();
+        }
+        Message::FolderSelected(folder_id) => {
+            app.library.selected_folder = folder_id;
+            app.sync_folder_rename_input();
+            app.library.library_drag = None;
+            app.library.library_scroll_offset = 0.0;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return Task::batch([
+                save_library_preferences_task(app),
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(0.0),
+            ]);
+        }
+        Message::ClearLibraryFilters => {
+            app.library.search_query.clear();
+            app.library.search_results = None;
+            app.library.search_hit_pages.clear();
+            app.library.active_tag_filter = None;
+            app.library.active_reading_filter = None;
+            app.library.missing_filter_active = false;
+            app.library.selected_folder = None;
+            app.library.library_drag = None;
+            app.library.library_scroll_offset = 0.0;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return Task::batch([
+                save_library_preferences_task(app),
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(0.0),
+            ]);
+        }
+        Message::NewFolderNameChanged(value) => {
+            app.library.new_folder_name = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(80)
+                .collect();
+        }
+        Message::FolderRenameInputChanged(value) => {
+            app.library.folder_rename_input = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(80)
+                .collect();
+        }
+        Message::OpenCreateFolderDialog => {
+            app.library.create_folder_dialog_open = true;
+        }
+        Message::CreateFolder => {
+            let name = app.library.new_folder_name.trim().to_owned();
+            if name.is_empty() {
+                return Task::none();
+            }
+            let db = Arc::clone(&app.db);
+            let parent_id = app.library.selected_folder.clone();
+            app.library.library_status = Some(format!("Creating folder {name}..."));
+            app.library.new_folder_name.clear();
+            app.library.create_folder_dialog_open = false;
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || db.create_folder(&name, parent_id.as_ref()))
+                        .await?
+                },
+                |result| match result {
+                    Ok(folder_id) => Message::FolderCreated(folder_id),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::RenameSelectedFolder => {
+            let Some(folder_id) = app.library.selected_folder.clone() else {
+                return Task::none();
+            };
+            let name = app.library.folder_rename_input.trim().to_owned();
+            if name.is_empty() {
+                return Task::none();
+            }
+            app.library.library_status = Some(format!("Renaming folder to {name}..."));
+            return rename_folder_task(Arc::clone(&app.db), folder_id, name);
+        }
+        Message::MoveSelectedFolderToRoot => {
+            let Some(folder_id) = app.library.selected_folder.clone() else {
+                return Task::none();
+            };
+            app.library.library_status = Some(String::from("Moving folder to library root..."));
+            return move_folder_task(Arc::clone(&app.db), folder_id, None);
+        }
+        Message::MoveSelectedFolderUp => {
+            let Some(folder) = app.selected_folder().cloned() else {
+                return Task::none();
+            };
+            let Some(parent_id) = folder.parent_id.as_ref() else {
+                return Task::none();
+            };
+            let grandparent_id = app
+                .library
+                .library_folders
+                .iter()
+                .find(|candidate| &candidate.id == parent_id)
+                .and_then(|parent| parent.parent_id.clone());
+            app.library.library_status = Some(String::from("Moving folder up one level..."));
+            return move_folder_task(Arc::clone(&app.db), folder.id, grandparent_id);
+        }
+        Message::MoveSelectedFolderEarlier => {
+            let Some((parent_id, folder_ids)) = app.selected_folder_manual_reorder(-1) else {
+                return Task::none();
+            };
+            app.library.library_status = Some(String::from("Moving folder earlier..."));
+            return persist_manual_folder_order_task(Arc::clone(&app.db), parent_id, folder_ids);
+        }
+        Message::MoveSelectedFolderLater => {
+            let Some((parent_id, folder_ids)) = app.selected_folder_manual_reorder(1) else {
+                return Task::none();
+            };
+            app.library.library_status = Some(String::from("Moving folder later..."));
+            return persist_manual_folder_order_task(Arc::clone(&app.db), parent_id, folder_ids);
+        }
+        Message::RequestDeleteSelectedFolder => {
+            if let Some(folder_id) = app.library.selected_folder.clone() {
+                app.chrome.pending_confirmation = Some(ConfirmationAction::DeleteFolder(folder_id));
+            }
+        }
+        Message::DeleteFolder(folder_id) => {
+            app.library.library_status = Some(String::from("Deleting folder..."));
+            return delete_folder_task(Arc::clone(&app.db), folder_id);
+        }
+        Message::FolderUpdated => {
+            app.library.library_status = Some(String::from("Folder updated."));
+            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+        }
+        Message::FolderCreated(folder_id) => {
+            app.library.library_status = Some(String::from("Folder created."));
+            app.library.selected_folder = Some(folder_id);
+            app.sync_folder_rename_input();
+            app.library.library_scroll_offset = 0.0;
+            return Task::batch([
+                save_library_preferences_task(app),
+                app.refresh_folders(),
+                app.refresh_library(),
+                scroll_library_to_offset_task(0.0),
+            ]);
+        }
+        Message::StartTagEntry(entry_id) => {
+            app.library.tag_entry_id = Some(entry_id);
+            app.library.tag_input.clear();
+        }
+        Message::TagInputChanged(value) => {
+            app.library.tag_input = value;
+        }
+        Message::SubmitTag => {
+            if let Some(entry_id) = app.library.tag_entry_id.clone() {
+                let tag = app.library.tag_input.trim().to_owned();
+                app.library.tag_entry_id = None;
+                app.library.tag_input.clear();
+                if !tag.is_empty() {
+                    let db = Arc::clone(&app.db);
+                    return Task::perform(
+                        async move {
+                            let saved_entry_id = entry_id.clone();
+                            let saved_tag = tag.clone();
+                            tokio::task::spawn_blocking(move || {
+                                db.add_tag(&saved_entry_id, &saved_tag)
+                            })
+                            .await??;
+                            Ok::<_, anyhow::Error>((entry_id, tag))
+                        },
+                        |result| match result {
+                            Ok((id, tag)) => Message::EntryTagged { id, tag },
+                            Err(error) => Message::LibraryError(error.to_string()),
+                        },
+                    );
+                }
+            }
+        }
+        Message::EntryTagged { .. } | Message::EntryUntagged { .. } | Message::EntryDeleted(_) => {
+            return app.refresh_library();
+        }
+        Message::RequestConfirmation(action) => {
+            app.chrome.pending_confirmation = Some(action);
+        }
+        Message::CancelConfirmation => {
+            app.chrome.pending_confirmation = None;
+        }
+        Message::ConfirmPendingAction => {
+            let Some(action) = app.chrome.pending_confirmation.take() else {
+                return Task::none();
+            };
+            return Task::done(match action {
+                ConfirmationAction::BulkResetDisplayMetadata => Message::BulkResetDisplayMetadata,
+                ConfirmationAction::BulkDeleteFromLibrary => Message::BulkDeleteFromLibrary,
+                ConfirmationAction::ResetDetailsMetadata(entry_id) => {
+                    Message::ResetDetailsMetadata(entry_id)
+                }
+                ConfirmationAction::DeleteFolder(folder_id) => Message::DeleteFolder(folder_id),
+            });
+        }
+        Message::SelectionToolbarActionSelected(action) => {
+            app.chrome.open_selection_menu = None;
+            return Task::done(match action {
+                SelectionToolbarAction::AddTag => Message::BulkAddTag,
+                SelectionToolbarAction::RemoveTag => Message::BulkRemoveTag,
+                SelectionToolbarAction::AddToFolder => Message::BulkAddToCurrentFolder,
+                SelectionToolbarAction::RemoveFromFolder => Message::BulkRemoveFromCurrentFolder,
+                SelectionToolbarAction::SaveDetails => Message::SaveDetailsMetadata,
+                SelectionToolbarAction::ResetDetails => {
+                    let Some(entry_id) = app.library.details_entry_id.clone() else {
+                        return Task::none();
+                    };
+                    Message::RequestConfirmation(ConfirmationAction::ResetDetailsMetadata(entry_id))
+                }
+                SelectionToolbarAction::SortTitles => Message::BulkApplyTitleSortCleanup,
+                SelectionToolbarAction::RefreshMetadata => Message::BulkRefreshPdfMetadata,
+                SelectionToolbarAction::ResetMetadata => {
+                    Message::RequestConfirmation(ConfirmationAction::BulkResetDisplayMetadata)
+                }
+                SelectionToolbarAction::RebuildThumbnails => Message::BulkRebuildThumbnails,
+                SelectionToolbarAction::Reindex => Message::BulkReindex,
+                SelectionToolbarAction::DeleteMetadata => {
+                    Message::RequestConfirmation(ConfirmationAction::BulkDeleteFromLibrary)
+                }
+            });
+        }
+        Message::DetailsTitleChanged(value) => {
+            app.library.details_title_input = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(240)
+                .collect();
+        }
+        Message::DetailsAuthorChanged(value) => {
+            app.library.details_author_input = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(240)
+                .collect();
+        }
+        Message::SaveDetailsMetadata => {
+            let Some(entry_id) = app.library.details_entry_id.clone() else {
+                return Task::none();
+            };
+            let Some(mut entry) = app
+                .library
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            else {
+                return Task::none();
+            };
+            entry.display_title = clean_metadata_input(&app.library.details_title_input);
+            entry.display_author = clean_metadata_input(&app.library.details_author_input);
+            entry.metadata_locked = true;
+            app.library.library_status =
+                Some(format!("Saving metadata for {}...", entry_title(&entry)));
+            return edit_metadata_task(
+                Arc::clone(&app.db),
+                entry,
+                app.library.details_title_input.clone(),
+                app.library.details_author_input.clone(),
+            );
+        }
+        Message::ResetDetailsMetadata(entry_id) => {
+            let Some(mut entry) = app
+                .library
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            else {
+                return Task::none();
+            };
+            entry.display_title = None;
+            entry.display_author = None;
+            entry.metadata_locked = false;
+            app.library.library_status =
+                Some(format!("Resetting metadata for {}...", entry_title(&entry)));
+            return reset_metadata_task(Arc::clone(&app.db), entry);
+        }
+        Message::RevealEntryInFileManager(entry_id) => {
+            let Some(entry) = app
+                .library
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            else {
+                return Task::none();
+            };
+            app.library.library_status = Some(format!("Revealing {}...", entry_title(&entry)));
+            return open_file_manager_task(entry.path, true);
+        }
+        Message::OpenEntryContainingFolder(entry_id) => {
+            let Some(entry) = app
+                .library
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            else {
+                return Task::none();
+            };
+            app.library.library_status =
+                Some(format!("Opening folder for {}...", entry_title(&entry)));
+            return open_file_manager_task(entry.path, false);
+        }
+        Message::RelinkMissingEntry(entry_id) => {
+            return relink_file_dialog_task(entry_id);
+        }
+        Message::RelinkFileSelected { entry_id, path } => {
+            let Some(entry) = app
+                .library
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            else {
+                return Task::none();
+            };
+            app.library.library_status = Some(format!("Relinking {}...", entry_title(&entry)));
+            return relink_entry_task(Arc::clone(&app.db), entry_id, path);
+        }
+        Message::RelinkFinished { entry_id: _, path } => {
+            app.library.library_status = Some(format!("Relinked PDF to {}.", path.display()));
+            app.library.library_error = None;
+            app.library.pending_thumbnails.clear();
+            return Task::batch([app.refresh_library(), app.request_visible_thumbnails()]);
+        }
+        Message::MetadataEditFinished {
+            entry_id: _,
+            label,
+            errors,
+        } => {
+            app.library.library_status = Some(if errors.is_empty() {
+                label
+            } else {
+                format!("{label}; {} indexing errors.", errors.len())
+            });
+            app.library.details_entry_id = None;
+            return app.refresh_library();
+        }
+        Message::BulkTagInputChanged(value) => {
+            app.library.bulk_tag_input = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(80)
+                .collect();
+        }
+        Message::BulkAddTag => {
+            let tag = app.library.bulk_tag_input.trim().to_owned();
+            if tag.is_empty() || app.library.selected_library_entries.is_empty() {
+                return Task::none();
+            }
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            app.start_bulk_operation_progress("Adding tag to", entry_ids.len());
+            return bulk_operation_task(
+                Arc::clone(&app.db),
+                entry_ids,
+                String::from("Tagged"),
+                move |db, entry_id| db.add_tag(entry_id, &tag),
+            );
+        }
+        Message::BulkRemoveTag => {
+            let tag = app.library.bulk_tag_input.trim().to_owned();
+            if tag.is_empty() || app.library.selected_library_entries.is_empty() {
+                return Task::none();
+            }
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            app.start_bulk_operation_progress("Removing tag from", entry_ids.len());
+            return bulk_operation_task(
+                Arc::clone(&app.db),
+                entry_ids,
+                String::from("Untagged"),
+                move |db, entry_id| db.remove_tag(entry_id, &tag),
+            );
+        }
+        Message::BulkAddToCurrentFolder => {
+            let Some(folder_id) = app.library.selected_folder.clone() else {
+                app.library.library_status =
+                    Some(String::from("Open a folder before adding PDFs to it."));
+                return Task::none();
+            };
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            if entry_ids.is_empty() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress("Adding to folder", entry_ids.len());
+            return bulk_operation_task(
+                Arc::clone(&app.db),
+                entry_ids,
+                String::from("Added to folder"),
+                move |db, entry_id| db.add_entry_to_folder(entry_id, &folder_id),
+            );
+        }
+        Message::BulkRemoveFromCurrentFolder => {
+            let Some(folder_id) = app.library.selected_folder.clone() else {
+                app.library.library_status =
+                    Some(String::from("Open a folder before removing PDFs from it."));
+                return Task::none();
+            };
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            if entry_ids.is_empty() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress("Removing from folder", entry_ids.len());
+            return bulk_operation_task(
+                Arc::clone(&app.db),
+                entry_ids,
+                String::from("Removed from folder"),
+                move |db, entry_id| db.remove_entry_from_folder(entry_id, &folder_id),
+            );
+        }
+        Message::BulkResetDisplayMetadata => {
+            let entries = app.selected_entries();
+            if entries.is_empty() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress("Resetting metadata for", entries.len());
+            return bulk_reset_metadata_task(Arc::clone(&app.db), entries);
+        }
+        Message::BulkApplyTitleSortCleanup => {
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            if entry_ids.is_empty() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress("Cleaning title sort keys for", entry_ids.len());
+            return bulk_operation_task(
+                Arc::clone(&app.db),
+                entry_ids,
+                String::from("Cleaned title sort for"),
+                |db, entry_id| db.apply_title_sort_cleanup(entry_id),
+            );
+        }
+        Message::BulkRefreshPdfMetadata => {
+            let entries = app.selected_entries();
+            if entries.is_empty() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress("Refreshing metadata for", entries.len());
+            return bulk_refresh_metadata_task(Arc::clone(&app.db), entries);
+        }
+        Message::BulkRebuildThumbnails => {
+            let entries = app.selected_entries();
+            if entries.is_empty() {
+                return Task::none();
+            }
+            for entry in &entries {
+                app.library
+                    .thumbnails
+                    .retain(|key, _| key.entry_id != entry.id);
+                app.library
+                    .pending_thumbnails
+                    .retain(|key| key.entry_id != entry.id);
+            }
+            app.start_bulk_operation_progress("Rebuilding thumbnails for", entries.len());
+            return bulk_thumbnail_task(entries);
+        }
+        Message::BulkReindex => {
+            let entries = app.selected_entries();
+            if entries.is_empty() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress("Reindexing", entries.len());
+            return bulk_reindex_task(entries);
+        }
+        Message::BulkDeleteFromLibrary => {
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            if entry_ids.is_empty() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress("Deleting from library metadata", entry_ids.len());
+            return bulk_delete_metadata_task(Arc::clone(&app.db), entry_ids);
+        }
+        Message::BulkOperationFinished {
+            label,
+            updated,
+            errors,
+        } => {
+            app.library.bulk_operation_progress = None;
+            app.library.library_status = Some(if errors.is_empty() {
+                app.library.library_error = None;
+                format!("{label} {updated} PDFs.")
+            } else {
+                app.library.library_error = Some(errors.join("\n"));
+                format!("{label} {updated} PDFs; {} failed.", errors.len())
+            });
+            app.clear_library_selection();
+            app.library.pending_thumbnails.clear();
+            return Task::batch([app.refresh_library(), app.request_visible_thumbnails()]);
+        }
+        Message::FolderAssignmentFinished {
+            folder_id,
+            label,
+            updated,
+            errors,
+        } => {
+            app.library.library_status = Some(if errors.is_empty() {
+                app.library.library_error = None;
+                if updated > 0 {
+                    app.start_folder_drop_flash(folder_id, Instant::now());
+                }
+                format!("{label} {updated} PDFs.")
+            } else {
+                app.library.library_error = Some(errors.join("\n"));
+                format!("{label} {updated} PDFs; {} failed.", errors.len())
+            });
+            app.clear_library_selection();
+            app.library.pending_thumbnails.clear();
+            return Task::batch([app.refresh_library(), app.request_visible_thumbnails()]);
+        }
+        Message::ThumbnailReady {
+            entry_id,
+            size,
+            data,
+            width,
+            height,
+        } => {
+            let key = ThumbnailCacheKey {
+                entry_id: entry_id.clone(),
+                size,
+            };
+            app.library.pending_thumbnails.remove(&key);
+            let handle = image::Handle::from_rgba(u32::from(width), u32::from(height), data);
+            app.library.thumbnails.insert(
+                key,
+                ThumbnailView {
+                    width,
+                    height,
+                    handle,
+                },
+            );
+        }
+        Message::ProgressUpdated { entry_id, page } => {
+            let db = Arc::clone(&app.db);
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || db.update_last_page(&entry_id, page))
+                        .await??;
+                    Ok::<_, anyhow::Error>(())
+                },
+                |result| match result {
+                    Ok(()) => Message::ProgressSaved,
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::ProgressSaved | Message::LibraryPreferencesSaved => {}
+        Message::OpenJumpDialog => {
+            app.viewer.page_input_editing = false;
+            app.viewer.jump_dialog_open = true;
+            app.viewer.jump_input = app
+                .viewer
+                .doc
+                .as_ref()
+                .map(|_| (u32::from(app.current_page()) + 1).to_string())
+                .unwrap_or_default();
+        }
+        Message::OpenViewerFind => {
+            return app.open_viewer_find();
+        }
+        Message::CloseViewerFind => {
+            app.viewer.viewer_find.open = false;
+        }
+        Message::ViewerFindQueryChanged(query) => {
+            return app.set_viewer_find_query(query);
+        }
+        Message::ViewerFindPrevious => {
+            app.viewer.viewer_find.select_previous();
+            return app.scroll_to_selected_viewer_find_match();
+        }
+        Message::ViewerFindNext => {
+            app.viewer.viewer_find.select_next();
+            return app.scroll_to_selected_viewer_find_match();
+        }
+        Message::ViewerFindHighlightAllToggled(value) => {
+            app.viewer.viewer_find.highlight_all = value;
+        }
+        Message::ViewerFindMatchCaseToggled(value) => {
+            app.viewer.viewer_find.match_case = value;
+            app.refresh_viewer_find_matches();
+            return app.scroll_to_selected_viewer_find_match();
+        }
+        Message::ViewerFindMatchDiacriticsToggled(value) => {
+            app.viewer.viewer_find.match_diacritics = value;
+            app.refresh_viewer_find_matches();
+            return app.scroll_to_selected_viewer_find_match();
+        }
+        Message::CloseOverlay => {
+            if app.viewer.jump_dialog_open {
+                app.viewer.jump_dialog_open = false;
+                app.viewer.jump_input.clear();
+            } else if app.viewer.page_input_editing {
+                app.viewer.page_input_editing = false;
+                app.viewer.jump_input.clear();
+            } else if app.viewer.viewer_find.open {
+                app.viewer.viewer_find.open = false;
+            } else if app.library.create_folder_dialog_open {
+                app.library.create_folder_dialog_open = false;
+            } else if app.chrome.pending_confirmation.is_some() {
+                app.chrome.pending_confirmation = None;
+            } else if app.chrome.open_app_menu.is_some() {
+                app.chrome.open_app_menu = None;
+                app.chrome.open_view_menu_flyout = None;
+            } else if app.chrome.open_selection_menu.is_some() {
+                app.chrome.open_selection_menu = None;
+            } else {
+                app.viewer.toc_open = false;
+            }
+        }
+        Message::JumpInputChanged(value) => {
+            app.viewer.jump_input = value.chars().filter(char::is_ascii_digit).take(5).collect();
+        }
+        Message::StartPageInputEdit => {
+            app.viewer.jump_dialog_open = false;
+            app.viewer.page_input_editing = true;
+            app.viewer.jump_input = app
+                .viewer
+                .doc
+                .as_ref()
+                .map(|_| (u32::from(app.current_page()) + 1).to_string())
+                .unwrap_or_default();
+            return operation::focus(Id::new(PAGE_INPUT_ID));
+        }
+        Message::SubmitJump => {
+            if let Ok(page) = app.viewer.jump_input.parse::<u16>() {
+                return app.jump_to_page(page.saturating_sub(1));
+            }
+            app.viewer.page_input_editing = false;
+            app.viewer.jump_input.clear();
+        }
+        Message::JumpToPage(page) => return app.jump_to_page(page),
+        Message::PreviousPage => {
+            let page = app.current_page().saturating_sub(1);
+            return app.jump_to_page(page);
+        }
+        Message::NextPage => {
+            if let Some(doc) = &app.viewer.doc {
+                let page = app
+                    .current_page()
+                    .saturating_add(1)
+                    .min(doc.page_count().saturating_sub(1));
+                return app.jump_to_page(page);
+            }
+        }
+        Message::ToggleOutlineNode(path) => {
+            if !app.viewer.expanded_outline_paths.insert(path.clone()) {
+                app.viewer.expanded_outline_paths.remove(&path);
+            }
+        }
+        Message::ViewerTextLayerLoaded { page, layer } => {
+            app.viewer.pending_text_layers.remove(&page);
+            app.viewer.viewer_text_layers.insert(page, layer);
+            let mut tasks = Vec::new();
+            if app.viewer.viewer_find.open {
+                let previous_match = app.viewer.viewer_find.selected_match();
+                app.refresh_viewer_find_matches();
+                if !app.viewer.viewer_find.query.is_empty()
+                    && previous_match != app.viewer.viewer_find.selected_match()
+                    && app.viewer.viewer_find.selected_match().is_some()
+                {
+                    tasks.push(app.scroll_to_selected_viewer_find_match());
+                }
+            }
+            if app.viewer.viewer_copy_pending && app.selected_text_layers_ready() {
+                tasks.push(app.copy_selected_viewer_text());
+            }
+            if !tasks.is_empty() {
+                return Task::batch(tasks);
+            }
+        }
+        Message::ViewerTextLayerError { page, error } => {
+            app.viewer.pending_text_layers.remove(&page);
+            app.viewer.document_error = Some(error);
+        }
+        Message::ViewerTextSelectionStarted { page, char_index } => {
+            app.start_viewer_text_selection(page, char_index);
+        }
+        Message::ViewerTextSelectionChanged { page, char_index } => {
+            app.update_viewer_text_selection(page, char_index);
+        }
+        Message::ViewerTextSelectionEnded => {
+            app.finish_viewer_text_selection();
+        }
+        Message::ViewerCanvasClicked => {
+            app.clear_viewer_text_selection();
+        }
+        Message::ClearViewerTextSelection => {
+            app.clear_viewer_text_selection();
+        }
+        Message::CopyViewerTextSelection => {
+            return app.copy_selected_viewer_text();
+        }
+        Message::ScrollChanged(offset) => {
+            app.viewer.last_scroll_offset = app.viewer.scroll_offset;
+            app.viewer.scroll_offset = offset;
+            app.clamp_scroll_offset();
+            let render_task = app.request_visible_pages();
+            let progress_task =
+                app.viewer
+                    .current_entry_id
+                    .clone()
+                    .map_or_else(Task::none, |entry_id| {
+                        Task::done(Message::ProgressUpdated {
+                            entry_id,
+                            page: app.current_page(),
+                        })
+                    });
+            return Task::batch([render_task, progress_task]);
+        }
+        Message::ViewportChanged {
+            scroll_offset,
+            width,
+            height,
+        } => {
+            app.viewer.last_scroll_offset = app.viewer.scroll_offset;
+            app.viewer.scroll_offset = scroll_offset;
+            app.viewer.viewer_viewport_width = width.max(1.0);
+            app.viewer.viewer_viewport_height = height.max(1.0);
+            app.clamp_horizontal_offset();
+            app.clamp_scroll_offset();
+            return Task::batch([
+                app.apply_active_dimension_zoom(),
+                app.request_visible_pages(),
+            ]);
+        }
+        Message::WindowResized { width, height } => {
+            app.viewer.viewport_width = width.max(1.0);
+            app.viewer.viewport_height = height.max(1.0);
+            app.viewer.viewer_viewport_width = app.estimated_viewer_viewport_width();
+            app.viewer.viewer_viewport_height = app.estimated_viewer_viewport_height();
+            if app.mode == AppMode::Library {
+                app.recalculate_library_viewport_width();
+                app.library.library_viewport_height =
+                    (app.viewer.viewport_height - app_menu_bar_height(app) - Spacing::LG * 2.0)
+                        .max(1.0);
+                return app.request_visible_thumbnails();
+            }
+            return app.apply_active_dimension_zoom();
+        }
+        Message::ViewportWheelScrolled {
+            delta_x,
+            delta_y,
+            cursor,
+            viewport_width,
+            viewport_height,
+        } => {
+            app.viewer.viewer_viewport_width = viewport_width.max(1.0);
+            app.viewer.viewer_viewport_height = viewport_height.max(1.0);
+            app.clamp_horizontal_offset();
+            app.clamp_scroll_offset();
+
+            if app.viewer.modifiers.control() {
+                app.viewer.active_zoom_preset = None;
+                let direction = if delta_y.abs() >= delta_x.abs() {
+                    delta_y
+                } else {
+                    -delta_x
+                };
+                let step = if direction > 0.0 { 100 } else { -100 };
+                let width = (i32::from(app.viewer.zoom_width) + step)
+                    .clamp(i32::from(MIN_ZOOM_WIDTH), i32::from(MAX_ZOOM_WIDTH))
+                    as u16;
+                return app.zoom_to_width(width, Some(cursor), ZoomRenderPolicy::Debounced);
+            }
+
+            if app.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+                let direction = if delta_y < 0.0 || delta_x > 0.0 {
+                    1
+                } else {
+                    -1
+                };
+                return app.scroll_page_mode_by(direction);
+            }
+
+            if app.viewer.viewer_scroll_mode == ViewerScrollMode::Horizontal {
+                let delta = if delta_x != 0.0 { delta_x } else { delta_y };
+                app.viewer.horizontal_offset =
+                    (app.viewer.horizontal_offset - delta).clamp(0.0, app.max_horizontal_offset());
+                return app.request_visible_pages();
+            }
+
+            if app.viewer.modifiers.shift() || delta_x != 0.0 {
+                let delta = if delta_x != 0.0 { delta_x } else { delta_y };
+                app.viewer.horizontal_offset =
+                    (app.viewer.horizontal_offset - delta).clamp(0.0, app.max_horizontal_offset());
+            } else {
+                app.viewer.last_scroll_offset = app.viewer.scroll_offset;
+                app.viewer.scroll_offset =
+                    (app.viewer.scroll_offset - delta_y).clamp(0.0, app.max_scroll_offset());
+                return app.request_visible_pages();
+            }
+        }
+        Message::ModifiersChanged(modifiers) => {
+            app.viewer.modifiers = modifiers;
+        }
+        Message::ZoomRenderSettled(generation) => {
+            if generation == app.viewer.zoom_generation {
+                return app.request_visible_pages();
+            }
+        }
+        Message::ZoomIn => {
+            app.viewer.active_zoom_preset = None;
+            return app.zoom_to_width(
+                app.viewer.zoom_width.saturating_add(100),
+                None,
+                ZoomRenderPolicy::Immediate,
+            );
+        }
+        Message::ZoomOut => {
+            app.viewer.active_zoom_preset = None;
+            return app.zoom_to_width(
+                app.viewer.zoom_width.saturating_sub(100),
+                None,
+                ZoomRenderPolicy::Immediate,
+            );
+        }
+        Message::ShortcutPressed(shortcut) => return shortcuts::handle_shortcut(app, shortcut),
+        Message::ZoomSet(width) => {
+            app.viewer.active_zoom_preset = None;
+            return app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+        }
+        Message::StartZoomInputEdit => {
+            app.viewer.zoom_editing = true;
+            app.viewer.zoom_menu_open = false;
+            app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);
+            return operation::focus(Id::new(ZOOM_INPUT_ID));
+        }
+        Message::ZoomInputChanged(value) => {
+            app.viewer.zoom_input = value;
+        }
+        Message::SubmitZoomInput => {
+            let width = width_from_percent_input(&app.viewer.zoom_input);
+            app.viewer.zoom_editing = false;
+            if let Some(width) = width {
+                app.viewer.active_zoom_preset = None;
+                return app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+            }
+            app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);
+        }
+        Message::ToggleZoomMenu => {
+            app.viewer.zoom_menu_open = !app.viewer.zoom_menu_open;
+            app.viewer.zoom_editing = false;
+            app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);
+        }
+        Message::CloseZoomMenu => {
+            app.viewer.zoom_menu_open = false;
+        }
+        Message::ZoomPresetSelected(preset) => {
+            app.viewer.zoom_menu_open = false;
+            app.viewer.zoom_editing = false;
+            app.viewer.active_zoom_preset = Some(preset);
+            let width = preset.width_for(app);
+            app.viewer.zoom_input = zoom_percent_label(width);
+            let task = app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+            if matches!(preset, ZoomPreset::PageWidth) {
+                app.viewer.horizontal_offset = 0.0;
+            }
+            return task;
+        }
+        _ => {}
+    }
+
+    Task::none()
+}

@@ -19,6 +19,7 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
         }) => {
             if status == event::Status::Captured
                 && !is_ctrl_character(&key, text.as_deref(), modifiers, "f")
+                && !is_ctrl_character(&key, text.as_deref(), modifiers, "c")
                 && !is_escape(&key)
             {
                 return None;
@@ -34,7 +35,7 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
                 (_, Some("g") | Some("G")) if modifiers.control() => {
                     Some(Message::ShortcutPressed(Shortcut::Jump))
                 }
-                (_, Some("c") | Some("C")) if modifiers.control() => {
+                (key, text) if is_ctrl_character(key, text, modifiers, "c") => {
                     Some(Message::ShortcutPressed(Shortcut::Copy))
                 }
                 (key, text) if is_ctrl_character(key, text, modifiers, "f") => {
@@ -122,6 +123,16 @@ mod tests {
         assert!(matches!(
             message,
             Some(Message::ShortcutPressed(Shortcut::FocusSearch))
+        ));
+    }
+
+    #[test]
+    fn ctrl_c_copies_even_when_event_is_captured() {
+        let message = keyboard_event_message(ctrl_key_event("c", None), event::Status::Captured);
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::Copy))
         ));
     }
 

@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use iced::futures::SinkExt;
 use iced::{event, mouse, stream, time, Event, Subscription};
 use notify::{EventKind, RecursiveMode, Watcher};
-use pdf_folio_library::LibraryWatcher;
+use pdf_folio_db::LibraryWatcher;
 
 use super::{shortcuts, AppMode, PDFolioApp, LIBRARY_CARD_HOVER_TICK_MS, VIEWER_ANIMATION_TICK_MS};
 use crate::library::drag::LIBRARY_DRAG_AUTOSCROLL_TICK_MS;
@@ -28,16 +28,16 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         )
     };
 
-    let style_watcher = if app.style_book.style_dirs().is_empty() {
+    let style_watcher = if app.appearance.style_book.style_dirs().is_empty() {
         Subscription::none()
     } else {
         Subscription::run_with(
-            app.style_book.style_dirs().to_vec(),
+            app.appearance.style_book.style_dirs().to_vec(),
             watch_style_directories_stream,
         )
     };
 
-    let sidebar_resize = if app.resizing_library_tag_sidebar {
+    let sidebar_resize = if app.library.resizing_library_tag_sidebar {
         event::listen_with(|event, _status, _window| match event {
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 Some(Message::TagSidebarResizeDragged(position.x))
@@ -51,7 +51,7 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         Subscription::none()
     };
 
-    let library_drag = if app.library_drag.is_some() {
+    let library_drag = if app.library.library_drag.is_some() {
         Subscription::batch([
             event::listen_with(|event, _status, _window| match event {
                 Event::Mouse(mouse::Event::CursorMoved { position }) => {
@@ -69,7 +69,7 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         Subscription::none()
     };
 
-    let folder_drag = if app.folder_drag.is_some() {
+    let folder_drag = if app.library.folder_drag.is_some() {
         Subscription::batch([
             event::listen_with(|event, _status, _window| match event {
                 Event::Mouse(mouse::Event::CursorMoved { position }) => {
@@ -89,12 +89,12 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
 
     let animations = if app.mode == AppMode::Library
         && (app.library_card_hover_animation_active()
-            || app.bulk_operation_progress.is_some()
-            || app.folder_drop_flash.is_some())
+            || app.library.bulk_operation_progress.is_some()
+            || app.library.folder_drop_flash.is_some())
     {
         time::every(Duration::from_millis(LIBRARY_CARD_HOVER_TICK_MS)).map(Message::AnimationFrame)
     } else if app.mode == AppMode::Viewer
-        && (app.zoom_preview_width_px.is_some() || app.viewer_page_fade_active())
+        && (app.viewer.zoom_preview_width_px.is_some() || app.viewer_page_fade_active())
     {
         time::every(Duration::from_millis(VIEWER_ANIMATION_TICK_MS)).map(Message::AnimationFrame)
     } else {

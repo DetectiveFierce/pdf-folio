@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use iced::Task;
 use pdf_folio_core::PdfDoc;
-use pdf_folio_library::{
+use pdf_folio_db::{
     hash_file, scan_pdf_files, Db, EntryId, FolderId, ImportSummary, ImportedEntry, IndexDocument,
     LibraryEntry, LibrarySortMode, LibraryWatchEvent, NewLibraryEntry, SearchIndex,
 };

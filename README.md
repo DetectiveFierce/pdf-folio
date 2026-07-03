@@ -122,57 +122,194 @@ The project is currently organized as a Rust workspace with separate crates for 
 
 ## Architecture
 
-The workspace is split into four crates:
+PDF-Folio is organized as a Rust workspace. The important boundary is that PDF/domain code does not depend on the app shell, reusable UI helpers do not depend on top-level app state, and `pdf-folio-ui` coordinates everything through `iced` messages and tasks.
 
 ```text
 crates/
-  pdf-folio-core/     PDF loading, rendering, tile cache, annotations
-  pdf-folio-library/  SQLite library store, imports, search index, watcher
-  pdf-folio-ui/       iced application, views, messages, styling
-  pdf-folio-main/     CLI and binary entrypoint
+  iced-widget-patch/        Local patched iced_widget scrollable implementation
+  pdf-folio-core/           PDF loading, rendering, text extraction, tile cache, annotations
+  pdf-folio-db/             SQLite persistence, imports, folders/tags, search index, watcher
+  pdf-folio-style/          KDL style book, tokens, classes, fonts, styled widget helpers
+  pdf-folio-viewer/         Viewer domain state such as find/search and text selection
+  pdf-folio-ui-components/  Reusable library UI logic and rendered component helpers
+  pdf-folio-ui/             App shell, runtime state, update loop, views, tasks, menus
+  pdf-folio-main/           CLI and binary entrypoint
 ```
 
-### `pdf-folio-core`
+### Crate Responsibilities
 
-Handles PDF-specific functionality without depending on the UI:
+`pdf-folio-core` handles PDF functionality without UI or database dependencies:
 
-- `PdfDoc` opens PDFs, renders pages, extracts page text, reads author metadata, and exposes outline nodes.
+- `PdfDoc` opens PDFs, renders pages, extracts text, reads metadata, and exposes outline nodes.
 - `RenderedPage` stores RGBA page render output.
 - `TileCache` stores rendered page tiles in a thread-safe LRU cache.
 - Annotation types model highlights, notes, and drawings independently from the UI.
 
-### `pdf-folio-library`
+`pdf-folio-db` owns local library state and indexing:
 
-Owns local library state and indexing:
-
-- SQLite database in the XDG data directory.
-- Recursive PDF folder import.
+- SQLite database access and schema.
+- Recursive folder import.
 - BLAKE3 content hashes for stable entry IDs.
 - Folder and tag membership.
-- Sort preferences and library layout preferences.
+- Sort, layout, sidebar, and tree preferences.
 - Tantivy full-text page index.
-- Filesystem watcher for PDF create/modify/remove events.
-- Thumbnail cache path management in the XDG cache directory.
+- Filesystem watcher events for PDF create/modify/remove flows.
 
-### `pdf-folio-ui`
+`pdf-folio-style` owns the shared style system:
 
-Contains the application state machine and `iced` UI:
+- Bundled KDL style files under `styles/`.
+- User style override loading.
+- Theme tokens, component classes, layout values, fonts, and styled widget helpers.
+- Viewer-specific styling in `styles/components/viewer/viewer.kdl`.
 
-- Top-level library/viewer modes.
-- Update loop and message routing.
-- Library grid/list rendering and virtualization.
-- Sidebar file tree and tag browser.
-- Viewer canvas, page rendering, zoom, scrolling, and outline panel.
-- Menu bar, selection toolbar, dialogs, and overlays.
-- Shared style system under `src/style/`.
+`pdf-folio-viewer` owns viewer-domain data structures that do not need app orchestration:
 
-### `pdf-folio-main`
+- Viewer scroll/spread mode types.
+- Rendered page view metadata.
+- Find-in-document state and matching behavior.
+- Text-selection anchors/ranges.
 
-Provides the `pdf-folio` binary:
+`pdf-folio-ui-components` owns reusable library UI logic and app-independent rendered controls:
+
+- Library drag/drop geometry, filtering, selection helpers, metadata labels, and library UI state enums.
+- Rendered component helpers in `src/library/view.rs`, including breadcrumb buttons, sort/metadata pickers, grid zoom, layout toggle, drop zones, tag rows, and preview placeholders.
+- This crate can depend on `iced`, `pdf-folio-db`, `pdf-folio-core`, and `pdf-folio-style`, but it does not depend on `pdf-folio-ui`.
+
+`pdf-folio-ui` is the app shell:
+
+- Owns `PDFolioApp`, the top-level `Message` enum, update loop, app view, subscriptions, menus, and platform integrations.
+- Coordinates cross-domain flows, such as opening a database entry in the viewer or saving library preferences after UI changes.
+- Holds app-owned tasks for file dialogs, thumbnails, imports, metadata updates, viewer rendering, and search.
+
+`pdf-folio-main` is intentionally small:
 
 - Parses an optional startup PDF path.
 - Initializes tracing.
-- Launches the UI.
+- Calls `pdf_folio_ui::run`.
+
+### App Shell Structure
+
+The `pdf-folio-ui` crate uses `src/app.rs` as its library entrypoint, but the implementation is split into focused modules under `src/app/`:
+
+```text
+crates/pdf-folio-ui/src/
+  app.rs                    App entrypoint, shared types, runtime state structs
+  app/
+    update.rs               Top-level message reducer
+    update/shortcuts.rs     Shortcut side effects
+    view.rs                 Top-level app shell view
+    messages.rs             App menus, commands, Message, Shortcut
+    menu.rs                 Application menu bar/dropdowns
+    menu/selection.rs       Selection toolbar/dropdown helpers
+    shortcuts.rs            Keyboard event to Message mapping
+    subscriptions.rs        Window, style-watch, watcher, and animation subscriptions
+    platform.rs             File-manager commands and file URI helpers
+    viewer_state.rs         Viewer document lifecycle, render/text tasks, find/selection state
+    viewer_navigation.rs    Scrolling, paging, panning, and zoom navigation
+    viewer_layout.rs        Viewer page grouping and layout math
+    library_data.rs         Library refresh and thumbnail request coordination
+    library_drag.rs         Library/folder drag lifecycle and autoscroll
+    library_folders.rs      Folder tree helpers and breadcrumbs
+    library_layout.rs       Library grid/list sizing and visible entry filtering
+    library_selection.rs    Selection, range selection, details sync
+    library_view_state.rs   Library viewport, hover, progress, and transient UI state
+```
+
+`PDFolioApp` is deliberately split into nested runtime structs:
+
+```text
+PDFolioApp
+  mode: AppMode
+  viewer: ViewerRuntime       Open document, render cache, zoom, scroll, find, outline
+  library: LibraryRuntime     Entries, folders, filters, selection, thumbnails, drag state
+  chrome: ChromeRuntime       Menus, flyouts, selection menu, confirmation modal
+  appearance: AppearanceRuntime
+                              Theme, loaded StyleBook, style load errors
+  settings: Settings
+  db: Arc<Db>
+```
+
+This keeps call sites explicit: viewer code reads `app.viewer.*`, library code reads `app.library.*`, menu/dialog state reads `app.chrome.*`, and theme/style state reads `app.appearance.*`.
+
+### Library UI Structure
+
+The library feature is split between reusable component code and app-owned adapters.
+
+Reusable logic and widgets live in `pdf-folio-ui-components/src/library/`:
+
+```text
+drag.rs       Drag/drop state machines and hit testing
+filters.rs    Folder/tag/search/reading-state filtering helpers
+metadata.rs   Display labels, metadata cleanup, progress/file-size helpers
+selection.rs  Selection/range/master-checkbox helpers
+state.rs      Library UI enums such as metadata density and reading filters
+view.rs       App-independent rendered library widgets and controls
+```
+
+The app-owned library surface lives under `pdf-folio-ui/src/library/`:
+
+```text
+tasks.rs             Async library/import/search/metadata tasks
+thumbnails.rs        Thumbnail load/render task helpers
+view.rs              Library root layout and app-specific adapter glue
+view/dialogs.rs      Confirmation, create-folder, and bulk-progress UI
+view/entries.rs      Library card/list-row rendering
+view/folders.rs      Folder cards, folder drag previews, masonry/drop-zone helpers
+view/sidebar.rs      Files/tags/details sidebar rendering
+```
+
+The remaining `pdf-folio-ui/src/library/view/*` modules still accept `&PDFolioApp` because they adapt app-owned data, app messages, thumbnail caches, and cross-domain commands. Reusable pieces that do not need `PDFolioApp` should live in `pdf-folio-ui-components`.
+
+### Viewer UI Structure
+
+Viewer-specific app rendering currently lives in `pdf-folio-ui/src/viewer/`:
+
+```text
+canvas.rs    Iced canvas drawing, hit testing, page images, text selection overlays
+outline.rs   Viewer sidebar, outline tree, thumbnail strip, jump dialog
+tasks.rs     Open/render/schedule viewer tasks
+zoom.rs      Zoom input, preset menu, zoom control rendering
+```
+
+Viewer state and behavior shared outside the app shell lives in `pdf-folio-viewer/src/state.rs`. The app shell re-exports that state module through `pdf-folio-ui/src/viewer/mod.rs` and coordinates rendering/tasks through `PDFolioApp.viewer`.
+
+### Styling Structure
+
+Styles are KDL-backed and live in `pdf-folio-style`:
+
+```text
+styles/application.kdl
+styles/themes/light.kdl
+styles/themes/espresso.kdl
+styles/components/core.kdl
+styles/components/library/library.kdl
+styles/components/library/sidebar.kdl
+styles/components/viewer/viewer.kdl
+```
+
+Rust code should use style classes/tokens from `pdf-folio-style` instead of hard-coding visual values where practical. Viewer-specific visual styling belongs in `viewer.kdl`; behavior such as scroll math, render scheduling, text hit testing, and page layout stays in Rust.
+
+### Dependency Direction
+
+The intended dependency direction is:
+
+```text
+pdf-folio-main
+  -> pdf-folio-ui
+      -> pdf-folio-ui-components
+      -> pdf-folio-viewer
+      -> pdf-folio-style
+      -> pdf-folio-core
+      -> pdf-folio-db
+
+pdf-folio-ui-components -> pdf-folio-style, pdf-folio-core, pdf-folio-db, iced
+pdf-folio-viewer       -> pdf-folio-core, iced
+pdf-folio-style        -> iced, kdl
+pdf-folio-db           -> no UI crates
+pdf-folio-core         -> no UI or database crates
+```
+
+Feature/component crates should not depend on `pdf-folio-ui`. Cross-domain workflows belong in the app shell.
 
 ## Data Locations
 

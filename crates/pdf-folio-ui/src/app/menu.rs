@@ -1,10 +1,14 @@
 //! App menu and selection menu rendering/routing.
 
 use super::*;
-use crate::library::view::with_alpha;
 use crate::viewer::state::{ViewerScrollMode, ViewerSpreadMode};
 use crate::viewer::zoom::ZoomPreset;
 use iced::widget::{column, row, stack};
+use pdf_folio_ui_components::library::view::with_alpha;
+
+#[path = "menu/selection.rs"]
+mod selection;
+pub(crate) use selection::*;
 
 const APP_MENU_LABELS: [AppMenu; 7] = [
     AppMenu::File,
@@ -36,7 +40,7 @@ pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -
         AppMenuAction::ClearSelection => Message::ClearLibrarySelection,
         AppMenuAction::SaveDetails => Message::SaveDetailsMetadata,
         AppMenuAction::ResetDetails => {
-            let entry_id = app.details_entry_id.clone()?;
+            let entry_id = app.library.details_entry_id.clone()?;
             Message::RequestConfirmation(ConfirmationAction::ResetDetailsMetadata(entry_id))
         }
         AppMenuAction::AddTag => Message::BulkAddTag,
@@ -71,7 +75,7 @@ pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -
 }
 
 pub(crate) fn view_app_menu_bar(app: &PDFolioApp) -> Element<'_, Message> {
-    let tokens = app.theme.tokens(&app.style_book);
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let labels = app.labels();
     let mut menus = row![]
         .spacing(APP_MENU_BUTTON_SPACING)
@@ -80,12 +84,12 @@ pub(crate) fn view_app_menu_bar(app: &PDFolioApp) -> Element<'_, Message> {
         .align_y(iced::Alignment::Center);
 
     for menu in APP_MENU_LABELS {
-        let active = app.open_app_menu == Some(menu);
+        let active = app.chrome.open_app_menu == Some(menu);
         menus = menus.push(app_menu_button(menu, active, tokens, labels));
     }
 
     let content: Element<'_, Message> =
-        if app.mode == AppMode::Library && !app.selected_library_entries.is_empty() {
+        if app.mode == AppMode::Library && !app.library.selected_library_entries.is_empty() {
             column![menus, view_selection_context_row(app, tokens)]
                 .spacing(0)
                 .into()
@@ -100,7 +104,7 @@ pub(crate) fn view_app_menu_bar(app: &PDFolioApp) -> Element<'_, Message> {
 }
 
 pub(crate) fn app_menu_bar_height(app: &PDFolioApp) -> f32 {
-    if app.mode == AppMode::Library && !app.selected_library_entries.is_empty() {
+    if app.mode == AppMode::Library && !app.library.selected_library_entries.is_empty() {
         app.layout().app_menu_bar_height + app.layout().selection_context_row_height
     } else {
         app.layout().app_menu_bar_height
@@ -173,7 +177,7 @@ pub(crate) fn view_app_menu_dropdown(
     app: &PDFolioApp,
     tokens: ThemeTokens,
 ) -> Element<'_, Message> {
-    let Some(menu) = app.open_app_menu else {
+    let Some(menu) = app.chrome.open_app_menu else {
         return container("").into();
     };
     let menu_x = app_menu_x(menu);
@@ -183,7 +187,7 @@ pub(crate) fn view_app_menu_dropdown(
         .height(Length::Fill);
 
     if menu == AppMenu::View {
-        if let Some(flyout) = app.open_view_menu_flyout {
+        if let Some(flyout) = app.chrome.open_view_menu_flyout {
             dropdown = dropdown.push(
                 pin(view_menu_flyout_panel(app, flyout, tokens))
                     .x(menu_x + app.layout().app_menu_panel_width)
@@ -263,9 +267,9 @@ pub(crate) fn app_menu_panel<'a>(
                 ));
         }
         AppMenu::Edit => {
-            let has_selection = !app.selected_library_entries.is_empty();
-            let single_selection = app.selected_library_entries.len() == 1;
-            let has_bulk_tag = has_selection && !app.bulk_tag_input.trim().is_empty();
+            let has_selection = !app.library.selected_library_entries.is_empty();
+            let single_selection = app.library.selected_library_entries.len() == 1;
+            let has_bulk_tag = has_selection && !app.library.bulk_tag_input.trim().is_empty();
             panel = panel
                 .push(app_menu_item(
                     app_menu_action_label(labels, "SelectAllVisible", "Select All Visible PDFs"),
@@ -329,7 +333,7 @@ pub(crate) fn app_menu_panel<'a>(
         AppMenu::View => {
             panel = panel
                 .push(app_menu_item(
-                    if app.compact_view_mode {
+                    if app.library.compact_view_mode {
                         app_menu_action_label(labels, "ToggleLayoutGrid", "Switch to Grid")
                     } else {
                         app_menu_action_label(labels, "ToggleLayoutList", "Switch to List")
@@ -341,7 +345,7 @@ pub(crate) fn app_menu_panel<'a>(
                     app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    match app.theme {
+                    match app.appearance.theme {
                         AppTheme::Light => {
                             app_menu_action_label(labels, "ToggleThemeDark", "Switch to Dark Theme")
                         }
@@ -367,7 +371,7 @@ pub(crate) fn app_menu_panel<'a>(
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
-                    if app.toc_open {
+                    if app.viewer.toc_open {
                         app_menu_action_label(labels, "ToggleTocHide", "Hide Table of Contents")
                     } else {
                         app_menu_action_label(labels, "ToggleTocShow", "Show Table of Contents")
@@ -381,19 +385,19 @@ pub(crate) fn app_menu_panel<'a>(
                 .push(app_menu_separator(tokens))
                 .push(app_menu_submenu_item(
                     app_menu_action_label(labels, "ViewerScrolling", "Scrolling"),
-                    app.viewer_scroll_mode.label(),
+                    app.viewer.viewer_scroll_mode.label(),
                     app.mode == AppMode::Viewer,
                     ViewMenuFlyout::Scrolling,
-                    app.open_view_menu_flyout == Some(ViewMenuFlyout::Scrolling),
+                    app.chrome.open_view_menu_flyout == Some(ViewMenuFlyout::Scrolling),
                     tokens,
                     app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_submenu_item(
                     app_menu_action_label(labels, "ViewerSpreads", "Spreads"),
-                    app.viewer_spread_mode.label(),
+                    app.viewer.viewer_spread_mode.label(),
                     app.mode == AppMode::Viewer,
                     ViewMenuFlyout::Spreads,
-                    app.open_view_menu_flyout == Some(ViewMenuFlyout::Spreads),
+                    app.chrome.open_view_menu_flyout == Some(ViewMenuFlyout::Spreads),
                     tokens,
                     app.layout().app_menu_item_height,
                 ))
@@ -442,7 +446,7 @@ pub(crate) fn app_menu_panel<'a>(
                     app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    if app.toc_open {
+                    if app.viewer.toc_open {
                         app_menu_action_label(labels, "ToggleTocHide", "Hide Table of Contents")
                     } else {
                         app_menu_action_label(labels, "ToggleTocShow", "Show Table of Contents")
@@ -480,8 +484,8 @@ pub(crate) fn app_menu_panel<'a>(
                 ));
         }
         AppMenu::Library => {
-            let has_selection = !app.selected_library_entries.is_empty();
-            let has_active_folder = app.selected_folder.is_some();
+            let has_selection = !app.library.selected_library_entries.is_empty();
+            let has_active_folder = app.library.selected_folder.is_some();
             panel = panel
                 .push(app_menu_item(
                     app_menu_action_label(labels, "ImportFolder", "Import Folder..."),
@@ -532,7 +536,7 @@ pub(crate) fn app_menu_panel<'a>(
             for sort_mode in LIBRARY_SORT_OPTIONS {
                 panel = panel.push(app_menu_item(
                     sort_mode.label(),
-                    if app.library_sort_mode == sort_mode {
+                    if app.library.library_sort_mode == sort_mode {
                         label_text(labels, "sort_selected", "Selected")
                     } else {
                         ""
@@ -545,7 +549,7 @@ pub(crate) fn app_menu_panel<'a>(
             }
         }
         AppMenu::Tools => {
-            let has_selection = !app.selected_library_entries.is_empty();
+            let has_selection = !app.library.selected_library_entries.is_empty();
             panel = panel
                 .push(app_menu_item(
                     app_menu_action_label(labels, "SortTitles", "Apply Title Sort Cleanup"),
@@ -652,7 +656,7 @@ fn view_menu_flyout_panel<'a>(
             for mode in ViewerScrollMode::ALL {
                 panel = panel.push(app_menu_item(
                     mode.label(),
-                    if app.viewer_scroll_mode == mode {
+                    if app.viewer.viewer_scroll_mode == mode {
                         "Selected"
                     } else {
                         mode.detail()
@@ -668,7 +672,7 @@ fn view_menu_flyout_panel<'a>(
             for mode in ViewerSpreadMode::ALL {
                 panel = panel.push(app_menu_item(
                     mode.label(),
-                    if app.viewer_spread_mode == mode {
+                    if app.viewer.viewer_spread_mode == mode {
                         "Selected"
                     } else {
                         ""
@@ -852,360 +856,4 @@ pub(crate) fn app_menu_static_item<'a>(
         container_style(tokens, Class::MenuItem).with_visual_override(selected_style)
     })
     .into()
-}
-
-pub(crate) fn view_selection_context_row(
-    app: &PDFolioApp,
-    tokens: ThemeTokens,
-) -> Element<'_, Message> {
-    let selected_count = app.selected_library_entries.len();
-    let title_input_width = selection_title_input_width(app);
-    let author_input_width = selection_author_input_width(app);
-    let tag_input_width = selection_tag_input_width(app);
-    let selected_label = text(format!("{selected_count} selected"))
-        .size(FontSize::CONTROL)
-        .font(ui_font(FontWeight::SEMIBOLD))
-        .color(tokens.text_primary)
-        .wrapping(Wrapping::None);
-
-    let mut controls = row![]
-        .spacing(Spacing::SM)
-        .padding([Spacing::SM, Spacing::MD])
-        .height(app.layout().selection_context_row_height)
-        .align_y(iced::Alignment::Center)
-        .push(selected_label)
-        .push(toolbar_button("Clear", tokens).on_press(Message::ClearLibrarySelection));
-
-    if selected_count == 1 {
-        controls = controls
-            .push(
-                text_input("Title", &app.details_title_input)
-                    .on_input(Message::DetailsTitleChanged)
-                    .on_submit(Message::SaveDetailsMetadata)
-                    .id(Id::new(LIBRARY_DETAILS_TITLE_INPUT_ID))
-                    .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
-                    .width(title_input_width),
-            )
-            .push(
-                text_input("Author", &app.details_author_input)
-                    .on_input(Message::DetailsAuthorChanged)
-                    .on_submit(Message::SaveDetailsMetadata)
-                    .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
-                    .width(author_input_width),
-            )
-            .push(toolbar_button("Save", tokens).on_press(Message::SaveDetailsMetadata))
-            .push(selection_menu_button(
-                "More",
-                SelectionMenu::More,
-                app.open_selection_menu == Some(SelectionMenu::More),
-                tokens,
-            ));
-    } else {
-        controls = controls
-            .push(
-                text_input("Tag", &app.bulk_tag_input)
-                    .on_input(Message::BulkTagInputChanged)
-                    .on_submit(Message::BulkAddTag)
-                    .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
-                    .width(tag_input_width),
-            )
-            .push(selection_menu_button(
-                "Tags",
-                SelectionMenu::Tags,
-                app.open_selection_menu == Some(SelectionMenu::Tags),
-                tokens,
-            ))
-            .push(selection_menu_button(
-                "Folders",
-                SelectionMenu::Folders,
-                app.open_selection_menu == Some(SelectionMenu::Folders),
-                tokens,
-            ))
-            .push(selection_menu_button(
-                "Metadata",
-                SelectionMenu::Metadata,
-                app.open_selection_menu == Some(SelectionMenu::Metadata),
-                tokens,
-            ))
-            .push(selection_menu_button(
-                "Maintenance",
-                SelectionMenu::Maintenance,
-                app.open_selection_menu == Some(SelectionMenu::Maintenance),
-                tokens,
-            ));
-    }
-
-    controls = controls.push(
-        text("PDF-Folio")
-            .size(FontSize::HEADING)
-            .font(ui_font(FontWeight::BOLD))
-            .color(tokens.text_secondary)
-            .width(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Right)
-            .wrapping(Wrapping::None),
-    );
-
-    container(controls)
-        .width(Length::Fill)
-        .style(move |_| {
-            let active_style =
-                tokens.class_styles[Class::MenuBar.index()].resolve(ComponentState::Active);
-            container_style(tokens, Class::MenuBar).with_visual_override(active_style)
-        })
-        .into()
-}
-
-pub(crate) fn selection_menu_button<'a>(
-    label: &'a str,
-    menu: SelectionMenu,
-    active: bool,
-    tokens: ThemeTokens,
-) -> Element<'a, Message> {
-    button(
-        row![
-            text(label)
-                .size(FontSize::MD)
-                .font(ui_font(FontWeight::MEDIUM))
-                .color(tokens.text_primary)
-                .wrapping(Wrapping::None),
-            text("v")
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::MEDIUM))
-                .color(tokens.text_secondary),
-        ]
-        .spacing(Spacing::XS)
-        .align_y(iced::Alignment::Center),
-    )
-    .padding([Spacing::SM, Spacing::MD])
-    .height(30.0)
-    .on_press(Message::SelectionMenuOpened(menu))
-    .style(move |_, status| {
-        if active {
-            let active_style =
-                tokens.class_styles[Class::MenuButton.index()].resolve(ComponentState::Active);
-            crate::style::button_style(tokens, Class::MenuButton, status)
-                .with_visual_override(active_style)
-        } else {
-            crate::style::button_style(tokens, Class::MenuButton, status)
-        }
-    })
-    .into()
-}
-
-pub(crate) fn view_selection_menu_dropdown(
-    app: &PDFolioApp,
-    tokens: ThemeTokens,
-) -> Element<'_, Message> {
-    let Some(menu) = app.open_selection_menu else {
-        return container("").into();
-    };
-    pin(selection_menu_panel(app, menu, tokens))
-        .x(selection_menu_x(app, menu))
-        .y(app_menu_bar_height(app))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-}
-
-pub(crate) fn selection_menu_x(app: &PDFolioApp, menu: SelectionMenu) -> f32 {
-    let base = Spacing::MD + 128.0;
-    if app.selected_library_entries.len() == 1 {
-        return base + selection_title_input_width(app) + selection_author_input_width(app) + 88.0;
-    }
-
-    match menu {
-        SelectionMenu::Tags => base + selection_tag_input_width(app),
-        SelectionMenu::Folders => base + selection_tag_input_width(app) + 92.0,
-        SelectionMenu::Metadata => base + selection_tag_input_width(app) + 202.0,
-        SelectionMenu::Maintenance => base + selection_tag_input_width(app) + 330.0,
-        SelectionMenu::More => base,
-    }
-}
-
-pub(crate) fn selection_menu_panel<'a>(
-    app: &'a PDFolioApp,
-    menu: SelectionMenu,
-    tokens: ThemeTokens,
-) -> Element<'a, Message> {
-    let labels = app.labels();
-    let actions: &'static [SelectionToolbarAction] = match menu {
-        SelectionMenu::More => &SINGLE_MORE_ACTIONS,
-        SelectionMenu::Tags => &BULK_TAG_ACTIONS,
-        SelectionMenu::Folders => &BULK_FOLDER_ACTIONS,
-        SelectionMenu::Metadata => &BULK_METADATA_ACTIONS,
-        SelectionMenu::Maintenance => &BULK_MAINTENANCE_ACTIONS,
-    };
-    let mut panel = column![].spacing(2.0).padding(Spacing::XS);
-    for action in actions {
-        panel = panel.push(selection_menu_item(
-            *action,
-            tokens,
-            labels,
-            app.layout().app_menu_item_height,
-        ));
-    }
-
-    container(panel)
-        .width(app.layout().app_menu_panel_width)
-        .style(move |_| {
-            let mut style = container_style(tokens, Class::MenuPanel);
-            style.shadow = iced::Shadow {
-                color: tokens.shadow,
-                offset: iced::Vector::new(0.0, 8.0),
-                blur_radius: 18.0,
-            };
-            style
-        })
-        .into()
-}
-
-pub(crate) fn app_menu_label<'a>(
-    labels: &'a crate::style::AppLabelTokens,
-    menu: AppMenu,
-) -> &'a str {
-    labels.get(LabelSection::AppMenu, app_menu_key(menu), menu.label())
-}
-
-pub(crate) fn app_menu_action_label<'a>(
-    labels: &'a crate::style::AppLabelTokens,
-    key: &str,
-    fallback: &'a str,
-) -> &'a str {
-    labels.get(LabelSection::AppMenuAction, key, fallback)
-}
-
-pub(crate) fn selection_toolbar_action_label<'a>(
-    labels: &'a crate::style::AppLabelTokens,
-    action: SelectionToolbarAction,
-) -> &'a str {
-    labels.get(
-        LabelSection::SelectionToolbarAction,
-        selection_toolbar_action_key(action),
-        action.label(),
-    )
-}
-
-pub(crate) fn library_sidebar_tab_label<'a>(
-    labels: &'a crate::style::AppLabelTokens,
-    tab: LibrarySidebarTab,
-) -> &'a str {
-    labels.get(
-        LabelSection::LibrarySidebarTab,
-        library_sidebar_tab_key(tab),
-        tab.label(),
-    )
-}
-
-pub(crate) fn label_text<'a>(
-    labels: &'a crate::style::AppLabelTokens,
-    key: &str,
-    fallback: &'a str,
-) -> &'a str {
-    labels.get(LabelSection::Text, key, fallback)
-}
-
-pub(crate) fn app_menu_key(menu: AppMenu) -> &'static str {
-    match menu {
-        AppMenu::File => "File",
-        AppMenu::Edit => "Edit",
-        AppMenu::View => "View",
-        AppMenu::Document => "Document",
-        AppMenu::Library => "Library",
-        AppMenu::Tools => "Tools",
-        AppMenu::Help => "Help",
-    }
-}
-
-pub(crate) fn library_sidebar_tab_key(tab: LibrarySidebarTab) -> &'static str {
-    match tab {
-        LibrarySidebarTab::Files => "Files",
-        LibrarySidebarTab::Tags => "Tags",
-    }
-}
-
-pub(crate) fn selection_toolbar_action_key(action: SelectionToolbarAction) -> &'static str {
-    match action {
-        SelectionToolbarAction::AddTag => "AddTag",
-        SelectionToolbarAction::RemoveTag => "RemoveTag",
-        SelectionToolbarAction::AddToFolder => "AddToFolder",
-        SelectionToolbarAction::RemoveFromFolder => "RemoveFromFolder",
-        SelectionToolbarAction::SaveDetails => "SaveDetails",
-        SelectionToolbarAction::ResetDetails => "ResetDetails",
-        SelectionToolbarAction::SortTitles => "SortTitles",
-        SelectionToolbarAction::RefreshMetadata => "RefreshMetadata",
-        SelectionToolbarAction::ResetMetadata => "ResetMetadata",
-        SelectionToolbarAction::RebuildThumbnails => "RebuildThumbnails",
-        SelectionToolbarAction::Reindex => "Reindex",
-        SelectionToolbarAction::DeleteMetadata => "DeleteMetadata",
-    }
-}
-
-pub(crate) fn selection_menu_item(
-    action: SelectionToolbarAction,
-    tokens: ThemeTokens,
-    labels: &crate::style::AppLabelTokens,
-    item_height: f32,
-) -> Element<'_, Message> {
-    button(
-        text(selection_toolbar_action_label(labels, action))
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::REGULAR))
-            .color(tokens.text_primary)
-            .wrapping(Wrapping::None)
-            .width(Length::Fill),
-    )
-    .height(item_height)
-    .width(Length::Fill)
-    .padding([Spacing::XS, Spacing::MD])
-    .on_press(Message::SelectionToolbarActionSelected(action))
-    .style(move |_, status| crate::style::button_style(tokens, Class::MenuItem, status))
-    .into()
-}
-
-pub(crate) fn app_menu_separator<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
-    container("")
-        .height(1.0)
-        .width(Length::Fill)
-        .style(move |_| {
-            let selected_style =
-                tokens.class_styles[Class::MenuBar.index()].resolve(ComponentState::Selected);
-            container_style(tokens, Class::MenuBar).with_visual_override(selected_style)
-        })
-        .into()
-}
-
-pub(crate) fn selection_title_input_width(app: &PDFolioApp) -> f32 {
-    responsive_selection_input_width(
-        app,
-        app.layout().selection_title_input_min_width,
-        app.layout().selection_title_input_width,
-        0.34,
-    )
-}
-
-pub(crate) fn selection_author_input_width(app: &PDFolioApp) -> f32 {
-    responsive_selection_input_width(
-        app,
-        app.layout().selection_author_input_min_width,
-        app.layout().selection_author_input_width,
-        0.24,
-    )
-}
-
-pub(crate) fn selection_tag_input_width(app: &PDFolioApp) -> f32 {
-    responsive_selection_input_width(
-        app,
-        app.layout().bulk_tag_input_min_width,
-        app.layout().bulk_tag_input_width,
-        0.2,
-    )
-}
-
-pub(crate) fn responsive_selection_input_width(
-    app: &PDFolioApp,
-    min_width: f32,
-    max_width: f32,
-    viewport_fraction: f32,
-) -> f32 {
-    (app.library_viewport_width * viewport_fraction).clamp(min_width, max_width)
 }

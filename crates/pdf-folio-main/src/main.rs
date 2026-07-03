@@ -1,4 +1,18 @@
 //! PDF-Folio binary entrypoint.
+//!
+//! This crate produces the `pdf-folio` executable. It initializes the
+//! tracing subscriber, parses command-line arguments via [`clap`], and
+//! delegates to [`pdf_folio_ui::run`] to launch the application.
+//!
+//! Usage:
+//!
+//! ```text
+//! pdf-folio               # open the library manager
+//! pdf-folio document.pdf  # open a PDF directly
+//! ```
+//!
+//! [`clap`]: https://docs.rs/clap
+
 
 use std::path::PathBuf;
 

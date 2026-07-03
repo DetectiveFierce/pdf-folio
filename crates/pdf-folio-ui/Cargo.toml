@@ -11,10 +11,12 @@ path = "src/app.rs"
 [dependencies]
 anyhow.workspace = true
 iced.workspace = true
-kdl.workspace = true
 notify.workspace = true
 pdf-folio-core = { path = "../pdf-folio-core" }
-pdf-folio-library = { path = "../pdf-folio-library" }
+pdf-folio-db = { path = "../pdf-folio-db" }
+pdf-folio-style = { path = "../pdf-folio-style" }
+pdf-folio-viewer = { path = "../pdf-folio-viewer" }
+pdf-folio-ui-components = { path = "../pdf-folio-ui-components" }
 rfd.workspace = true
 tokio.workspace = true
 tracing.workspace = true

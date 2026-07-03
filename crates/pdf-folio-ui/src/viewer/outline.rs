@@ -8,7 +8,7 @@ use pdf_folio_core::{OutlineNode, TileKey};
 use std::collections::HashSet;
 
 pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
-    let tokens = app.theme.tokens(&app.style_book);
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let heading = row![
         row![
             viewer_sidebar_tab_button(app, ViewerSidebarTab::Contents, tokens),
@@ -25,7 +25,7 @@ pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     ]
     .spacing(Spacing::XS)
     .align_y(iced::Alignment::Center);
-    let body = match app.viewer_sidebar_tab {
+    let body = match app.viewer.viewer_sidebar_tab {
         ViewerSidebarTab::Contents => view_outline_body(app, tokens),
         ViewerSidebarTab::Thumbnails => view_thumbnails_body(app, tokens),
     };
@@ -37,7 +37,7 @@ pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     )
     .width(app.layout().viewer_sidebar_width)
     .height(Length::Fill)
-    .style(move |_| container_style(tokens, Class::Sidebar))
+    .style(move |_| container_style(tokens, Class::ViewerSidebar))
     .into()
 }
 
@@ -46,7 +46,7 @@ fn viewer_sidebar_tab_button<'a>(
     tab: ViewerSidebarTab,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
-    let active = app.viewer_sidebar_tab == tab;
+    let active = app.viewer.viewer_sidebar_tab == tab;
     button(
         text(tab.label())
             .size(FontSize::SM)
@@ -65,19 +65,19 @@ fn viewer_sidebar_tab_button<'a>(
     .padding([Spacing::XS, Spacing::SM])
     .style(move |_, status| {
         if active {
-            let active_style =
-                tokens.class_styles[Class::SidebarRow.index()].resolve(ComponentState::Active);
-            crate::style::button_style(tokens, Class::SidebarRow, status)
+            let active_style = tokens.class_styles[Class::ViewerSidebarTab.index()]
+                .resolve(ComponentState::Active);
+            crate::style::button_style(tokens, Class::ViewerSidebarTab, status)
                 .with_visual_override(active_style)
         } else {
-            crate::style::button_style(tokens, Class::SidebarRow, status)
+            crate::style::button_style(tokens, Class::ViewerSidebarTab, status)
         }
     })
     .on_press(Message::ViewerSidebarTabSelected(tab))
 }
 
 fn view_outline_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
-    if app.outline.is_empty() {
+    if app.viewer.outline.is_empty() {
         container(
             text("No table of contents")
                 .size(FontSize::MD)
@@ -88,10 +88,10 @@ fn view_outline_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Messa
         .into()
     } else {
         scrollable(outline_list(
-            &app.outline,
+            &app.viewer.outline,
             0,
             Vec::new(),
-            &app.expanded_outline_paths,
+            &app.viewer.expanded_outline_paths,
             tokens,
         ))
         .direction(sidebar_scroll_direction())
@@ -102,7 +102,7 @@ fn view_outline_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Messa
 }
 
 fn view_thumbnails_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
-    let Some(doc) = app.doc.as_ref() else {
+    let Some(doc) = app.viewer.doc.as_ref() else {
         return container("").height(Length::Fill).into();
     };
 
@@ -124,14 +124,15 @@ fn view_thumbnails_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Me
 }
 
 fn thumbnail_button(app: &PDFolioApp, page: u16, tokens: ThemeTokens) -> Element<'_, Message> {
-    let width = f32::from(VIEWER_THUMBNAIL_WIDTH_PX);
-    let height = width * app.page_aspect_ratios[usize::from(page)];
+    let width = f32::from(app.layout().viewer_thumbnail_width_px);
+    let height = width * app.viewer.page_aspect_ratios[usize::from(page)];
     let key = TileKey {
         page,
-        width_px: VIEWER_THUMBNAIL_WIDTH_PX,
+        width_px: app.layout().viewer_thumbnail_width_px,
     };
 
-    let preview: Element<'_, Message> = if let Some(rendered) = app.rendered_pages.get(&key) {
+    let preview: Element<'_, Message> = if let Some(rendered) = app.viewer.rendered_pages.get(&key)
+    {
         let image_height = width * f32::from(rendered.height) / f32::from(rendered.width.max(1));
         container(
             image(rendered.handle.clone())
@@ -142,15 +143,17 @@ fn thumbnail_button(app: &PDFolioApp, page: u16, tokens: ThemeTokens) -> Element
         .width(Length::Fixed(width))
         .height(Length::Fixed(image_height))
         .clip(true)
-        .style(move |_| container_style(tokens, Class::PagePlaceholder))
+        .style(move |_| container_style(tokens, Class::ViewerPagePlaceholder))
         .into()
     } else {
-        container(crate::library::view::document_preview_lines(
-            width, height, tokens, 0.82,
-        ))
+        container(
+            pdf_folio_ui_components::library::view::document_preview_lines(
+                width, height, tokens, 0.82,
+            ),
+        )
         .width(Length::Fixed(width))
         .height(Length::Fixed(height))
-        .style(move |_| container_style(tokens, Class::PagePlaceholder))
+        .style(move |_| container_style(tokens, Class::ViewerPagePlaceholder))
         .into()
     };
 
@@ -178,7 +181,9 @@ fn thumbnail_button(app: &PDFolioApp, page: u16, tokens: ThemeTokens) -> Element
     button(content)
         .width(Length::Shrink)
         .padding(Spacing::SM)
-        .style(move |_, status| crate::style::button_style(tokens, Class::TocEntry, status))
+        .style(move |_, status| {
+            crate::style::button_style(tokens, Class::ViewerOutlineEntry, status)
+        })
         .on_press(Message::JumpToPage(page))
         .into()
 }
@@ -271,16 +276,16 @@ fn outline_button<'a>(
 }
 
 pub(crate) fn view_jump_dialog(app: &PDFolioApp) -> Element<'_, Message> {
-    let tokens = app.theme.tokens(&app.style_book);
-    let max_page = app.doc.as_ref().map_or(0, |doc| doc.page_count());
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let max_page = app.viewer.doc.as_ref().map_or(0, |doc| doc.page_count());
     let dialog = row![
         text("Go to page")
             .size(FontSize::CONTROL)
             .color(tokens.text_primary),
-        text_input("Page", &app.jump_input)
+        text_input("Page", &app.viewer.jump_input)
             .on_input(Message::JumpInputChanged)
             .on_submit(Message::SubmitJump)
-            .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+            .style(move |_, status| text_input_style(tokens, Class::ViewerFindInput, status))
             .width(app.layout().jump_input_width),
         text(format!("of {max_page}"))
             .size(FontSize::MD)

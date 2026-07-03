@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use iced::Task;
 use pdf_folio_core::{PdfDoc, RenderedPage, TileKey};
-use pdf_folio_library::EntryId;
+use pdf_folio_db::EntryId;
 
 use crate::messages::Message;
 
