@@ -240,6 +240,176 @@ pub(crate) fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message
     .into()
 }
 
+pub(crate) fn view_library_move_picker_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let Some(picker) = app.library.move_picker.as_ref() else {
+        return container("").into();
+    };
+    let selected_count = app.library.selected_library_entries.len();
+    let title = match &picker.target {
+        LibraryMoveTarget::SelectedEntries => {
+            format!("Move {}", format_count(selected_count, "PDF"))
+        }
+        LibraryMoveTarget::Folder(folder_id) => app
+            .library
+            .library_folders
+            .iter()
+            .find(|folder| &folder.id == folder_id)
+            .map_or_else(
+                || String::from("Move Folder"),
+                |folder| format!("Move {}", truncate_for_width(&folder.name, 360.0, 0.0)),
+            ),
+    };
+    let destination = picker
+        .selected_destination
+        .as_ref()
+        .and_then(|folder_id| {
+            app.library
+                .library_folders
+                .iter()
+                .find(|folder| &folder.id == folder_id)
+        })
+        .map_or_else(|| String::from("Library"), |folder| folder.name.clone());
+    let tree_width = 480.0;
+    let tree = container(
+        scrollable(view_move_picker_tree(app, picker, tree_width, tokens))
+            .direction(sidebar_scroll_direction())
+            .height(Length::Fill)
+            .style(move |_, status| sidebar_scrollable_style(tokens, status)),
+    )
+    .height(330.0)
+    .width(Length::Fill)
+    .style(move |_| container_style(tokens, Class::FileTree));
+
+    let dialog = column![
+        column![
+            text(title)
+                .size(FontSize::HEADING)
+                .font(display_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary),
+            text(format!("Destination: {destination}"))
+                .size(FontSize::MD)
+                .color(tokens.text_secondary),
+        ]
+        .spacing(Spacing::XS),
+        tree,
+        row![
+            toolbar_button("Cancel", tokens).on_press(Message::CancelMovePicker),
+            container("").width(Length::Fill),
+            toolbar_button("Select", tokens).on_press(Message::ConfirmMovePicker),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::LG);
+
+    container(
+        container(dialog)
+            .width(540.0)
+            .style(move |_| container_style(tokens, Class::JumpOverlay)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center(Length::Fill)
+    .style(move |_| container_style(tokens, Class::PresentationOverlay))
+    .into()
+}
+
+fn view_move_picker_tree<'a>(
+    app: &'a PDFolioApp,
+    picker: &'a LibraryMovePicker,
+    tree_width: f32,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let library_counts = app.folder_smart_counts(None);
+    let root_row = file_tree_row(
+        "Library",
+        Some(folder_sidebar_count_label(library_counts)),
+        0,
+        picker.selected_destination.is_none(),
+        true,
+        true,
+        Message::ToggleLibraryTreeRoot,
+        Message::MovePickerDestinationSelected(None),
+        tree_width,
+        tokens,
+        false,
+    );
+    column![
+        root_row,
+        view_move_picker_folder_rows(app, picker, None, 1, tree_width, tokens)
+    ]
+    .spacing(0)
+    .into()
+}
+
+fn view_move_picker_folder_rows<'a>(
+    app: &'a PDFolioApp,
+    picker: &'a LibraryMovePicker,
+    parent_id: Option<&'a FolderId>,
+    depth: usize,
+    tree_width: f32,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let mut rows = column![].spacing(0);
+    let mut children: Vec<&Folder> = app
+        .library
+        .library_folders
+        .iter()
+        .filter(|folder| folder.parent_id.as_ref() == parent_id)
+        .collect();
+    children.sort_by_key(|folder| (folder.manual_order, folder.name.to_lowercase()));
+
+    for folder in children {
+        let has_children = app
+            .library
+            .library_folders
+            .iter()
+            .any(|child| child.parent_id.as_ref() == Some(&folder.id));
+        let expanded = picker.expanded_folders.contains(&folder.id);
+        let active = picker.selected_destination.as_ref() == Some(&folder.id);
+        let invalid = match &picker.target {
+            LibraryMoveTarget::SelectedEntries => false,
+            LibraryMoveTarget::Folder(folder_id) => {
+                &folder.id == folder_id
+                    || !folder_can_move_into(&app.library.library_folders, folder_id, &folder.id)
+            }
+        };
+        let counts = app.folder_smart_counts(Some(&folder.id));
+        let row = file_tree_row(
+            &folder.name,
+            Some(if invalid {
+                String::from("Unavailable")
+            } else {
+                folder_sidebar_count_label(counts)
+            }),
+            depth,
+            active,
+            has_children,
+            expanded,
+            Message::ToggleMovePickerFolder(folder.id.clone()),
+            Message::MovePickerDestinationSelected(Some(folder.id.clone())),
+            tree_width,
+            tokens,
+            false,
+        );
+        rows = rows.push(row);
+        if expanded {
+            rows = rows.push(view_move_picker_folder_rows(
+                app,
+                picker,
+                Some(&folder.id),
+                depth.saturating_add(1),
+                tree_width,
+                tokens,
+            ));
+        }
+    }
+
+    rows.into()
+}
+
 pub(crate) fn view_raindrop_connect_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let can_submit = !app.library.raindrop_client_id_input.trim().is_empty()

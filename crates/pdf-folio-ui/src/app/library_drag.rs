@@ -38,6 +38,7 @@ impl PDFolioApp {
             source_index,
             multi,
         ));
+        self.adjust_scroll_for_parent_directory_drop_box(true);
     }
 
     pub(super) fn begin_folder_drag(&mut self, folder_id: FolderId) {
@@ -53,6 +54,7 @@ impl PDFolioApp {
         self.library.library_drag = None;
         self.library.folder_drag = Some(FolderDragState::new(folder_id));
         self.library.folder_drag_started_in_tree = false;
+        self.adjust_scroll_for_parent_directory_drop_box(true);
     }
 
     pub(super) fn begin_folder_tree_drag(&mut self, folder_id: FolderId) {
@@ -82,6 +84,15 @@ impl PDFolioApp {
             .as_ref()
             .is_some_and(|drag| drag.active)
         {
+            if self
+                .library
+                .library_drag
+                .as_ref()
+                .is_some_and(|drag| drag.parent_drop_target)
+            {
+                return;
+            }
+
             self.update_library_drag_target_from_cursor();
             if let Some(target) = self.library_folder_card_target_at_cursor(cursor) {
                 self.set_library_drag_card_target(Some(target), Instant::now());
@@ -187,6 +198,10 @@ impl PDFolioApp {
             return;
         }
 
+        if drag.parent_drop_target {
+            return;
+        }
+
         let dragged_folder_id = drag.folder_id.clone();
         if let Some(target) = self.folder_card_target_at_cursor(cursor, &dragged_folder_id) {
             self.set_folder_drag_card_target(Some(target));
@@ -221,18 +236,83 @@ impl PDFolioApp {
         )
     }
 
+    pub(super) fn parent_directory_drop_box_visible(&self) -> bool {
+        self.library.selected_folder.is_some()
+            && (self.library.library_drag.is_some() || self.library.folder_drag.is_some())
+    }
+
+    pub(super) fn parent_directory_drop_target_active(&self) -> bool {
+        self.library
+            .library_drag
+            .as_ref()
+            .is_some_and(|drag| drag.parent_drop_target)
+            || self
+                .library
+                .folder_drag
+                .as_ref()
+                .is_some_and(|drag| drag.parent_drop_target)
+    }
+
+    pub(super) fn parent_directory_folder_id(&self) -> Option<FolderId> {
+        let selected_folder = self.library.selected_folder.as_ref()?;
+        self.library
+            .library_folders
+            .iter()
+            .find(|folder| &folder.id == selected_folder)
+            .and_then(|folder| folder.parent_id.clone())
+    }
+
+    pub(super) fn set_parent_directory_drop_hover_target(&mut self, active: bool) {
+        if let Some(drag) = &mut self.library.library_drag {
+            if drag.active {
+                drag.set_parent_drop_target(active);
+            }
+        }
+
+        if let Some(drag) = &mut self.library.folder_drag {
+            if drag.active {
+                drag.set_parent_drop_target(active);
+            }
+        }
+    }
+
+    pub(super) fn adjust_scroll_for_parent_directory_drop_box(&mut self, visible: bool) {
+        if self.library.selected_folder.is_none() {
+            return;
+        }
+
+        let height = parent_directory_drop_box_height(self) + Spacing::MD;
+        if visible {
+            if self.library.library_scroll_offset > 0.0
+                && !self.library.parent_directory_drop_scroll_adjusted
+            {
+                self.library.library_scroll_offset += height;
+                self.library.parent_directory_drop_scroll_adjusted = true;
+            }
+        } else if self.library.parent_directory_drop_scroll_adjusted {
+            self.library.library_scroll_offset =
+                (self.library.library_scroll_offset - height).max(0.0);
+            self.library.parent_directory_drop_scroll_adjusted = false;
+        }
+    }
+
     pub(super) fn folder_card_target_at_cursor(
         &self,
         cursor: Point,
         dragged_folder_id: &FolderId,
     ) -> Option<FolderId> {
         let child_folders = self.child_folders();
+        let folder_section_top = if self.parent_directory_drop_box_visible() {
+            parent_directory_drop_box_height(self) + Spacing::MD
+        } else {
+            0.0
+        };
         folder_card_target_at_cursor(
             cursor,
             &child_folders,
             dragged_folder_id,
             self.library.library_viewport_x,
-            self.library.library_viewport_y,
+            self.library.library_viewport_y + folder_section_top,
             self.library.library_scroll_offset,
             self.library_grid_card_width(),
             self.layout().library_folder_grid_row_height,
@@ -245,12 +325,17 @@ impl PDFolioApp {
     pub(super) fn library_folder_card_target_at_cursor(&self, cursor: Point) -> Option<FolderId> {
         let child_folders = self.child_folders();
         let dragged_folder_sentinel = FolderId::new("__pdf_folio_db_drag__");
+        let folder_section_top = if self.parent_directory_drop_box_visible() {
+            parent_directory_drop_box_height(self) + Spacing::MD
+        } else {
+            0.0
+        };
         folder_card_target_at_cursor(
             cursor,
             &child_folders,
             &dragged_folder_sentinel,
             self.library.library_viewport_x,
-            self.library.library_viewport_y,
+            self.library.library_viewport_y + folder_section_top,
             self.library.library_scroll_offset,
             self.library_grid_card_width(),
             self.layout().library_folder_grid_row_height,
@@ -348,8 +433,9 @@ impl PDFolioApp {
     }
 
     pub(super) fn max_library_scroll_offset(&self) -> f32 {
-        let content_height =
-            self.library_content_height_for_len(self.visible_library_entries().len());
+        let content_height = self
+            .library_content_height_for_len(self.visible_library_entries().len())
+            + folder_cards_section_height(self, self.child_folders().len());
         (content_height - self.library.library_viewport_height.max(1.0)).max(0.0)
     }
 
@@ -437,10 +523,49 @@ impl PDFolioApp {
         let Some(drag) = self.library.library_drag.take() else {
             return Task::none();
         };
+        self.adjust_scroll_for_parent_directory_drop_box(false);
 
         if !drag.active {
             self.collapse_drag_expanded_folders(drag.expanded_during_drag);
             return Task::done(Message::LibraryEntryClicked(drag.entry_id));
+        }
+
+        if drag.parent_drop_target {
+            let Some(current_folder_id) = self.library.selected_folder.clone() else {
+                self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+                return scroll_library_to_offset_task(self.library.library_scroll_offset);
+            };
+            let entry_ids = drag.entry_ids.clone();
+            if entry_ids.is_empty() {
+                self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+                return Task::none();
+            }
+            if let Some(parent_id) = self.parent_directory_folder_id() {
+                self.library.library_status = Some(format!(
+                    "Moving {} to parent folder...",
+                    format_count(entry_ids.len(), "PDF")
+                ));
+                self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+                return Task::batch([
+                    move_entries_to_folder_task(Arc::clone(&self.db), entry_ids, Some(parent_id)),
+                    scroll_library_to_offset_task(self.library.library_scroll_offset),
+                ]);
+            }
+
+            self.library.library_status = Some(format!(
+                "Moving {} to library root...",
+                format_count(entry_ids.len(), "PDF")
+            ));
+            self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+            return Task::batch([
+                bulk_operation_task(
+                    Arc::clone(&self.db),
+                    entry_ids,
+                    String::from("Moved to parent directory"),
+                    move |db, entry_id| db.remove_entry_from_folder(entry_id, &current_folder_id),
+                ),
+                scroll_library_to_offset_task(self.library.library_scroll_offset),
+            ]);
         }
 
         if let Some(folder_id) = drag.drop_target.clone() {
@@ -457,7 +582,7 @@ impl PDFolioApp {
                 format_count(entry_ids.len(), "PDF")
             ));
             return Task::batch([
-                move_entries_to_folder_task(Arc::clone(&self.db), entry_ids, folder_id),
+                move_entries_to_folder_task(Arc::clone(&self.db), entry_ids, Some(folder_id)),
                 scroll_library_to_offset_task(self.library.library_scroll_offset),
             ]);
         }
@@ -505,6 +630,7 @@ impl PDFolioApp {
         let Some(drag) = self.library.folder_drag.take() else {
             return Task::none();
         };
+        self.adjust_scroll_for_parent_directory_drop_box(false);
         let started_in_tree = self.library.folder_drag_started_in_tree;
         self.library.folder_drag_started_in_tree = false;
 
@@ -516,6 +642,16 @@ impl PDFolioApp {
                 Message::FolderClicked(Some(drag.folder_id))
             };
             return Task::done(click_message);
+        }
+
+        if drag.parent_drop_target {
+            let parent_id = self.parent_directory_folder_id();
+            self.collapse_drag_expanded_folders(drag.expanded_during_drag);
+            self.library.library_status = Some(String::from("Moving folder..."));
+            return Task::batch([
+                move_folder_task(Arc::clone(&self.db), drag.folder_id, parent_id),
+                scroll_library_to_offset_task(self.library.library_scroll_offset),
+            ]);
         }
 
         if let Some(target_id) = drag.drop_target.clone() {

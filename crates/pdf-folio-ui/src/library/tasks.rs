@@ -169,7 +169,7 @@ fn collect_folder_subtree_ids(
 pub(crate) fn move_entries_to_folder_task(
     db: Arc<Db>,
     entry_ids: Vec<EntryId>,
-    folder_id: FolderId,
+    folder_id: Option<FolderId>,
 ) -> Task<Message> {
     Task::perform(
         async move {
@@ -178,14 +178,19 @@ pub(crate) fn move_entries_to_folder_task(
                 let mut updated = 0;
                 let mut errors = Vec::new();
                 for entry_id in entry_ids {
-                    match db.move_entry_to_folder(&entry_id, &folder_id) {
+                    let result = if let Some(folder_id) = folder_id.as_ref() {
+                        db.move_entry_to_folder(&entry_id, folder_id)
+                    } else {
+                        db.move_entry_to_root(&entry_id)
+                    };
+                    match result {
                         Ok(()) => updated += 1,
                         Err(error) => errors.push(format!("{}: {error}", entry_id.as_str())),
                     }
                 }
                 Ok::<_, anyhow::Error>((
                     completed_folder_id,
-                    String::from("Moved to folder"),
+                    String::from("Moved"),
                     updated,
                     errors,
                 ))

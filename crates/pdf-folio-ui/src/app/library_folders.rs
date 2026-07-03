@@ -44,6 +44,20 @@ impl PDFolioApp {
         folder_ids
     }
 
+    pub(super) fn move_picker_expanded_folders(&self) -> HashSet<FolderId> {
+        self.library
+            .library_folders
+            .iter()
+            .filter(|folder| {
+                !self
+                    .library
+                    .collapsed_library_tree_folders
+                    .contains(&folder.id)
+            })
+            .map(|folder| folder.id.clone())
+            .collect()
+    }
+
     pub(super) fn collect_folder_subtree_ids(
         &self,
         folder_id: &FolderId,

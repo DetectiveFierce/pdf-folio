@@ -48,6 +48,7 @@ pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -
         AppMenuAction::RemoveTag => Message::BulkRemoveTag,
         AppMenuAction::AddToFolder => Message::BulkAddToCurrentFolder,
         AppMenuAction::RemoveFromFolder => Message::BulkRemoveFromCurrentFolder,
+        AppMenuAction::MoveTo => Message::OpenMoveSelectionDialog,
         AppMenuAction::DeleteFromLibrary => {
             Message::RequestConfirmation(ConfirmationAction::BulkDeleteFromLibrary)
         }
@@ -65,6 +66,7 @@ pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -
         }
         AppMenuAction::SortLibrary(sort_mode) => Message::LibrarySortChanged(sort_mode),
         AppMenuAction::CreateFolder => Message::OpenCreateFolderDialog,
+        AppMenuAction::RestoreTagPillView => Message::RestoreLibraryViewBeforeTag,
         AppMenuAction::ResetMetadata => {
             Message::RequestConfirmation(ConfirmationAction::BulkResetDisplayMetadata)
         }
@@ -331,6 +333,14 @@ pub(crate) fn app_menu_panel<'a>(
                     app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
+                    app_menu_action_label(labels, "MoveTo", "Move To..."),
+                    "",
+                    has_selection,
+                    AppMenuAction::MoveTo,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_item(
                     app_menu_action_label(labels, "DeleteFromLibrary", "Delete From Library..."),
                     "Delete",
                     has_selection,
@@ -496,6 +506,15 @@ pub(crate) fn app_menu_panel<'a>(
             let has_selection = !app.library.selected_library_entries.is_empty();
             let has_active_folder = app.library.selected_folder.is_some();
             panel = panel
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "RestoreTagPillView", "< Previous Library View"),
+                    "",
+                    app.mode == AppMode::Library && app.library.previous_tag_pill_view.is_some(),
+                    AppMenuAction::RestoreTagPillView,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_separator(tokens))
                 .push(app_menu_item(
                     app_menu_action_label(labels, "ImportFolder", "Import Folder..."),
                     "",

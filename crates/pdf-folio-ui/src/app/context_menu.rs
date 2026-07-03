@@ -71,6 +71,7 @@ impl PDFolioApp {
                 }
                 _ => None,
             },
+            ContextMenuAction::MoveTo => Some(Message::OpenMoveSelectionDialog),
             ContextMenuAction::RevealInFileManager => match target {
                 ContextMenuTarget::LibraryEntry(entry_id) => {
                     Some(Message::RevealEntryInFileManager(entry_id.clone()))
@@ -113,6 +114,7 @@ impl PDFolioApp {
             },
             ContextMenuAction::NewFolder => Some(Message::OpenCreateFolderDialog),
             ContextMenuAction::RenameFolder => Some(Message::RenameSelectedFolder),
+            ContextMenuAction::MoveFolderTo => Some(Message::OpenMoveSelectedFolderDialog),
             ContextMenuAction::MoveFolderToRoot => Some(Message::MoveSelectedFolderToRoot),
             ContextMenuAction::MoveFolderUp => Some(Message::MoveSelectedFolderUp),
             ContextMenuAction::MoveFolderEarlier => Some(Message::MoveSelectedFolderEarlier),
@@ -260,6 +262,7 @@ fn library_entry_context_groups(
         ],
         vec![
             spec("Add Tag...", "", true, ContextMenuAction::AddTag),
+            spec("Move To...", "", has_selection, ContextMenuAction::MoveTo),
             spec(
                 "Save Details",
                 "Enter",
@@ -376,6 +379,12 @@ fn folder_context_groups(
                 ContextMenuAction::RenameFolder,
             ),
             spec(
+                "Move To...",
+                "",
+                has_folder,
+                ContextMenuAction::MoveFolderTo,
+            ),
+            spec(
                 "Move To Root",
                 "",
                 has_parent,
@@ -427,6 +436,12 @@ fn library_background_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuIte
             ),
         ],
         vec![
+            spec(
+                "Move To...",
+                "",
+                !app.library.selected_library_entries.is_empty(),
+                ContextMenuAction::MoveTo,
+            ),
             spec(
                 if app.library.compact_view_mode {
                     "Switch To Grid"

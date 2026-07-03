@@ -12,7 +12,12 @@ impl PDFolioApp {
         };
 
         let page = page.min(doc.page_count().saturating_sub(1));
-        if let Some(rect) = self.viewer_page_rect_for_page(page) {
+        if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+            self.viewer.last_scroll_offset = self.viewer.scroll_offset;
+            self.viewer.page_scroll_page = page;
+            self.viewer.scroll_offset = 0.0;
+            self.viewer.horizontal_offset = 0.0;
+        } else if let Some(rect) = self.viewer_page_rect_for_page(page) {
             self.viewer.last_scroll_offset = self.viewer.scroll_offset;
             if matches!(self.viewer.viewer_scroll_mode, ViewerScrollMode::Horizontal) {
                 self.viewer.horizontal_offset = rect.x;
@@ -29,10 +34,17 @@ impl PDFolioApp {
         self.viewer.jump_dialog_open = false;
         self.viewer.page_input_editing = false;
         self.viewer.jump_input.clear();
-        self.request_visible_pages()
+        Task::batch([
+            self.request_visible_pages(),
+            self.scroll_viewer_to_offsets_task(),
+        ])
     }
 
     pub(super) fn scroll_to_page_rect(&mut self, page: u16, x_fraction: f32, y_fraction: f32) {
+        if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+            self.viewer.page_scroll_page = page;
+        }
+
         let Some(rect) = self.viewer_page_rect_for_page(page) else {
             return;
         };
@@ -59,6 +71,16 @@ impl PDFolioApp {
         (self.content_height() - self.viewer.viewer_viewport_height.max(1.0)).max(0.0)
     }
 
+    pub(super) fn scroll_viewer_to_offsets_task(&self) -> Task<Message> {
+        operation::scroll_to(
+            Id::new(VIEWER_SCROLLABLE_ID),
+            operation::AbsoluteOffset {
+                x: Some(self.viewer.horizontal_offset.max(0.0)),
+                y: Some(self.viewer.scroll_offset.max(0.0)),
+            },
+        )
+    }
+
     pub(super) fn clamp_horizontal_offset(&mut self) {
         self.viewer.horizontal_offset = self
             .viewer
@@ -77,7 +99,10 @@ impl PDFolioApp {
         self.viewer.last_scroll_offset = self.viewer.scroll_offset;
         self.viewer.scroll_offset =
             (self.viewer.scroll_offset + delta).clamp(0.0, self.max_scroll_offset());
-        self.request_visible_pages()
+        Task::batch([
+            self.request_visible_pages(),
+            self.scroll_viewer_to_offsets_task(),
+        ])
     }
 
     pub(super) fn scroll_page_mode_by(&mut self, direction: i16) -> Task<Message> {
@@ -87,7 +112,14 @@ impl PDFolioApp {
         let current = i32::from(self.current_page());
         let page_count = i32::from(doc.page_count());
         let next = (current + i32::from(direction)).clamp(0, page_count.saturating_sub(1));
-        self.jump_to_page(next as u16)
+        self.viewer.last_scroll_offset = self.viewer.scroll_offset;
+        self.viewer.page_scroll_page = next as u16;
+        self.viewer.scroll_offset = 0.0;
+        self.viewer.horizontal_offset = 0.0;
+        Task::batch([
+            self.request_visible_pages(),
+            self.scroll_viewer_to_offsets_task(),
+        ])
     }
 
     pub(super) fn pan_horizontally_by(&mut self, delta: f32) {
@@ -101,6 +133,9 @@ impl PDFolioApp {
         }
         let current_page = self.current_page();
         self.viewer.viewer_scroll_mode = mode;
+        if mode == ViewerScrollMode::Page {
+            self.viewer.page_scroll_page = current_page;
+        }
         self.viewer.horizontal_offset = 0.0;
         self.viewer.scroll_offset = 0.0;
         let zoom_task = self.apply_active_dimension_zoom();
@@ -166,8 +201,14 @@ impl PDFolioApp {
         self.clamp_horizontal_offset();
 
         match render_policy {
-            ZoomRenderPolicy::Immediate => self.request_visible_pages(),
-            ZoomRenderPolicy::Debounced => schedule_zoom_render(generation),
+            ZoomRenderPolicy::Immediate => Task::batch([
+                self.request_visible_pages(),
+                self.scroll_viewer_to_offsets_task(),
+            ]),
+            ZoomRenderPolicy::Debounced => Task::batch([
+                schedule_zoom_render(generation),
+                self.scroll_viewer_to_offsets_task(),
+            ]),
         }
     }
 

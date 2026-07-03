@@ -1,6 +1,9 @@
 use super::*;
 use iced::widget::column;
 
+const FOLDER_CARD_ICON_SVG: &[u8] = include_bytes!("../../../assets/icons/folder-svgrepo-com.svg");
+const PARENT_DIRECTORY_ICON_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 24"><path fill="currentColor" d="M3.4 1.25h6.2c.75 0 1.3.25 1.85.8l3.1 3.1H26c1.1 0 2 .9 2 2V20.7c0 1.1-.9 2-2 2h-5.2v-2.05h5.1V7.3H13.65l-4.05-4H4.05v17.35h10.95V22.7H3.4c-1.1 0-2-.9-2-2V3.25c0-1.1.9-2 2-2z"/><path fill="currentColor" d="M16 9.25l5.25 5.25-1.55 1.55-2.45-2.45v7.65c0 .78-.62 1.4-1.4 1.4h-1.1V13.6l-2.45 2.45-1.55-1.55z"/></svg>"##;
+
 pub(crate) fn view_folder_cards<'a>(
     app: &'a PDFolioApp,
     folders: Vec<Folder>,
@@ -40,6 +43,15 @@ pub(crate) fn folder_cards_per_row(app: &PDFolioApp) -> usize {
 }
 
 pub(crate) fn folder_cards_section_height(app: &PDFolioApp, folder_count: usize) -> f32 {
+    let parent_height = parent_directory_drop_section_height(app);
+    if folder_count == 0 {
+        return parent_height;
+    }
+
+    parent_height + folder_cards_height(app, folder_count)
+}
+
+pub(crate) fn folder_cards_height(app: &PDFolioApp, folder_count: usize) -> f32 {
     if folder_count == 0 {
         return 0.0;
     }
@@ -48,6 +60,71 @@ pub(crate) fn folder_cards_section_height(app: &PDFolioApp, folder_count: usize)
     rows as f32 * app.layout().library_folder_grid_row_height
         + rows.saturating_sub(1) as f32 * Spacing::SM
         + Spacing::MD
+}
+
+pub(crate) fn parent_directory_drop_section_height(app: &PDFolioApp) -> f32 {
+    if app.parent_directory_drop_box_visible() {
+        parent_directory_drop_box_height(app) + Spacing::MD
+    } else {
+        0.0
+    }
+}
+
+pub(crate) fn parent_directory_drop_box_height(app: &PDFolioApp) -> f32 {
+    app.layout().library_folder_grid_row_height
+}
+
+pub(crate) fn view_parent_directory_drop_box<'a>(
+    app: &'a PDFolioApp,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let active = app.parent_directory_drop_target_active();
+    let border_color = if active {
+        tokens.accent
+    } else {
+        tokens.text_secondary
+    };
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(
+        PARENT_DIRECTORY_ICON_SVG,
+    ))
+    .width(26.0)
+    .height(22.0)
+    .style(move |_, _| iced::widget::svg::Style {
+        color: Some(border_color),
+    });
+    let content = row![
+        icon,
+        text("Move to Parent Directory")
+            .size(FontSize::CONTROL)
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .color(border_color)
+    ]
+    .spacing(Spacing::SM)
+    .align_y(iced::Alignment::Center);
+
+    let drop_box = container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .style(move |_| {
+            let mut style = container_style(tokens, Class::LibraryFolderCard);
+            style.background = active
+                .then(|| iced::Background::Color(mix_color(tokens.surface, tokens.accent, 0.18)));
+            style.border.color = border_color;
+            style.border.width = if active { 2.0 } else { 1.5 };
+            style.border.radius = 8.0.into();
+            style
+        });
+
+    mouse_area(
+        container(drop_box)
+            .width(Length::Fill)
+            .height(parent_directory_drop_box_height(app)),
+    )
+    .on_enter(Message::ParentDirectoryDropTargetChanged(true))
+    .on_exit(Message::ParentDirectoryDropTargetChanged(false))
+    .into()
 }
 
 pub(crate) fn folder_grid_card<'a>(
@@ -144,11 +221,16 @@ pub(crate) fn folder_grid_card<'a>(
 }
 
 pub(crate) fn folder_icon<'a>(tokens: ThemeTokens, alpha: f32) -> Element<'a, Message> {
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(FOLDER_CARD_ICON_SVG))
+        .width(22.0)
+        .height(22.0)
+        .style(move |_, _| iced::widget::svg::Style {
+            color: Some(with_alpha(tokens.accent, alpha)),
+        });
     container(
-        text("DIR")
-            .size(FontSize::SM)
-            .font(ui_font(FontWeight::SEMIBOLD))
-            .color(with_alpha(tokens.accent, alpha)),
+        container(icon)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
     )
     .center(38.0)
     .height(28.0)

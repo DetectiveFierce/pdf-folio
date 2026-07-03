@@ -40,6 +40,12 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
     ) -> Option<canvas::Action<Message>> {
         match event {
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                if !self.app.viewer.modifiers.control()
+                    && self.app.viewer.viewer_scroll_mode != ViewerScrollMode::Horizontal
+                {
+                    return None;
+                }
+
                 let (delta_x, delta_y) =
                     scroll_delta_pixels(*delta, self.app.layout().line_scroll_pixels);
 
@@ -155,10 +161,7 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
         if self.app.viewer.doc.is_none() {
             return vec![frame.into_geometry()];
         };
-        for (page, rect) in self
-            .app
-            .viewer_page_rects_screen(bounds.width, bounds.height)
-        {
+        for (page, rect) in self.app.viewer_page_rects_visible_content() {
             let key = TileKey {
                 page,
                 width_px: self.app.render_width_px(),
@@ -249,10 +252,7 @@ impl canvas::Program<Message> for ViewerSelectionOverlay<'_> {
             return vec![frame.into_geometry()];
         };
 
-        for (page, rect) in self
-            .app
-            .viewer_page_rects_screen(bounds.width, bounds.height)
-        {
+        for (page, rect) in self.app.viewer_page_rects_visible_content() {
             draw_find_highlights(self.app, &mut frame, page, rect);
             draw_text_selection(self.app, &mut frame, page, rect);
         }
@@ -263,11 +263,11 @@ impl canvas::Program<Message> for ViewerSelectionOverlay<'_> {
 
 fn char_at_position(
     app: &PDFolioApp,
-    bounds: Rectangle,
+    _bounds: Rectangle,
     position: Point,
 ) -> Option<crate::viewer::state::ViewerTextAnchor> {
     app.viewer.doc.as_ref()?;
-    for (page, rect) in app.viewer_page_rects_screen(bounds.width, bounds.height) {
+    for (page, rect) in app.viewer_page_rects_visible_content() {
         if position.x >= rect.x
             && position.x <= rect.x + rect.width
             && position.y >= rect.y

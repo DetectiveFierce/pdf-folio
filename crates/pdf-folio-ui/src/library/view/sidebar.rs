@@ -360,8 +360,8 @@ pub(crate) fn view_selected_folder_sidebar<'a>(
         section_heading("Folder Details", tokens).width(Length::Fill),
         sidebar_chevron_button(
             CHEVRON_LEFT_SVG,
-            "Collapse Sidebar",
-            Message::CollapseLibrarySidebar,
+            "Clear selection",
+            Message::ClearLibrarySidebarDetails,
             tokens,
         ),
     ]
@@ -500,8 +500,8 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
         section_heading("PDF Details", tokens).width(Length::Fill),
         sidebar_chevron_button(
             CHEVRON_LEFT_SVG,
-            "Collapse Sidebar",
-            Message::CollapseLibrarySidebar,
+            "Clear selection",
+            Message::ClearLibrarySidebarDetails,
             tokens,
         ),
     ]
@@ -569,7 +569,7 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
     .into()
 }
 
-fn sidebar_scroll_direction() -> Direction {
+pub(crate) fn sidebar_scroll_direction() -> Direction {
     Direction::Vertical(
         Scrollbar::new()
             .width(4.0)
@@ -599,8 +599,8 @@ pub(crate) fn view_multi_selection_sidebar<'a>(
         section_heading("Selection", tokens).width(Length::Fill),
         sidebar_chevron_button(
             CHEVRON_LEFT_SVG,
-            "Collapse Sidebar",
-            Message::CollapseLibrarySidebar,
+            "Clear selection",
+            Message::ClearLibrarySidebarDetails,
             tokens,
         ),
     ]

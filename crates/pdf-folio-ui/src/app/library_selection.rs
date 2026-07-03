@@ -103,6 +103,13 @@ impl PDFolioApp {
         self.sync_details_editor_to_selection();
     }
 
+    pub(super) fn clear_library_sidebar_details(&mut self) {
+        self.clear_library_selection();
+        self.library.details_folder_id = None;
+        self.library.folder_details_sidebar_open = false;
+        self.library.folder_rename_input.clear();
+    }
+
     pub(super) fn select_folder_for_details(&mut self, folder_id: Option<FolderId>) {
         self.library.selected_library_entries.clear();
         self.library.library_selection_anchor = None;
@@ -123,6 +130,14 @@ impl PDFolioApp {
         self.library.details_folder_id = folder_id;
         self.library.folder_details_sidebar_open = false;
         self.sync_folder_rename_input();
+    }
+
+    pub(super) fn open_folder_from_tree(&mut self, folder_id: Option<FolderId>) {
+        self.library.selected_folder = folder_id.clone();
+        self.library.previous_tag_pill_view = None;
+        self.select_folder_in_tree(folder_id);
+        self.library.library_drag = None;
+        self.library.library_scroll_offset = 0.0;
     }
 
     pub(super) fn prune_selection_to_visible_entries(&mut self, visible_entries: &[LibraryEntry]) {

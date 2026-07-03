@@ -4,7 +4,7 @@ use crate::app_context_menu::{context_menu_capture_layer, view_context_menu_drop
 use crate::library::view::{
     chevron_button, floating_folder_drag_preview, floating_library_drag_preview,
     view_confirmation_dialog, view_create_folder_dialog, view_library,
-    view_raindrop_connect_dialog, view_raindrop_import_dialog,
+    view_library_move_picker_dialog, view_raindrop_connect_dialog, view_raindrop_import_dialog,
     view_raindrop_import_progress_dialog,
 };
 use crate::menu::{
@@ -15,6 +15,7 @@ use crate::viewer::canvas::{ViewerCanvas, ViewerSelectionOverlay};
 use crate::viewer::outline::{view_jump_dialog, view_sidebar};
 use crate::viewer::zoom::{zoom_control, zoom_menu};
 use crate::*;
+use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{canvas, column, row, stack};
 use std::time::Duration;
 
@@ -28,13 +29,36 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
                 container("").width(Length::Shrink).into()
             };
 
+            let content_size = app.viewer_content_size(app.viewer.viewer_viewport_width);
             let viewer = canvas(ViewerCanvas { app })
-                .width(Length::Fill)
-                .height(Length::Fill);
+                .width(Length::Fixed(content_size.width))
+                .height(Length::Fixed(content_size.height));
             let selection_overlay = canvas(ViewerSelectionOverlay { app })
+                .width(Length::Fixed(content_size.width))
+                .height(Length::Fixed(content_size.height));
+            let viewer_content = stack![viewer, selection_overlay]
+                .width(Length::Fixed(content_size.width))
+                .height(Length::Fixed(content_size.height));
+            let viewer_scroll = scrollable(viewer_content)
+                .id(Id::new(VIEWER_SCROLLABLE_ID))
+                .direction(Direction::Both {
+                    vertical: Scrollbar::default(),
+                    horizontal: Scrollbar::default(),
+                })
                 .width(Length::Fill)
-                .height(Length::Fill);
-            let mut viewer_stack = stack![viewer, selection_overlay]
+                .height(Length::Fill)
+                .style(move |_, status| scrollable_style(tokens, Class::ViewerCanvas, status))
+                .on_scroll(|viewport| {
+                    let offset = viewport.absolute_offset();
+                    let bounds = viewport.bounds();
+                    Message::ViewportChanged {
+                        horizontal_offset: offset.x,
+                        scroll_offset: offset.y,
+                        width: bounds.width,
+                        height: bounds.height,
+                    }
+                });
+            let mut viewer_stack = stack![viewer_scroll]
                 .width(Length::Fill)
                 .height(Length::Fill);
             if !app.viewer.toc_open {
@@ -129,6 +153,11 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
             .into()
     } else if app.library.create_folder_dialog_open {
         stack![menu_content, view_create_folder_dialog(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if app.library.move_picker.is_some() {
+        stack![menu_content, view_library_move_picker_dialog(app)]
             .width(Length::Fill)
             .height(Length::Fill)
             .into()

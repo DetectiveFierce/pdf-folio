@@ -6,18 +6,26 @@ use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{column, row, stack};
 use pdf_folio_ui_components::library::view::{
-    breadcrumb_button as component_breadcrumb_button, document_preview_lines, flush_media_style,
-    ghost_tags_row, library_drop_zone_card as component_library_drop_zone_card,
+    document_preview_lines, flush_media_style, ghost_tags_row,
+    library_drop_zone_card as component_library_drop_zone_card,
     library_drop_zone_row as component_library_drop_zone_row,
     library_grid_zoom_control as component_library_grid_zoom_control,
     library_layout_toggle_button as component_library_layout_toggle_button,
     library_metadata_density_picker as component_library_metadata_density_picker,
-    library_new_folder_button as component_library_new_folder_button,
     library_scrollable as component_library_scrollable,
     library_sort_picker as component_library_sort_picker, tags_row as component_tags_row,
     with_alpha,
 };
 use std::time::Duration;
+
+const LIBRARY_TOOLBAR_COMPACT_WIDTH: f32 = 760.0;
+const LIBRARY_TOOLBAR_NARROW_WIDTH: f32 = 600.0;
+const LIBRARY_BREADCRUMB_MAX_WIDTH: f32 = 150.0;
+const LIBRARY_BREADCRUMB_NARROW_WIDTH: f32 = 94.0;
+const LIBRARY_FILTER_PILL_MAX_WIDTH: f32 = 170.0;
+const LIBRARY_FILTER_PILL_NARROW_WIDTH: f32 = 112.0;
+const LIBRARY_REORDER_HINT_WIDTH: f32 = 190.0;
+const LIBRARY_REORDER_HINT_NARROW_WIDTH: f32 = 118.0;
 
 #[path = "view/dialogs.rs"]
 mod dialogs;
@@ -41,27 +49,25 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let folder_section_height = folder_cards_section_height(app, child_folders.len());
     let entry_scroll_offset = (app.library.library_scroll_offset - folder_section_height).max(0.0);
     let window = app.visible_library_entry_window_at(entries.len(), entry_scroll_offset);
-    let mut header = row![];
+    let toolbar_width = library_toolbar_available_width(app);
+    let compact_toolbar = toolbar_width < LIBRARY_TOOLBAR_COMPACT_WIDTH;
+    let narrow_toolbar = toolbar_width < LIBRARY_TOOLBAR_NARROW_WIDTH;
+    let mut search_row = row![];
     if !app.library.library_tag_sidebar_open {
-        header = header.push(sidebar_chevron_button(
+        search_row = search_row.push(sidebar_chevron_button(
             CHEVRON_RIGHT_SVG,
             "Expand Sidebar",
             Message::ExpandLibrarySidebar,
             tokens,
         ));
     }
-    let mut header = header
-        .push(
-            search_input_with_class(
-                "Search library",
-                &app.library.search_query,
-                tokens,
-                Class::LibrarySearchInput,
-                Message::SearchQueryChanged,
-            )
-            .id(Id::new(LIBRARY_SEARCH_INPUT_ID))
-            .width(Length::Fill),
-        )
+    search_row = search_row
+        .push(library_search_input(app, tokens))
+        .spacing(Spacing::MD)
+        .align_y(iced::Alignment::Center)
+        .width(Length::Fill);
+
+    let mut controls_row = row![]
         .push(component_library_sort_picker(
             app.library.library_sort_mode,
             &LIBRARY_SORT_OPTIONS,
@@ -74,21 +80,44 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             GRID_LAYOUT_SVG,
             LIST_LAYOUT_SVG,
             Message::ToggleViewMode,
-        ))
-        .push(component_library_metadata_density_picker(
+        ));
+    if !narrow_toolbar {
+        controls_row = controls_row.push(component_library_metadata_density_picker(
             app.library.library_metadata_density,
             &LIBRARY_METADATA_DENSITY_OPTIONS,
             tokens,
             Message::LibraryMetadataDensityChanged,
         ));
-    if app.viewer.doc.is_some() {
-        header = header.push(toolbar_button("Viewer", tokens).on_press(Message::BackToViewer));
     }
-    let header = header
-        .push(component_library_new_folder_button(tokens).on_press(Message::OpenCreateFolderDialog))
+    if app.viewer.doc.is_some() {
+        controls_row =
+            controls_row.push(toolbar_button("Viewer", tokens).on_press(Message::BackToViewer));
+    }
+    controls_row = controls_row
+        .push(
+            library_new_folder_button(tokens, narrow_toolbar)
+                .on_press(Message::OpenCreateFolderDialog),
+        )
         .spacing(Spacing::MD)
-        .align_y(iced::Alignment::Center);
-    let header = container(header)
+        .align_y(iced::Alignment::Center)
+        .width(if compact_toolbar {
+            Length::Shrink
+        } else {
+            Length::Fill
+        });
+    let header_content: Element<'_, Message> = if compact_toolbar {
+        column![search_row, controls_row]
+            .spacing(Spacing::SM)
+            .width(Length::Fill)
+            .into()
+    } else {
+        row![search_row, controls_row]
+            .spacing(Spacing::MD)
+            .align_y(iced::Alignment::Center)
+            .width(Length::Fill)
+            .into()
+    };
+    let header = container(header_content)
         .width(Length::Fill)
         .padding(Spacing::SM)
         .style(move |_| container_style(tokens, Class::LibraryControlBar));
@@ -150,12 +179,15 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         if bottom_spacer > 0.0 {
             rows = rows.push(container("").height(bottom_spacer));
         }
-        let scroll_content = if child_folders.is_empty() {
-            rows
-        } else {
-            column![view_folder_cards(app, child_folders.clone(), tokens), rows]
-                .spacing(Spacing::MD)
-        };
+        let mut scroll_content = column![].spacing(Spacing::MD);
+        if app.parent_directory_drop_box_visible() {
+            scroll_content = scroll_content.push(view_parent_directory_drop_box(app, tokens));
+        }
+        if !child_folders.is_empty() {
+            scroll_content =
+                scroll_content.push(view_folder_cards(app, child_folders.clone(), tokens));
+        }
+        scroll_content = scroll_content.push(rows);
         content = content.push(library_scrollable(scroll_content, tokens));
     } else {
         let layout = app.library_render_item_masonry_layout(&render_items);
@@ -210,12 +242,15 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             grid = grid.push(stack);
         }
         grid = grid.push(container("").width(app.layout().library_scrollbar_gutter));
-        let scroll_content = if child_folders.is_empty() {
-            column![grid]
-        } else {
-            column![view_folder_cards(app, child_folders.clone(), tokens), grid]
-                .spacing(Spacing::MD)
-        };
+        let mut scroll_content = column![].spacing(Spacing::MD);
+        if app.parent_directory_drop_box_visible() {
+            scroll_content = scroll_content.push(view_parent_directory_drop_box(app, tokens));
+        }
+        if !child_folders.is_empty() {
+            scroll_content =
+                scroll_content.push(view_folder_cards(app, child_folders.clone(), tokens));
+        }
+        scroll_content = scroll_content.push(grid);
         content = content.push(library_scrollable(scroll_content, tokens));
     }
 
@@ -240,6 +275,14 @@ pub(crate) fn view_library_breadcrumb_row<'a>(
     tokens: ThemeTokens,
     reorder_hint: &'a str,
 ) -> Element<'a, Message> {
+    let toolbar_width = library_toolbar_available_width(app);
+    let compact = toolbar_width < LIBRARY_TOOLBAR_COMPACT_WIDTH;
+    let narrow = toolbar_width < LIBRARY_TOOLBAR_NARROW_WIDTH;
+    let breadcrumb_width = if narrow {
+        LIBRARY_BREADCRUMB_NARROW_WIDTH
+    } else {
+        LIBRARY_BREADCRUMB_MAX_WIDTH
+    };
     let breadcrumbs = app.folder_breadcrumbs();
     let active_index = breadcrumbs.len().saturating_sub(1);
     let mut trail = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
@@ -259,39 +302,101 @@ pub(crate) fn view_library_breadcrumb_row<'a>(
             folder_id,
             index == active_index,
             tokens,
+            breadcrumb_width,
         ));
     }
 
+    let mut controls = row![
+        container(trail)
+            .width(if compact {
+                Length::FillPortion(3)
+            } else {
+                Length::Shrink
+            })
+            .clip(true),
+        library_quick_filter_chips(app, tokens),
+        library_filter_summary(app, tokens, narrow),
+    ]
+    .spacing(Spacing::MD)
+    .align_y(iced::Alignment::Center)
+    .width(Length::Fill);
+    controls = controls.push(component_library_grid_zoom_control(
+        LIBRARY_GRID_ZOOM_MIN,
+        app.library_grid_zoom_max(),
+        app.library_grid_zoom(),
+        LIBRARY_GRID_ZOOM_STEP,
+        app.library_grid_zoom_label(),
+        tokens,
+        Message::LibraryGridZoomChanged,
+    ));
+
+    let reorder_hint_width = if narrow {
+        LIBRARY_REORDER_HINT_NARROW_WIDTH
+    } else {
+        LIBRARY_REORDER_HINT_WIDTH
+    };
+    let visible_reorder_hint =
+        truncate_for_width_with_font(reorder_hint, reorder_hint_width, 0.0, FontSize::SM);
     row![
-        row![
-            trail.width(Length::Shrink),
-            library_quick_filter_chips(app, tokens),
-            library_filter_summary(app, tokens),
-            component_library_grid_zoom_control(
-                LIBRARY_GRID_ZOOM_MIN,
-                app.library_grid_zoom_max(),
-                app.library_grid_zoom(),
-                LIBRARY_GRID_ZOOM_STEP,
-                app.library_grid_zoom_label(),
-                tokens,
-                Message::LibraryGridZoomChanged,
-            ),
-        ]
-        .spacing(Spacing::MD)
-        .align_y(iced::Alignment::Center)
-        .width(Length::Fill),
-        text(reorder_hint)
+        controls,
+        text(visible_reorder_hint)
+            .width(reorder_hint_width)
             .size(FontSize::SM)
             .font(ui_font(FontWeight::REGULAR))
             .color(if app.can_drag_reorder_library() {
                 tokens.accent
             } else {
                 tokens.text_secondary
-            }),
+            })
+            .wrapping(Wrapping::None),
     ]
     .spacing(Spacing::MD)
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+pub(crate) fn library_search_input<'a>(
+    app: &'a PDFolioApp,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    search_input_with_class(
+        "Search library",
+        &app.library.search_query,
+        tokens,
+        Class::LibrarySearchInput,
+        Message::SearchQueryChanged,
+    )
+    .id(Id::new(LIBRARY_SEARCH_INPUT_ID))
+    .width(Length::Fill)
+    .into()
+}
+
+pub(crate) fn library_toolbar_available_width(app: &PDFolioApp) -> f32 {
+    let sidebar_width = if app.library.library_tag_sidebar_open {
+        app.library.library_tag_sidebar_width + app.layout().sidebar_resize_handle_width
+    } else {
+        0.0
+    };
+    (app.viewer.viewport_width - sidebar_width - Spacing::LG * 2.0 - Spacing::SM * 2.0).max(1.0)
+}
+
+pub(crate) fn library_new_folder_button<'a>(
+    tokens: ThemeTokens,
+    compact: bool,
+) -> iced::widget::Button<'a, Message> {
+    button(
+        text(if compact { "New" } else { "New folder" })
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary)
+            .wrapping(Wrapping::None),
+    )
+    .padding(if compact {
+        [Spacing::SM, Spacing::MD]
+    } else {
+        [Spacing::SM, Spacing::LG]
+    })
+    .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
 }
 
 pub(crate) fn library_quick_filter_chips<'a>(
@@ -329,11 +434,9 @@ pub(crate) fn library_quick_filter_chips<'a>(
 pub(crate) fn library_filter_summary<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
+    narrow: bool,
 ) -> Element<'a, Message> {
     let mut labels = Vec::new();
-    if let Some(folder_name) = app.selected_folder_name() {
-        labels.push(format!("Folder: {folder_name}"));
-    }
     if let Some(tag) = app.library.active_tag_filter.as_ref() {
         labels.push(format!("Tag: {tag}"));
     }
@@ -353,10 +456,16 @@ pub(crate) fn library_filter_summary<'a>(
     }
 
     let mut row = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
+    let pill_width = if narrow {
+        LIBRARY_FILTER_PILL_NARROW_WIDTH
+    } else {
+        LIBRARY_FILTER_PILL_MAX_WIDTH
+    };
     for label in labels {
+        let visible_label = truncate_for_width_with_font(&label, pill_width, 0.0, FontSize::SM);
         row = row.push(
             container(
-                text(label)
+                text(visible_label)
                     .size(FontSize::SM)
                     .font(ui_font(FontWeight::MEDIUM))
                     .color(tokens.text_primary)
@@ -426,8 +535,36 @@ pub(crate) fn breadcrumb_button<'a>(
     folder_id: Option<FolderId>,
     active: bool,
     tokens: ThemeTokens,
+    width: f32,
 ) -> Element<'a, Message> {
-    component_breadcrumb_button(label, active, tokens, Message::FolderSelected(folder_id))
+    let visible_label = truncate_for_width_with_font(&label, width, 0.0, FontSize::SM);
+    button(
+        text(visible_label)
+            .size(FontSize::SM)
+            .font(ui_font(if active {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::MEDIUM
+            }))
+            .color(if active {
+                tokens.text_primary
+            } else {
+                tokens.accent
+            })
+            .wrapping(Wrapping::None),
+    )
+    .padding([Spacing::XS, Spacing::SM])
+    .style(move |_, status| {
+        if active {
+            let active_style =
+                tokens.class_styles[Class::SidebarRow.index()].resolve(ComponentState::Active);
+            button_style(tokens, Class::SidebarRow, status).with_visual_override(active_style)
+        } else {
+            button_style(tokens, Class::SidebarRow, status)
+        }
+    })
+    .on_press(Message::FolderSelected(folder_id))
+    .into()
 }
 
 pub(crate) fn library_scrollable<'a>(

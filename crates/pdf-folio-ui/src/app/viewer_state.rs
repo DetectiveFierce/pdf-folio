@@ -74,6 +74,7 @@ impl PDFolioApp {
                 pending_document_open: false,
                 dismissed_document_errors: HashSet::new(),
                 cache: TileCache::with_default_capacity(),
+                page_scroll_page: 0,
                 scroll_offset: 0.0,
                 horizontal_offset: 0.0,
                 viewer_scroll_mode: ViewerScrollMode::Vertical,
@@ -147,6 +148,7 @@ impl PDFolioApp {
                 active_tag_filter: None,
                 active_reading_filter: None,
                 missing_filter_active: false,
+                previous_tag_pill_view: None,
                 tag_entry_id: None,
                 tag_input: String::new(),
                 selected_library_entries: HashSet::new(),
@@ -181,10 +183,12 @@ impl PDFolioApp {
                 last_library_click: None,
                 last_folder_click: None,
                 folder_drag_started_in_tree: false,
+                parent_directory_drop_scroll_adjusted: false,
                 library_card_hover_animations: HashMap::new(),
                 animation_now: Instant::now(),
                 library_drag: None,
                 folder_drag: None,
+                move_picker: None,
             },
             chrome: ChromeRuntime {
                 pending_confirmation: None,
@@ -234,6 +238,7 @@ impl PDFolioApp {
         self.viewer.expanded_outline_paths.clear();
         self.viewer.pending_renders.clear();
         self.viewer.page_fade_started.clear();
+        self.viewer.page_scroll_page = 0;
         self.viewer.scroll_offset = 0.0;
         self.viewer.last_scroll_offset = 0.0;
         self.viewer.horizontal_offset = 0.0;
@@ -297,9 +302,19 @@ impl PDFolioApp {
             .map_or(0, |entry| entry.last_page);
         let task = self.open_document(doc);
         self.viewer.last_scroll_offset = self.viewer.scroll_offset;
-        self.viewer.scroll_offset = self.page_top(last_page);
+        if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+            self.viewer.page_scroll_page = last_page;
+            self.viewer.scroll_offset = 0.0;
+            self.viewer.horizontal_offset = 0.0;
+        } else {
+            self.viewer.scroll_offset = self.page_top(last_page);
+        }
         self.clamp_scroll_offset();
-        Task::batch([task, self.request_visible_pages()])
+        Task::batch([
+            task,
+            self.request_visible_pages(),
+            self.scroll_viewer_to_offsets_task(),
+        ])
     }
 
     pub(super) fn request_visible_pages(&mut self) -> Task<Message> {
@@ -545,7 +560,10 @@ impl PDFolioApp {
         self.scroll_to_page_rect(selected.page, character.bounds.x, character.bounds.y);
         self.clamp_scroll_offset();
         self.clamp_horizontal_offset();
-        self.request_visible_pages()
+        Task::batch([
+            self.request_visible_pages(),
+            self.scroll_viewer_to_offsets_task(),
+        ])
     }
 
     pub(super) fn start_viewer_text_selection(&mut self, page: u16, char_index: usize) {
@@ -628,6 +646,15 @@ impl PDFolioApp {
             return 0..0;
         };
 
+        let page_count = doc.page_count();
+        if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+            let page = self
+                .viewer
+                .page_scroll_page
+                .min(page_count.saturating_sub(1));
+            return page..page.saturating_add(1).min(page_count);
+        }
+
         let viewport = Rectangle {
             x: self.viewer.horizontal_offset.max(0.0),
             y: self.viewer.scroll_offset.max(0.0),
@@ -644,7 +671,6 @@ impl PDFolioApp {
             }
         }
 
-        let page_count = doc.page_count();
         first.unwrap_or(0)..end.max(first.unwrap_or(0).saturating_add(1).min(page_count))
     }
 
@@ -697,36 +723,17 @@ impl PDFolioApp {
             .width
     }
 
-    pub(crate) fn viewer_page_rects_screen(
-        &self,
-        viewport_width: f32,
-        viewport_height: f32,
-    ) -> Vec<(u16, Rectangle)> {
-        self.viewer_page_rects_content(viewport_width)
+    pub(crate) fn viewer_page_rects_visible_content(&self) -> Vec<(u16, Rectangle)> {
+        let viewport = Rectangle {
+            x: self.viewer.horizontal_offset.max(0.0),
+            y: self.viewer.scroll_offset.max(0.0),
+            width: self.viewer.viewer_viewport_width.max(1.0),
+            height: self.viewer.viewer_viewport_height.max(1.0),
+        };
+
+        self.viewer_page_rects_content(self.viewer.viewer_viewport_width)
             .into_iter()
-            .map(|(page, rect)| {
-                (
-                    page,
-                    Rectangle::new(
-                        Point::new(
-                            rect.x - self.viewer.horizontal_offset,
-                            rect.y - self.viewer.scroll_offset,
-                        ),
-                        rect.size(),
-                    ),
-                )
-            })
-            .filter(|(_, rect)| {
-                rects_intersect(
-                    *rect,
-                    Rectangle {
-                        x: 0.0,
-                        y: 0.0,
-                        width: viewport_width.max(1.0),
-                        height: viewport_height.max(1.0),
-                    },
-                )
-            })
+            .filter(|(_, rect)| rects_intersect(*rect, viewport))
             .collect()
     }
 
@@ -741,14 +748,46 @@ impl PDFolioApp {
             return Vec::new();
         };
 
-        let groups = viewer_spread_groups(doc.page_count(), self.viewer.viewer_spread_mode);
         match self.viewer.viewer_scroll_mode {
-            ViewerScrollMode::Horizontal => self.horizontal_page_rects(&groups),
-            ViewerScrollMode::Wrapped => self.wrapped_page_rects(&groups, viewport_width),
-            ViewerScrollMode::Page | ViewerScrollMode::Vertical => {
+            ViewerScrollMode::Page => self.page_mode_rects(doc.page_count()),
+            ViewerScrollMode::Horizontal => {
+                let groups = viewer_spread_groups(doc.page_count(), self.viewer.viewer_spread_mode);
+                self.horizontal_page_rects(&groups)
+            }
+            ViewerScrollMode::Wrapped => {
+                let groups = viewer_spread_groups(doc.page_count(), self.viewer.viewer_spread_mode);
+                self.wrapped_page_rects(&groups, viewport_width)
+            }
+            ViewerScrollMode::Vertical => {
+                let groups = viewer_spread_groups(doc.page_count(), self.viewer.viewer_spread_mode);
                 self.vertical_page_rects(&groups)
             }
         }
+    }
+
+    pub(super) fn page_mode_rects(&self, page_count: u16) -> Vec<(u16, Rectangle)> {
+        if page_count == 0 {
+            return Vec::new();
+        }
+
+        let page = self
+            .viewer
+            .page_scroll_page
+            .min(page_count.saturating_sub(1));
+        let height = self.page_height(page);
+        let content_width = (f32::from(self.viewer.zoom_width) + Spacing::PAGE_GUTTER * 2.0)
+            .max(self.viewer.viewer_viewport_width)
+            .max(1.0);
+        let x =
+            ((content_width - f32::from(self.viewer.zoom_width)) / 2.0).max(Spacing::PAGE_GUTTER);
+
+        vec![(
+            page,
+            Rectangle::new(
+                Point::new(x, Spacing::PAGE_GUTTER),
+                Size::new(f32::from(self.viewer.zoom_width), height),
+            ),
+        )]
     }
 
     pub(super) fn vertical_page_rects(&self, groups: &[Vec<u16>]) -> Vec<(u16, Rectangle)> {
@@ -872,6 +911,21 @@ impl PDFolioApp {
                 self.viewer.viewer_viewport_height.max(1.0),
             );
         };
+        if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+            let page = self
+                .viewer
+                .page_scroll_page
+                .min(doc.page_count().saturating_sub(1));
+            return Size::new(
+                (f32::from(self.viewer.zoom_width) + Spacing::PAGE_GUTTER * 2.0)
+                    .max(viewport_width)
+                    .max(1.0),
+                (self.page_height(page) + Spacing::PAGE_GUTTER * 2.0)
+                    .max(self.viewer.viewer_viewport_height)
+                    .max(1.0),
+            );
+        }
+
         let groups = viewer_spread_groups(doc.page_count(), self.viewer.viewer_spread_mode);
         self.viewer_content_size_for_groups(&groups, viewport_width)
     }
@@ -922,6 +976,14 @@ impl PDFolioApp {
     }
 
     pub(crate) fn current_page(&self) -> u16 {
+        if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+            return self.viewer.doc.as_ref().map_or(0, |doc| {
+                self.viewer
+                    .page_scroll_page
+                    .min(doc.page_count().saturating_sub(1))
+            });
+        }
+
         self.visible_page_range().start
     }
 }

@@ -84,6 +84,8 @@ pub enum AppMenuAction {
     AddToFolder,
     /// Remove selection from the active folder.
     RemoveFromFolder,
+    /// Move the selected PDFs to a chosen library folder or root.
+    MoveTo,
     /// Delete selected PDFs from library metadata.
     DeleteFromLibrary,
     /// Toggle grid/list library layout.
@@ -122,6 +124,8 @@ pub enum AppMenuAction {
     RebuildThumbnails,
     /// Reindex selected PDFs for full-text search.
     Reindex,
+    /// Restore the library view shown before drilling into a tag pill.
+    RestoreTagPillView,
 }
 
 /// Right-opening submenus nested inside the View menu.
@@ -169,6 +173,7 @@ pub enum ContextMenuAction {
     AddToSelection,
     ClearSelection,
     AddTag,
+    MoveTo,
     RevealInFileManager,
     OpenContainingFolder,
     RelinkMissingFile,
@@ -182,6 +187,7 @@ pub enum ContextMenuAction {
     SelectFolder,
     NewFolder,
     RenameFolder,
+    MoveFolderTo,
     MoveFolderToRoot,
     MoveFolderUp,
     MoveFolderEarlier,
@@ -343,6 +349,7 @@ pub enum Message {
     ScrollChanged(f32),
     /// Scroll offset and viewport size changed.
     ViewportChanged {
+        horizontal_offset: f32,
         scroll_offset: f32,
         width: f32,
         height: f32,
@@ -547,6 +554,8 @@ pub enum Message {
     FolderClicked(Option<FolderId>),
     /// A library folder tree row was clicked.
     FolderTreeClicked(Option<FolderId>),
+    /// Open a library folder from the sidebar file tree.
+    FolderTreeFolderOpened(Option<FolderId>),
     /// A library entry selection checkbox was toggled.
     EntryCheckboxToggled(EntryId),
     /// The master visible-entry selection checkbox was clicked.
@@ -557,6 +566,8 @@ pub enum Message {
     AnimationFrame(Instant),
     /// Clear the current library PDF selection.
     ClearLibrarySelection,
+    /// Clear the current library sidebar details and return to navigation.
+    ClearLibrarySidebarDetails,
     /// Select all currently visible library PDFs.
     SelectAllVisibleLibraryEntries,
     /// Begin dragging a library entry for manual reordering.
@@ -571,6 +582,8 @@ pub enum Message {
     FolderDragMoved(Point),
     /// A folder drop target changed while dragging PDFs.
     FolderDropTargetChanged(Option<FolderId>),
+    /// The parent-directory drop target changed while dragging PDFs or folders.
+    ParentDirectoryDropTargetChanged(bool),
     /// Auto-scroll timer tick while dragging a library entry.
     LibraryAutoScrollTick(Instant),
     /// Finish the active library entry drag.
@@ -622,6 +635,10 @@ pub enum Message {
     LibraryWatchEvent(LibraryWatchEvent),
     /// Tag filter changed.
     TagFilterChanged(Option<String>),
+    /// A tag pill on a library card or row was clicked.
+    TagPillClicked(String),
+    /// Restore the library view shown before the last tag pill click.
+    RestoreLibraryViewBeforeTag,
     /// Reading-progress filter changed.
     ReadingFilterChanged(Option<LibraryReadingFilter>),
     /// Missing-files filter changed.
@@ -650,6 +667,18 @@ pub enum Message {
     MoveSelectedFolderEarlier,
     /// Move the selected folder later among its siblings.
     MoveSelectedFolderLater,
+    /// Open the folder picker for moving selected PDFs.
+    OpenMoveSelectionDialog,
+    /// Open the folder picker for moving the selected folder.
+    OpenMoveSelectedFolderDialog,
+    /// The move picker selected a destination folder, or the library root.
+    MovePickerDestinationSelected(Option<FolderId>),
+    /// Expand or collapse one folder branch in the move picker.
+    ToggleMovePickerFolder(FolderId),
+    /// Move the pending library content to the selected picker destination.
+    ConfirmMovePicker,
+    /// Dismiss the library move picker.
+    CancelMovePicker,
     /// Request confirmation before deleting the selected folder.
     RequestDeleteSelectedFolder,
     /// Delete the selected folder after confirmation.
@@ -732,7 +761,7 @@ pub enum Message {
     },
     /// A drag-to-folder assignment finished.
     FolderAssignmentFinished {
-        folder_id: FolderId,
+        folder_id: Option<FolderId>,
         label: String,
         updated: usize,
         errors: Vec<String>,

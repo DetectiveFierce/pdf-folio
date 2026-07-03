@@ -105,7 +105,8 @@ use crate::library::drag::{
 };
 #[cfg(test)]
 use crate::library::drag::{
-    folder_drop_target_at_cursor, LIBRARY_DRAG_AUTOSCROLL_MAX_SPEED, LIBRARY_FOLDER_DROP_DWELL_MS,
+    folder_drop_target_at_cursor, parent_directory_target_at_cursor,
+    LIBRARY_DRAG_AUTOSCROLL_MAX_SPEED, LIBRARY_FOLDER_DROP_DWELL_MS,
 };
 #[cfg(test)]
 use crate::library::filters::{
@@ -145,7 +146,7 @@ use crate::library::view::{
 };
 use crate::library::view::{
     folder_cards_per_row, folder_cards_section_height, format_count, masonry_target_index,
-    scroll_library_to_offset_task, shortest_column_index,
+    parent_directory_drop_box_height, scroll_library_to_offset_task, shortest_column_index,
 };
 use crate::menu::{app_menu_action_message, app_menu_bar_height};
 use crate::messages::{
@@ -202,6 +203,7 @@ const IBM_PLEX_SANS_BOLD: &[u8] = pdf_folio_style::IBM_PLEX_SANS_BOLD;
 const FILE_TREE_LABEL_SIZE: u32 = FontSize::MD;
 const FILE_TREE_ROW_HEIGHT: f32 = 26.0;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
+const VIEWER_SCROLLABLE_ID: &str = "viewer-scrollable";
 const LIBRARY_SEARCH_INPUT_ID: &str = "library-search-input";
 const VIEWER_FIND_INPUT_ID: &str = "viewer-find-input";
 const LIBRARY_FOLDER_RENAME_INPUT_ID: &str = "library-folder-rename-input";
@@ -321,6 +323,7 @@ pub struct ViewerRuntime {
     pub pending_document_open: bool,
     pub dismissed_document_errors: HashSet<String>,
     pub cache: TileCache,
+    pub page_scroll_page: u16,
     pub scroll_offset: f32,
     pub horizontal_offset: f32,
     pub viewer_scroll_mode: ViewerScrollMode,
@@ -387,6 +390,7 @@ pub struct LibraryRuntime {
     pub active_tag_filter: Option<String>,
     pub active_reading_filter: Option<LibraryReadingFilter>,
     pub missing_filter_active: bool,
+    pub previous_tag_pill_view: Option<LibraryViewSnapshot>,
     pub tag_entry_id: Option<EntryId>,
     pub tag_input: String,
     pub selected_library_entries: HashSet<EntryId>,
@@ -420,10 +424,39 @@ pub struct LibraryRuntime {
     pub last_library_click: Option<(EntryId, Instant)>,
     pub last_folder_click: Option<(Option<FolderId>, Instant)>,
     pub folder_drag_started_in_tree: bool,
+    pub parent_directory_drop_scroll_adjusted: bool,
     pub library_card_hover_animations: HashMap<EntryId, Animation<bool>>,
     pub animation_now: Instant,
     pub library_drag: Option<LibraryDragState>,
     pub folder_drag: Option<FolderDragState>,
+    pub move_picker: Option<LibraryMovePicker>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryMovePicker {
+    pub target: LibraryMoveTarget,
+    pub selected_destination: Option<FolderId>,
+    pub expanded_folders: HashSet<FolderId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LibraryMoveTarget {
+    SelectedEntries,
+    Folder(FolderId),
+}
+
+/// Restorable library view state captured before drilling into a tag pill.
+#[derive(Debug, Clone)]
+pub struct LibraryViewSnapshot {
+    pub search_query: String,
+    pub search_results: Option<Vec<LibraryEntry>>,
+    pub search_hit_pages: HashMap<EntryId, u16>,
+    pub active_tag_filter: Option<String>,
+    pub active_reading_filter: Option<LibraryReadingFilter>,
+    pub missing_filter_active: bool,
+    pub selected_folder: Option<FolderId>,
+    pub details_folder_id: Option<FolderId>,
+    pub library_scroll_offset: f32,
 }
 
 /// Runtime state owned by app chrome and modal overlays.

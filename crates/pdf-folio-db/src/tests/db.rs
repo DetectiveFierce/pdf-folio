@@ -276,6 +276,27 @@ fn moving_entry_to_folder_replaces_existing_folder_memberships() {
 }
 
 #[test]
+fn moving_entry_to_root_removes_folder_memberships() {
+    let db = test_db();
+    let entry_id = EntryId::new("paper");
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+
+    let first = db.create_folder("Reading", None).unwrap();
+    let second = db.create_folder("Research", None).unwrap();
+    db.add_entry_to_folder(&entry_id, &first).unwrap();
+    db.add_entry_to_folder(&entry_id, &second).unwrap();
+    db.move_entry_to_root(&entry_id).unwrap();
+
+    let entry = db
+        .entry_by_path(Path::new("/tmp/paper.pdf"))
+        .unwrap()
+        .unwrap();
+    assert!(entry.folders.is_empty());
+    assert!(db.entries_in_folder(&first).unwrap().is_empty());
+    assert!(db.entries_in_folder(&second).unwrap().is_empty());
+}
+
+#[test]
 fn library_preferences_round_trip() {
     let db = test_db();
     let folder = db.create_folder("Reading", None).unwrap();

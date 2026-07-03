@@ -31,6 +31,8 @@ pub struct LibraryDragState {
     pub multi: bool,
     /// Active folder target for additive assignment.
     pub drop_target: Option<FolderId>,
+    /// Whether the active drop target is the parent directory strip.
+    pub parent_drop_target: bool,
     /// Folder currently hovered while waiting for dwell activation.
     pub pending_drop_target: Option<FolderId>,
     /// Time when the current folder hover began.
@@ -61,6 +63,7 @@ impl LibraryDragState {
             target_index: source_index,
             multi,
             drop_target: None,
+            parent_drop_target: false,
             pending_drop_target: None,
             pending_drop_started_at: None,
             expanded_during_drag: HashSet::new(),
@@ -93,6 +96,20 @@ impl LibraryDragState {
         true
     }
 
+    pub fn set_parent_drop_target(&mut self, active: bool) -> bool {
+        if self.parent_drop_target == active {
+            return false;
+        }
+
+        self.parent_drop_target = active;
+        if active {
+            self.drop_target = None;
+            self.pending_drop_target = None;
+            self.pending_drop_started_at = None;
+        }
+        true
+    }
+
     pub fn pending_target_ready(&self, now: Instant) -> Option<FolderId> {
         if !self.active || self.drop_target.is_some() {
             return None;
@@ -110,6 +127,8 @@ pub struct FolderDragState {
     pub folder_id: FolderId,
     /// Active folder target for nesting.
     pub drop_target: Option<FolderId>,
+    /// Whether the active drop target is the parent directory strip.
+    pub parent_drop_target: bool,
     /// Folder currently hovered while waiting for dwell activation.
     pub pending_drop_target: Option<FolderId>,
     /// Time when the current folder hover began.
@@ -129,6 +148,7 @@ impl FolderDragState {
         Self {
             folder_id,
             drop_target: None,
+            parent_drop_target: false,
             pending_drop_target: None,
             pending_drop_started_at: None,
             expanded_during_drag: HashSet::new(),
@@ -164,6 +184,20 @@ impl FolderDragState {
         } else {
             None
         };
+        true
+    }
+
+    pub fn set_parent_drop_target(&mut self, active: bool) -> bool {
+        if self.parent_drop_target == active {
+            return false;
+        }
+
+        self.parent_drop_target = active;
+        if active {
+            self.drop_target = None;
+            self.pending_drop_target = None;
+            self.pending_drop_started_at = None;
+        }
         true
     }
 
@@ -361,4 +395,21 @@ pub fn folder_drop_target_at_cursor(
                 && cursor.y <= bounds.y + bounds.height
         })
         .map(|(folder_id, _)| folder_id.clone())
+}
+
+pub fn parent_directory_target_at_cursor(
+    cursor: Point,
+    viewport_x: f32,
+    viewport_y: f32,
+    scroll_offset: f32,
+    width: f32,
+    height: f32,
+) -> bool {
+    if width <= 0.0 || height <= 0.0 {
+        return false;
+    }
+
+    let content_x = cursor.x - viewport_x;
+    let content_y = cursor.y - viewport_y + scroll_offset;
+    content_x >= 0.0 && content_x <= width && content_y >= 0.0 && content_y <= height
 }

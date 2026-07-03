@@ -28,20 +28,8 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
             Task::none()
         }
         Shortcut::ReloadStyles => Task::done(Message::ReloadStyles),
-        Shortcut::PageDown => {
-            if app.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
-                app.scroll_page_mode_by(1)
-            } else {
-                app.scroll_by(app.viewer.viewer_viewport_height * 0.86)
-            }
-        }
-        Shortcut::PageUp => {
-            if app.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
-                app.scroll_page_mode_by(-1)
-            } else {
-                app.scroll_by(-(app.viewer.viewer_viewport_height * 0.86))
-            }
-        }
+        Shortcut::PageDown => app.scroll_by(app.viewer.viewer_viewport_height * 0.86),
+        Shortcut::PageUp => app.scroll_by(-(app.viewer.viewer_viewport_height * 0.86)),
         Shortcut::FineScroll(delta) => {
             if app.viewer.viewer_scroll_mode == ViewerScrollMode::Horizontal {
                 app.pan_horizontally_by(f32::from(delta));
@@ -144,6 +132,8 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 app.viewer.jump_input.clear();
             } else if app.library.create_folder_dialog_open {
                 app.library.create_folder_dialog_open = false;
+            } else if app.library.move_picker.is_some() {
+                app.library.move_picker = None;
             } else if app.library.raindrop_connect_dialog_open {
                 app.library.raindrop_connect_dialog_open = false;
             } else if app.library.raindrop_import_dialog_open {

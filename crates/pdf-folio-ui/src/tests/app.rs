@@ -224,6 +224,65 @@ fn prefetch_page_order_prioritizes_visible_then_directional_margin() {
 }
 
 #[test]
+fn visible_page_requests_follow_scroll_position_deep_in_document() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/phase1-multipage.pdf");
+    let doc = Arc::new(PdfDoc::open(&fixture).expect("fixture should open"));
+    assert!(doc.page_count() > 80);
+
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    let _ = app.open_document(doc);
+    app.viewer.viewer_viewport_width = 720.0;
+    app.viewer.viewer_viewport_height = 900.0;
+    app.viewer.zoom_width = 600;
+    app.viewer.last_scroll_offset = app.viewer.scroll_offset;
+    app.viewer.scroll_offset = app.page_top(83);
+    app.clamp_scroll_offset();
+
+    let visible = app.visible_page_range();
+    assert!(visible.start >= 80, "visible range was {visible:?}");
+
+    let _ = app.request_visible_pages();
+    assert!(
+        app.viewer
+            .pending_renders
+            .keys()
+            .any(|key| key.page >= visible.start),
+        "late visible pages were not queued for rendering"
+    );
+}
+
+#[test]
+fn page_scroll_mode_lays_out_only_the_active_page() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/phase1-multipage.pdf");
+    let doc = Arc::new(PdfDoc::open(&fixture).expect("fixture should open"));
+    assert!(doc.page_count() > 20);
+
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    let _ = app.open_document(doc);
+    let _ = app.set_viewer_scroll_mode(ViewerScrollMode::Page);
+    let _ = app.jump_to_page(20);
+
+    let rects = app.viewer_page_rects_content(app.viewer.viewer_viewport_width);
+    assert_eq!(
+        rects.iter().map(|(page, _)| *page).collect::<Vec<_>>(),
+        vec![20]
+    );
+    assert_eq!(app.visible_page_range(), 20..21);
+
+    let page_mode_height = app.content_height();
+    let _ = app.set_viewer_scroll_mode(ViewerScrollMode::Vertical);
+    assert!(app.content_height() > page_mode_height * 10.0);
+
+    let _ = app.set_viewer_scroll_mode(ViewerScrollMode::Page);
+    let _ = app.jump_to_page(20);
+    let _ = app.scroll_by(10_000.0);
+    assert_eq!(app.current_page(), 20);
+    assert_eq!(app.visible_page_range(), 20..21);
+}
+
+#[test]
 fn stale_page_render_completion_is_discarded() {
     let mut app = PDFolioApp::new().expect("app should initialize");
     let key = TileKey {
@@ -271,6 +330,43 @@ fn root_library_scope_shows_only_unfiled_entries() {
     assert!(!entry_visible_in_folder_scope(filed, None));
     assert!(entry_visible_in_folder_scope(filed, Some(&folder)));
     assert!(!entry_visible_in_folder_scope(unfiled, Some(&folder)));
+}
+
+#[test]
+fn double_clicking_folder_in_file_tree_keeps_navigation_sidebar_open() {
+    let db = test_db("file-tree-double-click");
+    let folder_id = db.create_folder("Reading", None).unwrap();
+
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.library.library_folders = db.get_folders().unwrap();
+
+    let _ = update(
+        &mut app,
+        Message::FolderTreeFolderOpened(Some(folder_id.clone())),
+    );
+
+    assert_eq!(app.library.selected_folder.as_ref(), Some(&folder_id));
+    assert_eq!(app.library.details_folder_id.as_ref(), Some(&folder_id));
+    assert!(!app.library.folder_details_sidebar_open);
+}
+
+#[test]
+fn detail_sidebar_chevron_clears_details_before_sidebar_can_collapse() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    let folder_id = FolderId::new("folder-reading");
+    app.library.library_tag_sidebar_open = true;
+    app.library.details_folder_id = Some(folder_id);
+    app.library.folder_details_sidebar_open = true;
+
+    let _ = update(&mut app, Message::ClearLibrarySidebarDetails);
+
+    assert!(app.library.library_tag_sidebar_open);
+    assert!(app.library.details_folder_id.is_none());
+    assert!(!app.library.folder_details_sidebar_open);
+
+    let _ = update(&mut app, Message::CollapseLibrarySidebar);
+
+    assert!(!app.library.library_tag_sidebar_open);
 }
 
 #[test]
@@ -457,6 +553,42 @@ fn folder_card_target_hit_test_uses_grid_cells() {
         ),
         Some(third)
     );
+}
+
+#[test]
+fn parent_directory_target_hit_test_uses_top_strip() {
+    assert!(parent_directory_target_at_cursor(
+        Point::new(40.0, 28.0),
+        10.0,
+        12.0,
+        0.0,
+        240.0,
+        86.0,
+    ));
+    assert!(parent_directory_target_at_cursor(
+        Point::new(40.0, 28.0),
+        10.0,
+        12.0,
+        20.0,
+        240.0,
+        86.0,
+    ));
+    assert!(!parent_directory_target_at_cursor(
+        Point::new(260.0, 28.0),
+        10.0,
+        12.0,
+        0.0,
+        240.0,
+        86.0,
+    ));
+    assert!(!parent_directory_target_at_cursor(
+        Point::new(40.0, 100.0),
+        10.0,
+        12.0,
+        0.0,
+        240.0,
+        86.0,
+    ));
 }
 
 #[test]

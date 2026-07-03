@@ -1244,8 +1244,18 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.last_folder_click = Some((folder_id.clone(), now));
 
             if is_double_click {
-                return Task::done(Message::FolderSelected(folder_id));
+                return Task::done(Message::FolderTreeFolderOpened(folder_id));
             }
+        }
+        Message::FolderTreeFolderOpened(folder_id) => {
+            app.open_folder_from_tree(folder_id);
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return Task::batch([
+                save_library_preferences_task(app),
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(0.0),
+            ]);
         }
         Message::EntryCheckboxToggled(entry_id) => {
             app.toggle_library_entry_selection(entry_id);
@@ -1277,6 +1287,9 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::ClearLibrarySelection => {
             app.clear_library_selection();
         }
+        Message::ClearLibrarySidebarDetails => {
+            app.clear_library_sidebar_details();
+        }
         Message::SelectAllVisibleLibraryEntries => {
             app.select_all_visible_library_entries();
         }
@@ -1288,6 +1301,9 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::FolderDropTargetChanged(folder_id) => {
             app.set_folder_drop_hover_target(folder_id, Instant::now());
+        }
+        Message::ParentDirectoryDropTargetChanged(active) => {
+            app.set_parent_directory_drop_hover_target(active);
         }
         Message::LibraryAutoScrollTick(tick) => {
             return app.auto_scroll_library_drag(tick);
@@ -1419,13 +1435,65 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::TagFilterChanged(tag) => {
             app.library.active_tag_filter = tag;
+            app.library.previous_tag_pill_view = None;
             app.library.library_drag = None;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
             return app.request_visible_thumbnails();
         }
+        Message::TagPillClicked(tag) => {
+            app.library.previous_tag_pill_view = Some(LibraryViewSnapshot {
+                search_query: app.library.search_query.clone(),
+                search_results: app.library.search_results.clone(),
+                search_hit_pages: app.library.search_hit_pages.clone(),
+                active_tag_filter: app.library.active_tag_filter.clone(),
+                active_reading_filter: app.library.active_reading_filter,
+                missing_filter_active: app.library.missing_filter_active,
+                selected_folder: app.library.selected_folder.clone(),
+                details_folder_id: app.library.details_folder_id.clone(),
+                library_scroll_offset: app.library.library_scroll_offset,
+            });
+            app.library.search_query.clear();
+            app.library.search_results = None;
+            app.library.search_hit_pages.clear();
+            app.library.active_tag_filter = Some(tag);
+            app.library.active_reading_filter = None;
+            app.library.missing_filter_active = false;
+            app.library.selected_folder = None;
+            app.library.details_folder_id = None;
+            app.library.library_drag = None;
+            app.library.library_scroll_offset = 0.0;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return Task::batch([
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(0.0),
+            ]);
+        }
+        Message::RestoreLibraryViewBeforeTag => {
+            if let Some(snapshot) = app.library.previous_tag_pill_view.take() {
+                app.library.search_query = snapshot.search_query;
+                app.library.search_results = snapshot.search_results;
+                app.library.search_hit_pages = snapshot.search_hit_pages;
+                app.library.active_tag_filter = snapshot.active_tag_filter;
+                app.library.active_reading_filter = snapshot.active_reading_filter;
+                app.library.missing_filter_active = snapshot.missing_filter_active;
+                app.library.selected_folder = snapshot.selected_folder;
+                app.library.details_folder_id = snapshot.details_folder_id;
+                app.library.library_drag = None;
+                app.library.library_scroll_offset = snapshot.library_scroll_offset.max(0.0);
+                app.sync_folder_rename_input();
+                let visible_entries = app.visible_library_entries();
+                app.prune_selection_to_visible_entries(&visible_entries);
+                return Task::batch([
+                    app.request_visible_thumbnails(),
+                    scroll_library_to_offset_task(app.library.library_scroll_offset),
+                ]);
+            }
+        }
         Message::ReadingFilterChanged(filter) => {
             app.library.active_reading_filter = filter;
+            app.library.previous_tag_pill_view = None;
             app.library.library_drag = None;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
@@ -1433,6 +1501,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::MissingFilterChanged(active) => {
             app.library.missing_filter_active = active;
+            app.library.previous_tag_pill_view = None;
             app.library.library_drag = None;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
@@ -1440,6 +1509,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::FolderSelected(folder_id) => {
             app.library.selected_folder = folder_id.clone();
+            app.library.previous_tag_pill_view = None;
             app.select_folder_for_details(folder_id);
             app.sync_folder_rename_input();
             app.library.library_drag = None;
@@ -1461,6 +1531,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.missing_filter_active = false;
             app.library.selected_folder = None;
             app.library.details_folder_id = None;
+            app.library.previous_tag_pill_view = None;
             app.library.library_drag = None;
             app.library.library_scroll_offset = 0.0;
             let visible_entries = app.visible_library_entries();
@@ -1556,6 +1627,96 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             };
             app.library.library_status = Some(String::from("Moving folder later..."));
             return persist_manual_folder_order_task(Arc::clone(&app.db), parent_id, folder_ids);
+        }
+        Message::OpenMoveSelectionDialog => {
+            if app.library.selected_library_entries.is_empty() {
+                return Task::none();
+            }
+            app.chrome.open_app_menu = None;
+            app.chrome.open_context_menu = None;
+            app.chrome.open_selection_menu = None;
+            app.library.move_picker = Some(LibraryMovePicker {
+                target: LibraryMoveTarget::SelectedEntries,
+                selected_destination: app.library.selected_folder.clone(),
+                expanded_folders: app.move_picker_expanded_folders(),
+            });
+        }
+        Message::OpenMoveSelectedFolderDialog => {
+            let Some(folder_id) = app.library.details_folder_id.clone() else {
+                return Task::none();
+            };
+            let selected_destination = app
+                .library
+                .library_folders
+                .iter()
+                .find(|folder| folder.id == folder_id)
+                .and_then(|folder| folder.parent_id.clone());
+            app.chrome.open_app_menu = None;
+            app.chrome.open_context_menu = None;
+            app.chrome.open_selection_menu = None;
+            app.library.move_picker = Some(LibraryMovePicker {
+                target: LibraryMoveTarget::Folder(folder_id),
+                selected_destination,
+                expanded_folders: app.move_picker_expanded_folders(),
+            });
+        }
+        Message::MovePickerDestinationSelected(destination) => {
+            let Some(picker) = app.library.move_picker.as_mut() else {
+                return Task::none();
+            };
+            if let LibraryMoveTarget::Folder(folder_id) = &picker.target {
+                if destination.as_ref() == Some(folder_id)
+                    || destination.as_ref().is_some_and(|destination| {
+                        !folder_can_move_into(&app.library.library_folders, folder_id, destination)
+                    })
+                {
+                    return Task::none();
+                }
+            }
+            picker.selected_destination = destination;
+        }
+        Message::ToggleMovePickerFolder(folder_id) => {
+            let Some(picker) = app.library.move_picker.as_mut() else {
+                return Task::none();
+            };
+            if !picker.expanded_folders.insert(folder_id.clone()) {
+                picker.expanded_folders.remove(&folder_id);
+            }
+        }
+        Message::CancelMovePicker => {
+            app.library.move_picker = None;
+        }
+        Message::ConfirmMovePicker => {
+            let Some(picker) = app.library.move_picker.take() else {
+                return Task::none();
+            };
+            match picker.target {
+                LibraryMoveTarget::SelectedEntries => {
+                    let entry_ids = app
+                        .library
+                        .selected_library_entries
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if entry_ids.is_empty() {
+                        return Task::none();
+                    }
+                    app.start_bulk_operation_progress("Moving", entry_ids.len());
+                    return move_entries_to_folder_task(
+                        Arc::clone(&app.db),
+                        entry_ids,
+                        picker.selected_destination,
+                    );
+                }
+                LibraryMoveTarget::Folder(folder_id) => {
+                    app.library.library_status = Some(String::from("Moving folder..."));
+                    return move_folder_task(
+                        Arc::clone(&app.db),
+                        folder_id,
+                        picker.selected_destination,
+                    );
+                }
+            }
         }
         Message::RequestDeleteSelectedFolder => {
             if let Some(folder_id) = app.library.details_folder_id.clone() {
@@ -1989,7 +2150,9 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_status = Some(if errors.is_empty() {
                 app.library.library_error = None;
                 if updated > 0 {
-                    app.start_folder_drop_flash(folder_id, Instant::now());
+                    if let Some(folder_id) = folder_id {
+                        app.start_folder_drop_flash(folder_id, Instant::now());
+                    }
                 }
                 format!("{label} {updated} PDFs.")
             } else {
@@ -2088,6 +2251,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.viewer.viewer_find.open = false;
             } else if app.library.create_folder_dialog_open {
                 app.library.create_folder_dialog_open = false;
+            } else if app.library.move_picker.is_some() {
+                app.library.move_picker = None;
             } else if app.library.raindrop_connect_dialog_open {
                 app.library.raindrop_connect_dialog_open = false;
             } else if app.library.raindrop_import_dialog_open {
@@ -2206,11 +2371,13 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return Task::batch([render_task, progress_task]);
         }
         Message::ViewportChanged {
+            horizontal_offset,
             scroll_offset,
             width,
             height,
         } => {
             app.viewer.last_scroll_offset = app.viewer.scroll_offset;
+            app.viewer.horizontal_offset = horizontal_offset;
             app.viewer.scroll_offset = scroll_offset;
             app.viewer.viewer_viewport_width = width.max(1.0);
             app.viewer.viewer_viewport_height = height.max(1.0);
@@ -2274,13 +2441,20 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 let delta = if delta_x != 0.0 { delta_x } else { delta_y };
                 app.viewer.horizontal_offset =
                     (app.viewer.horizontal_offset - delta).clamp(0.0, app.max_horizontal_offset());
-                return app.request_visible_pages();
+                return Task::batch([
+                    app.request_visible_pages(),
+                    app.scroll_viewer_to_offsets_task(),
+                ]);
             }
 
             if app.viewer.modifiers.shift() || delta_x != 0.0 {
                 let delta = if delta_x != 0.0 { delta_x } else { delta_y };
                 app.viewer.horizontal_offset =
                     (app.viewer.horizontal_offset - delta).clamp(0.0, app.max_horizontal_offset());
+                return Task::batch([
+                    app.request_visible_pages(),
+                    app.scroll_viewer_to_offsets_task(),
+                ]);
             } else {
                 app.viewer.last_scroll_offset = app.viewer.scroll_offset;
                 app.viewer.scroll_offset =

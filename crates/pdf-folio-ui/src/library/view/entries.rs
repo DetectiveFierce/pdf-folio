@@ -1,6 +1,8 @@
 use super::*;
 use iced::widget::column;
 
+const LIBRARY_CARD_TAG_ROW_LEFT_SHIFT: f32 = -4.0;
+
 pub(crate) fn library_entry_card<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -10,6 +12,7 @@ pub(crate) fn library_entry_card<'a>(
     let entry_id = entry.id.clone();
     let selected = app.library.selected_library_entries.contains(&entry_id);
     let title = entry_title(&entry);
+    let tags = entry.tags.iter().take(3).cloned().collect::<Vec<_>>();
     let author = entry
         .display_author
         .clone()
@@ -37,18 +40,36 @@ pub(crate) fn library_entry_card<'a>(
     };
     let top_lift_space = LIBRARY_CARD_HOVER_LIFT * (1.0 - hover_progress);
     let bottom_lift_space = LIBRARY_CARD_HOVER_LIFT * hover_progress;
-    let mut info = column![
-        truncated_title(title, text_width, tokens, content_alpha, title_font_size),
+    let mut info = column![truncated_title(
+        title,
+        text_width,
+        tokens,
+        content_alpha,
+        title_font_size
+    ),]
+    .spacing(app.library_card_spacing())
+    .padding(app.library_card_padding())
+    .height(app.library_card_info_height())
+    .width(Length::Fill);
+    if !tags.is_empty() {
+        info = info.push(if mode != LibraryEntryRenderMode::Normal {
+            compact_tags_row(tags, tokens, content_alpha, None)
+        } else {
+            compact_tags_row(
+                tags,
+                tokens,
+                content_alpha,
+                Some(|tag| Message::TagPillClicked(tag)),
+            )
+        });
+    }
+    info = info.push(
         text(author)
             .size(metadata_font_size)
             .font(ui_font(FontWeight::REGULAR))
             .color(text_secondary)
             .wrapping(Wrapping::None),
-    ]
-    .spacing(app.library_card_spacing())
-    .padding(app.library_card_padding())
-    .height(app.library_card_info_height())
-    .width(Length::Fill);
+    );
     if let Some(metadata_label) = metadata_label {
         info = info.push(
             text(metadata_label)
@@ -190,7 +211,7 @@ pub(crate) fn library_entry_row<'a>(
         component_tags_row(
             tags,
             tokens,
-            |tag| Message::TagFilterChanged(Some(tag)),
+            Message::TagPillClicked,
             Message::StartTagEntry(entry_id.clone()),
         )
     });
@@ -264,6 +285,45 @@ pub(crate) fn library_entry_row<'a>(
             area.into()
         }
     }
+}
+
+fn compact_tags_row<'a>(
+    tags: Vec<String>,
+    tokens: ThemeTokens,
+    alpha: f32,
+    on_tag: Option<fn(String) -> Message>,
+) -> Element<'a, Message> {
+    let mut row = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
+    for tag in tags {
+        let pill: Element<'a, Message> = if let Some(on_tag) = on_tag {
+            tag_pill(tag.clone(), tokens).on_press(on_tag(tag)).into()
+        } else {
+            container(
+                text(tag)
+                    .size(FontSize::SM)
+                    .font(ui_font(FontWeight::MEDIUM))
+                    .color(with_alpha(tokens.text_secondary, alpha)),
+            )
+            .padding([Spacing::XS, Spacing::MD])
+            .style(move |_| {
+                let mut style = container_style(tokens, Class::TagPill);
+                if let Some(iced::Background::Color(mut background)) = style.background {
+                    background.a *= alpha;
+                    style.background = Some(iced::Background::Color(background));
+                }
+                style.border.color = with_alpha(style.border.color, alpha);
+                style
+            })
+            .into()
+        };
+        row = row.push(pill);
+    }
+    container(row)
+        .padding(iced::Padding {
+            left: LIBRARY_CARD_TAG_ROW_LEFT_SHIFT,
+            ..iced::Padding::ZERO
+        })
+        .into()
 }
 
 pub(crate) fn library_entry_container_style(

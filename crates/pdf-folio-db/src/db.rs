@@ -916,6 +916,20 @@ impl Db {
         Ok(())
     }
 
+    /// Moves an entry to the library root by removing all folder memberships.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot delete memberships.
+    pub fn move_entry_to_root(&self, entry_id: &EntryId) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "DELETE FROM entry_folders WHERE entry_id = ?1",
+            params![entry_id.as_str()],
+        )?;
+        Ok(())
+    }
+
     /// Removes an entry from a folder.
     ///
     /// # Errors
