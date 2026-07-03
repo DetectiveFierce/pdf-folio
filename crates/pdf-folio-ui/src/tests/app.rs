@@ -149,6 +149,107 @@ fn viewer_spread_groups_leave_cover_alone_for_even_spreads() {
 }
 
 #[test]
+fn selected_render_key_prefers_exact_preview_then_nearest() {
+    let target = TileKey {
+        page: 2,
+        width_px: 1000,
+    };
+    let keys = vec![
+        TileKey {
+            page: 2,
+            width_px: 760,
+        },
+        TileKey {
+            page: 2,
+            width_px: 900,
+        },
+        TileKey {
+            page: 1,
+            width_px: 1000,
+        },
+    ];
+
+    assert_eq!(
+        selected_render_key(keys.iter(), target, Some(760), true),
+        Some(TileKey {
+            page: 2,
+            width_px: 760
+        })
+    );
+
+    assert_eq!(
+        selected_render_key(keys.iter(), target, None, true),
+        Some(TileKey {
+            page: 2,
+            width_px: 900
+        })
+    );
+
+    let keys_with_exact = keys
+        .iter()
+        .copied()
+        .chain(std::iter::once(target))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        selected_render_key(keys_with_exact.iter(), target, Some(760), true),
+        Some(target)
+    );
+}
+
+#[test]
+fn selected_render_key_returns_none_without_same_page_image() {
+    let target = TileKey {
+        page: 2,
+        width_px: 1000,
+    };
+    let keys = [TileKey {
+        page: 1,
+        width_px: 1000,
+    }];
+
+    assert_eq!(selected_render_key(keys.iter(), target, None, true), None);
+}
+
+#[test]
+fn prefetch_page_order_prioritizes_visible_then_directional_margin() {
+    assert_eq!(
+        prefetch_page_order_for_range(4..6, 10, true),
+        vec![4, 5, 3, 6, 7, 8]
+    );
+    assert_eq!(
+        prefetch_page_order_for_range(4..6, 10, false),
+        vec![4, 5, 3, 6, 2, 1]
+    );
+    assert_eq!(prefetch_page_order_for_range(0..1, 2, false), vec![0, 1]);
+}
+
+#[test]
+fn stale_page_render_completion_is_discarded() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    let key = TileKey {
+        page: 0,
+        width_px: 800,
+    };
+    app.zoom_generation = 2;
+    app.pending_renders.insert(key, Some(1));
+
+    let _ = update(
+        &mut app,
+        Message::PageRendered {
+            key,
+            data: Vec::new(),
+            width: 1,
+            height: 1,
+            generation: Some(1),
+        },
+    );
+
+    assert!(!app.rendered_pages.contains_key(&key));
+    assert!(app.cache.is_empty());
+    assert!(!app.pending_renders.contains_key(&key));
+}
+
+#[test]
 fn root_library_scope_shows_only_unfiled_entries() {
     let db = test_db("root-folder-scope");
     db.insert_entry(&test_new_entry("unfiled")).unwrap();

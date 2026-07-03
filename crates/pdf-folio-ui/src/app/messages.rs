@@ -270,6 +270,7 @@ pub enum Message {
         data: Vec<u8>,
         width: u16,
         height: u16,
+        generation: Option<u64>,
     },
     /// A thumbnail render finished.
     ThumbnailReady {

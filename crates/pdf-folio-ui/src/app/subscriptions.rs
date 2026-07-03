@@ -10,7 +10,7 @@ use iced::{event, mouse, stream, time, Event, Subscription};
 use notify::{EventKind, RecursiveMode, Watcher};
 use pdf_folio_library::LibraryWatcher;
 
-use super::{shortcuts, AppMode, PDFolioApp, LIBRARY_CARD_HOVER_TICK_MS};
+use super::{shortcuts, AppMode, PDFolioApp, LIBRARY_CARD_HOVER_TICK_MS, VIEWER_ANIMATION_TICK_MS};
 use crate::library::drag::LIBRARY_DRAG_AUTOSCROLL_TICK_MS;
 use crate::messages::Message;
 
@@ -93,6 +93,10 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
             || app.folder_drop_flash.is_some())
     {
         time::every(Duration::from_millis(LIBRARY_CARD_HOVER_TICK_MS)).map(Message::AnimationFrame)
+    } else if app.mode == AppMode::Viewer
+        && (app.zoom_preview_width_px.is_some() || app.viewer_page_fade_active())
+    {
+        time::every(Duration::from_millis(VIEWER_ANIMATION_TICK_MS)).map(Message::AnimationFrame)
     } else {
         Subscription::none()
     };

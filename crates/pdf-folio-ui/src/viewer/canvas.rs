@@ -149,7 +149,29 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
             };
 
             if let Some(rendered) = self.app.rendered_page_for_draw(key) {
-                frame.draw_image(rect, canvas::Image::new(rendered.handle.clone()).snap(true));
+                if let Some(progress) = self.app.page_fade_progress(key) {
+                    if progress < 1.0 {
+                        if let Some(fallback) = self.app.fallback_rendered_page_for_draw(key) {
+                            frame.draw_image(
+                                rect,
+                                canvas::Image::new(fallback.handle.clone()).snap(true),
+                            );
+                        }
+                        frame.draw_image(
+                            rect,
+                            canvas::Image::new(rendered.handle.clone())
+                                .opacity(progress)
+                                .snap(true),
+                        );
+                    } else {
+                        frame.draw_image(
+                            rect,
+                            canvas::Image::new(rendered.handle.clone()).snap(true),
+                        );
+                    }
+                } else {
+                    frame.draw_image(rect, canvas::Image::new(rendered.handle.clone()).snap(true));
+                }
             } else {
                 let shadow = canvas::Path::rectangle(
                     Point::new(

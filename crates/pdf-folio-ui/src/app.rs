@@ -159,6 +159,8 @@ const LIBRARY_ROW_HOVER_LIFT: f32 = 1.0;
 const LIBRARY_GRID_ZOOM_MIN: f32 = 0.25;
 const LIBRARY_GRID_ZOOM_MAX: f32 = 12.0;
 const VIEWER_THUMBNAIL_WIDTH_PX: u16 = 128;
+pub(crate) const VIEWER_ANIMATION_TICK_MS: u64 = 16;
+const VIEWER_PAGE_FADE_MS: u64 = 50;
 const LIBRARY_GRID_ZOOM_STEP: f32 = 0.05;
 const LIBRARY_GRID_ZOOM_DENSE_COLUMN_CAP: usize = 28;
 const LIBRARY_SORT_OPTIONS: [LibrarySortMode; 10] = [
@@ -282,6 +284,8 @@ pub struct PDFolioApp {
     pub zoom_preview_width_px: Option<u16>,
     /// Monotonic token used to debounce wheel zoom rendering.
     pub zoom_generation: u64,
+    /// Previous vertical scroll offset used to bias render prefetching.
+    pub last_scroll_offset: f32,
     /// UI scale factor used to render pages at physical-pixel resolution.
     pub scale_factor: f32,
     /// Last known keyboard modifiers.
@@ -297,7 +301,9 @@ pub struct PDFolioApp {
     /// Find-in-text UI and match state for the open PDF.
     pub viewer_find: ViewerFindState,
     /// Tile render jobs currently in flight.
-    pub pending_renders: HashSet<TileKey>,
+    pub pending_renders: HashMap<TileKey, Option<u64>>,
+    /// Newly sharpened page renders that should fade in over the preview image.
+    pub page_fade_started: HashMap<TileKey, Instant>,
     /// Whether the table-of-contents panel is open.
     pub toc_open: bool,
     /// Active navigation tab in the viewer sidebar.
@@ -565,6 +571,7 @@ impl PDFolioApp {
             zoom_menu_open: false,
             zoom_preview_width_px: None,
             zoom_generation: 0,
+            last_scroll_offset: 0.0,
             scale_factor: 1.0,
             modifiers: keyboard::Modifiers::default(),
             viewer_text_selection: None,
@@ -572,7 +579,8 @@ impl PDFolioApp {
             pending_text_layers: HashSet::new(),
             viewer_copy_pending: false,
             viewer_find: ViewerFindState::default(),
-            pending_renders: HashSet::new(),
+            pending_renders: HashMap::new(),
+            page_fade_started: HashMap::new(),
             toc_open: true,
             viewer_sidebar_tab: ViewerSidebarTab::Contents,
             outline: Vec::new(),
@@ -678,7 +686,9 @@ impl PDFolioApp {
         self.viewer_sidebar_tab = ViewerSidebarTab::Contents;
         self.expanded_outline_paths.clear();
         self.pending_renders.clear();
+        self.page_fade_started.clear();
         self.scroll_offset = 0.0;
+        self.last_scroll_offset = 0.0;
         self.horizontal_offset = 0.0;
         self.viewer_viewport_width = self.estimated_viewer_viewport_width();
         self.viewer_viewport_height = self.estimated_viewer_viewport_height();
@@ -734,6 +744,7 @@ impl PDFolioApp {
             .find(|entry| entry.id == entry_id)
             .map_or(0, |entry| entry.last_page);
         let task = self.open_document(doc);
+        self.last_scroll_offset = self.scroll_offset;
         self.scroll_offset = self.page_top(last_page);
         self.clamp_scroll_offset();
         Task::batch([task, self.request_visible_pages()])
@@ -745,13 +756,16 @@ impl PDFolioApp {
         };
 
         let mut tasks = Vec::new();
-        for page in self.visible_page_range() {
+        let generation = self.zoom_generation;
+        for page in self.prefetch_page_order() {
             let key = TileKey {
                 page,
                 width_px: self.render_width_px(),
             };
 
-            if self.rendered_pages.contains_key(&key) || self.pending_renders.contains(&key) {
+            if self.rendered_pages.contains_key(&key)
+                || self.pending_renders.get(&key) == Some(&Some(generation))
+            {
                 continue;
             }
 
@@ -778,16 +792,17 @@ impl PDFolioApp {
                 }
             }
 
-            self.pending_renders.insert(key);
+            self.pending_renders.insert(key, Some(generation));
             let doc = Arc::clone(&doc);
             tasks.push(Task::perform(
                 render_page(doc, key),
-                |result| match result {
+                move |result| match result {
                     Ok((key, page)) => Message::PageRendered {
                         key,
                         data: page.rgba,
                         width: page.width,
                         height: page.height,
+                        generation: Some(generation),
                     },
                     Err(error) => Message::DocumentError(error.to_string()),
                 },
@@ -813,7 +828,7 @@ impl PDFolioApp {
                 width_px: VIEWER_THUMBNAIL_WIDTH_PX,
             };
 
-            if self.rendered_pages.contains_key(&key) || self.pending_renders.contains(&key) {
+            if self.rendered_pages.contains_key(&key) || self.pending_renders.contains_key(&key) {
                 continue;
             }
 
@@ -841,7 +856,7 @@ impl PDFolioApp {
                 }
             }
 
-            self.pending_renders.insert(key);
+            self.pending_renders.insert(key, None);
             let doc = Arc::clone(&doc);
             tasks.push(Task::perform(
                 render_page(doc, key),
@@ -851,6 +866,7 @@ impl PDFolioApp {
                         data: page.rgba,
                         width: page.width,
                         height: page.height,
+                        generation: None,
                     },
                     Err(error) => Message::DocumentError(error.to_string()),
                 },
@@ -1071,6 +1087,22 @@ impl PDFolioApp {
 
         let page_count = doc.page_count();
         first.unwrap_or(0)..end.max(first.unwrap_or(0).saturating_add(1).min(page_count))
+    }
+
+    fn prefetch_page_order(&self) -> Vec<u16> {
+        let Some(doc) = &self.doc else {
+            return Vec::new();
+        };
+        let page_count = doc.page_count();
+        if page_count == 0 {
+            return Vec::new();
+        }
+
+        prefetch_page_order_for_range(
+            self.visible_page_range(),
+            page_count,
+            self.scroll_offset >= self.last_scroll_offset,
+        )
     }
 
     fn page_height(&self, page: u16) -> f32 {
@@ -1921,6 +1953,7 @@ impl PDFolioApp {
                 animation.is_animating(now) || visible_entry_ids.contains(entry_id)
             });
         self.expire_folder_drop_flash(now);
+        self.expire_viewer_page_fades(now);
     }
 
     fn start_bulk_operation_progress(&mut self, label: impl Into<String>, total: usize) {
@@ -1971,6 +2004,16 @@ impl PDFolioApp {
         self.library_card_hover_animations
             .values()
             .any(|animation| animation.is_animating(self.animation_now))
+    }
+
+    fn expire_viewer_page_fades(&mut self, now: Instant) {
+        self.page_fade_started.retain(|_, started_at| {
+            now.saturating_duration_since(*started_at) < Duration::from_millis(VIEWER_PAGE_FADE_MS)
+        });
+    }
+
+    fn viewer_page_fade_active(&self) -> bool {
+        !self.page_fade_started.is_empty()
     }
 
     fn clear_library_transient_interactions(&mut self) {
@@ -2562,6 +2605,7 @@ impl PDFolioApp {
 
         let page = page.min(doc.page_count().saturating_sub(1));
         if let Some(rect) = self.viewer_page_rect_for_page(page) {
+            self.last_scroll_offset = self.scroll_offset;
             if matches!(self.viewer_scroll_mode, ViewerScrollMode::Horizontal) {
                 self.horizontal_offset = rect.x;
                 self.scroll_offset = 0.0;
@@ -2617,6 +2661,7 @@ impl PDFolioApp {
     }
 
     fn scroll_by(&mut self, delta: f32) -> Task<Message> {
+        self.last_scroll_offset = self.scroll_offset;
         self.scroll_offset = (self.scroll_offset + delta).clamp(0.0, self.max_scroll_offset());
         self.request_visible_pages()
     }
@@ -2694,7 +2739,6 @@ impl PDFolioApp {
             self.zoom_input = zoom_percent_label(new_width);
         }
         self.zoom_menu_open = false;
-        self.pending_renders.clear();
         self.zoom_generation = self.zoom_generation.wrapping_add(1);
         let generation = self.zoom_generation;
 
@@ -2712,19 +2756,29 @@ impl PDFolioApp {
     }
 
     fn rendered_page_for_draw(&self, key: TileKey) -> Option<&RenderedPageView> {
-        self.rendered_pages
-            .get(&key)
-            .or_else(|| {
-                self.zoom_preview_width_px
-                    .and_then(|width_px| self.rendered_pages.get(&TileKey { width_px, ..key }))
-            })
-            .or_else(|| {
-                self.rendered_pages
-                    .iter()
-                    .filter(|(candidate, _)| candidate.page == key.page)
-                    .min_by_key(|(candidate, _)| candidate.width_px.abs_diff(key.width_px))
-                    .map(|(_, rendered)| rendered)
-            })
+        selected_render_key(
+            self.rendered_pages.keys(),
+            key,
+            self.zoom_preview_width_px,
+            true,
+        )
+        .and_then(|key| self.rendered_pages.get(&key))
+    }
+
+    fn fallback_rendered_page_for_draw(&self, key: TileKey) -> Option<&RenderedPageView> {
+        selected_render_key(
+            self.rendered_pages.keys(),
+            key,
+            self.zoom_preview_width_px,
+            false,
+        )
+        .and_then(|key| self.rendered_pages.get(&key))
+    }
+
+    fn page_fade_progress(&self, key: TileKey) -> Option<f32> {
+        let started = self.page_fade_started.get(&key)?;
+        let elapsed = Instant::now().saturating_duration_since(*started);
+        Some((elapsed.as_secs_f32() / (VIEWER_PAGE_FADE_MS as f32 / 1000.0)).clamp(0.0, 1.0))
     }
 
     fn all_visible_pages_rendered_at_current_zoom(&self) -> bool {
@@ -2783,6 +2837,79 @@ fn viewer_spread_groups(page_count: u16, spread_mode: ViewerSpreadMode) -> Vec<V
             groups
         }
     }
+}
+
+fn prefetch_page_order_for_range(
+    visible: std::ops::Range<u16>,
+    page_count: u16,
+    scrolling_forward: bool,
+) -> Vec<u16> {
+    if page_count == 0 || visible.start >= page_count {
+        return Vec::new();
+    }
+
+    let start = visible.start.min(page_count);
+    let end = visible
+        .end
+        .min(page_count)
+        .max(start.saturating_add(1).min(page_count));
+    let mut pages = Vec::new();
+
+    for page in start..end {
+        push_unique_page(&mut pages, page, page_count);
+    }
+
+    if start > 0 {
+        push_unique_page(&mut pages, start - 1, page_count);
+    }
+    push_unique_page(&mut pages, end, page_count);
+
+    if scrolling_forward {
+        push_unique_page(&mut pages, end.saturating_add(1), page_count);
+        push_unique_page(&mut pages, end.saturating_add(2), page_count);
+    } else {
+        if start > 1 {
+            push_unique_page(&mut pages, start - 2, page_count);
+        }
+        if start > 2 {
+            push_unique_page(&mut pages, start - 3, page_count);
+        }
+    }
+
+    pages
+}
+
+fn push_unique_page(pages: &mut Vec<u16>, page: u16, page_count: u16) {
+    if page < page_count && !pages.contains(&page) {
+        pages.push(page);
+    }
+}
+
+fn selected_render_key<'a>(
+    keys: impl Iterator<Item = &'a TileKey>,
+    target: TileKey,
+    preview_width_px: Option<u16>,
+    include_exact: bool,
+) -> Option<TileKey> {
+    let keys = keys
+        .filter(|candidate| candidate.page == target.page)
+        .copied()
+        .collect::<Vec<_>>();
+
+    if include_exact && keys.iter().any(|candidate| *candidate == target) {
+        return Some(target);
+    }
+
+    if let Some(width_px) = preview_width_px {
+        let preview = TileKey { width_px, ..target };
+        if preview != target && keys.iter().any(|candidate| *candidate == preview) {
+            return Some(preview);
+        }
+    }
+
+    keys.into_iter()
+        .filter(|candidate| include_exact || *candidate != target)
+        .min_by_key(|candidate| candidate.width_px.abs_diff(target.width_px))
 }
 
 fn viewer_group_width(app: &PDFolioApp, group: &[u16]) -> f32 {
@@ -2957,6 +3084,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.document_error = Some(error);
             }
             app.pending_renders.clear();
+            app.page_fade_started.clear();
         }
         Message::DismissDocumentError => {
             if let Some(error) = app.document_error.take() {
@@ -2970,8 +3098,18 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             data,
             width,
             height,
+            generation,
         } => {
-            app.pending_renders.remove(&key);
+            if app.pending_renders.get(&key) == Some(&generation) {
+                app.pending_renders.remove(&key);
+            }
+            if generation.is_some_and(|generation| generation != app.zoom_generation) {
+                return Task::none();
+            }
+
+            let had_fallback = generation.is_some()
+                && key.width_px == app.render_width_px()
+                && app.fallback_rendered_page_for_draw(key).is_some();
             app.cache.insert(key, data.clone());
             let handle = image::Handle::from_rgba(u32::from(width), u32::from(height), data);
             app.rendered_pages.insert(
@@ -2982,6 +3120,9 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     handle,
                 },
             );
+            if had_fallback {
+                app.page_fade_started.insert(key, Instant::now());
+            }
 
             if key.width_px == app.render_width_px()
                 && app.all_visible_pages_rendered_at_current_zoom()
@@ -4033,6 +4174,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return app.copy_selected_viewer_text();
         }
         Message::ScrollChanged(offset) => {
+            app.last_scroll_offset = app.scroll_offset;
             app.scroll_offset = offset;
             app.clamp_scroll_offset();
             let render_task = app.request_visible_pages();
@@ -4052,6 +4194,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             width,
             height,
         } => {
+            app.last_scroll_offset = app.scroll_offset;
             app.scroll_offset = scroll_offset;
             app.viewer_viewport_width = width.max(1.0);
             app.viewer_viewport_height = height.max(1.0);
@@ -4122,6 +4265,7 @@ fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.horizontal_offset =
                     (app.horizontal_offset - delta).clamp(0.0, app.max_horizontal_offset());
             } else {
+                app.last_scroll_offset = app.scroll_offset;
                 app.scroll_offset =
                     (app.scroll_offset - delta_y).clamp(0.0, app.max_scroll_offset());
                 return app.request_visible_pages();
