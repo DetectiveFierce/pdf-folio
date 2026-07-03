@@ -1,14 +1,14 @@
 //! Async task constructors and blocking helpers for library operations.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use iced::Task;
 use pdf_folio_core::PdfDoc;
 use pdf_folio_db::{
-    hash_file, scan_pdf_files, Db, EntryId, FolderId, ImportSummary, ImportedEntry, IndexDocument,
-    LibraryEntry, LibrarySortMode, LibraryWatchEvent, NewLibraryEntry, SearchIndex,
+    hash_file, scan_pdf_files, Db, EntryId, Folder, FolderId, ImportSummary, ImportedEntry,
+    IndexDocument, LibraryEntry, LibrarySortMode, LibraryWatchEvent, NewLibraryEntry, SearchIndex,
 };
 
 use crate::library::filters::entry_matches_query;
@@ -120,7 +120,21 @@ pub(crate) fn move_folder_task(
 pub(crate) fn delete_folder_task(db: Arc<Db>, folder_id: FolderId) -> Task<Message> {
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || db.delete_folder(&folder_id)).await??;
+            tokio::task::spawn_blocking(move || {
+                let folders = db.get_folders()?;
+                let folder_ids = folder_subtree_ids(&folders, &folder_id);
+                let mut entry_ids = HashSet::new();
+                for folder_id in &folder_ids {
+                    for entry in db.entries_in_folder(folder_id)? {
+                        entry_ids.insert(entry.id);
+                    }
+                }
+                for entry_id in entry_ids {
+                    db.delete_entry(&entry_id)?;
+                }
+                db.delete_folder(&folder_id)
+            })
+            .await??;
             Ok::<_, anyhow::Error>(())
         },
         |result| match result {
@@ -128,6 +142,28 @@ pub(crate) fn delete_folder_task(db: Arc<Db>, folder_id: FolderId) -> Task<Messa
             Err(error) => Message::LibraryError(error.to_string()),
         },
     )
+}
+
+fn folder_subtree_ids(folders: &[Folder], folder_id: &FolderId) -> HashSet<FolderId> {
+    let mut folder_ids = HashSet::new();
+    collect_folder_subtree_ids(folders, folder_id, &mut folder_ids);
+    folder_ids
+}
+
+fn collect_folder_subtree_ids(
+    folders: &[Folder],
+    folder_id: &FolderId,
+    folder_ids: &mut HashSet<FolderId>,
+) {
+    if !folder_ids.insert(folder_id.clone()) {
+        return;
+    }
+    for child in folders
+        .iter()
+        .filter(|folder| folder.parent_id.as_ref() == Some(folder_id))
+    {
+        collect_folder_subtree_ids(folders, &child.id, folder_ids);
+    }
 }
 
 pub(crate) fn move_entries_to_folder_task(
@@ -312,15 +348,21 @@ pub(crate) fn bulk_delete_metadata_task(db: Arc<Db>, entry_ids: Vec<EntryId>) ->
         async move {
             tokio::task::spawn_blocking(move || {
                 let search_index = SearchIndex::open_default()?;
-                let mut updated = 0;
                 let mut errors = Vec::new();
-                for entry_id in entry_ids {
-                    match db
-                        .delete_entry(&entry_id)
-                        .and_then(|()| search_index.delete_entry(entry_id.as_str()))
-                    {
-                        Ok(()) => updated += 1,
-                        Err(error) => errors.push(format!("{}: {error}", entry_id.as_str())),
+                let updated = entry_ids.len();
+                if let Err(error) = db.delete_entries(entry_ids.iter()) {
+                    errors.push(error.to_string());
+                } else if let Err(error) =
+                    search_index.delete_entries(entry_ids.iter().map(EntryId::as_str))
+                {
+                    errors.push(format!("search index: {error}"));
+                }
+                if !errors.is_empty() {
+                    for entry_id in &entry_ids {
+                        tracing::debug!(
+                            entry_id = entry_id.as_str(),
+                            "Bulk delete entry was part of a failed batch"
+                        );
                     }
                 }
                 Ok::<_, anyhow::Error>((String::from("Deleted from library"), updated, errors))

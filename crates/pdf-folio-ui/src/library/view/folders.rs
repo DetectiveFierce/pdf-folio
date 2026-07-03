@@ -57,6 +57,7 @@ pub(crate) fn folder_grid_card<'a>(
     mode: FolderCardRenderMode,
 ) -> Element<'a, Message> {
     let folder_id = folder.id.clone();
+    let selected = app.library.details_folder_id.as_ref() == Some(&folder.id);
     let drop_active = app.active_folder_drop_target() == Some(&folder.id);
     let flash_active = app.folder_drop_flash_active(&folder.id);
     let smart_counts = app.folder_smart_counts(Some(&folder.id));
@@ -104,6 +105,13 @@ pub(crate) fn folder_grid_card<'a>(
                 let placeholder_style = tokens.class_styles[Class::LibraryFolderCard.index()]
                     .resolve(ComponentState::Disabled);
                 style = style.with_visual_override(placeholder_style);
+            }
+            if selected {
+                let selected_style = tokens.class_styles[Class::LibraryFolderCard.index()]
+                    .resolve(ComponentState::Selected);
+                style = style.with_visual_override(selected_style);
+                style.border.color = selected_style.border_color.unwrap_or(tokens.focus);
+                style.border.width = selected_style.border_width.unwrap_or(1.5).max(1.5);
             }
             if drop_active || flash_active || matches!(mode, FolderCardRenderMode::NestingTarget) {
                 let drop_style = container_style(tokens, Class::FolderDropTarget);

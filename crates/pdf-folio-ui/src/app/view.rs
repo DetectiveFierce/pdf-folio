@@ -4,6 +4,8 @@ use crate::app_context_menu::{context_menu_capture_layer, view_context_menu_drop
 use crate::library::view::{
     chevron_button, floating_folder_drag_preview, floating_library_drag_preview,
     view_confirmation_dialog, view_create_folder_dialog, view_library,
+    view_raindrop_connect_dialog, view_raindrop_import_dialog,
+    view_raindrop_import_progress_dialog,
 };
 use crate::menu::{
     app_menu_bar_height, app_menu_capture_layer, selection_menu_capture_layer, view_app_menu_bar,
@@ -130,6 +132,21 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    } else if app.library.raindrop_connect_dialog_open {
+        stack![menu_content, view_raindrop_connect_dialog(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if app.library.raindrop_import_dialog_open {
+        stack![menu_content, view_raindrop_import_dialog(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if app.library.raindrop_import_progress.is_some() {
+        stack![menu_content, view_raindrop_import_progress_dialog(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     } else if let Some(floating) = floating_folder_drag_preview(app, tokens) {
         stack![menu_content, floating]
             .width(Length::Fill)
@@ -150,7 +167,12 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         .style(move |_| container_style(tokens, Class::AppShell))
         .into();
 
-    if app.viewer.pending_document_open {
+    if app.library.library_startup_loading {
+        stack![shell, startup_library_loading_layer(app, tokens)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if app.viewer.pending_document_open {
         stack![shell, loading_cursor_layer()]
             .width(Length::Fill)
             .height(Length::Fill)
@@ -273,6 +295,38 @@ fn loading_cursor_layer() -> Element<'static, Message> {
     mouse_area(container("").width(Length::Fill).height(Length::Fill))
         .interaction(mouse::Interaction::Progress)
         .into()
+}
+
+fn startup_library_loading_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let status = app
+        .library
+        .raindrop_rollback_recovery_status
+        .as_deref()
+        .unwrap_or("Preparing library...");
+    mouse_area(
+        container(
+            container(
+                column![
+                    text("Restoring library")
+                        .size(FontSize::HEADING)
+                        .font(ui_font(FontWeight::SEMIBOLD))
+                        .color(tokens.text_primary),
+                    text(status).size(FontSize::MD).color(tokens.text_secondary),
+                    container(progress_bar(0.42, tokens)).width(Length::Fill),
+                ]
+                .spacing(Spacing::MD)
+                .padding(Spacing::LG),
+            )
+            .width(460.0)
+            .style(move |_| container_style(tokens, Class::JumpOverlay)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center(Length::Fill)
+        .style(move |_| container_style(tokens, Class::PresentationOverlay)),
+    )
+    .interaction(mouse::Interaction::Progress)
+    .into()
 }
 
 pub(crate) fn dismissible_error_banner<'a>(

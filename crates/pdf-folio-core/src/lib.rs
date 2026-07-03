@@ -12,7 +12,6 @@
 //!
 //! [`pdfium-render`]: https://docs.rs/pdfium-render
 
-
 pub mod annotations;
 pub mod document;
 pub mod renderer;

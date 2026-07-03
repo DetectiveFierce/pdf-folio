@@ -52,6 +52,14 @@ impl PDFolioApp {
 
         self.library.library_drag = None;
         self.library.folder_drag = Some(FolderDragState::new(folder_id));
+        self.library.folder_drag_started_in_tree = false;
+    }
+
+    pub(super) fn begin_folder_tree_drag(&mut self, folder_id: FolderId) {
+        self.begin_folder_drag(folder_id);
+        if self.library.folder_drag.is_some() {
+            self.library.folder_drag_started_in_tree = true;
+        }
     }
 
     pub(super) fn update_library_drag_target(&mut self, cursor: Point) {
@@ -497,10 +505,17 @@ impl PDFolioApp {
         let Some(drag) = self.library.folder_drag.take() else {
             return Task::none();
         };
+        let started_in_tree = self.library.folder_drag_started_in_tree;
+        self.library.folder_drag_started_in_tree = false;
 
         if !drag.active {
             self.collapse_drag_expanded_folders(drag.expanded_during_drag);
-            return Task::done(Message::FolderSelected(Some(drag.folder_id)));
+            let click_message = if started_in_tree {
+                Message::FolderTreeClicked(Some(drag.folder_id))
+            } else {
+                Message::FolderClicked(Some(drag.folder_id))
+            };
+            return Task::done(click_message);
         }
 
         if let Some(target_id) = drag.drop_target.clone() {

@@ -14,15 +14,15 @@
 //! [`tantivy`]: https://docs.rs/tantivy
 //! [`notify`]: https://docs.rs/notify
 
-
 pub mod db;
 pub mod importer;
 pub mod indexer;
 pub mod watcher;
 
 pub use db::{
-    Db, EntryId, Folder, FolderId, LibraryEntry, LibraryLayoutMode, LibraryPreferences,
-    LibrarySortMode, NewLibraryEntry,
+    Db, EntryId, Folder, FolderId, ImportSource, LibraryEntry, LibraryLayoutMode,
+    LibraryPreferences, LibrarySortMode, NewLibraryEntry, RaindropCollectionMapping,
+    RaindropEntryMapping,
 };
 pub use importer::{
     hash_file, import_folder, import_pdf, scan_pdf_files, thumbnail_cache_dir, thumbnail_path,

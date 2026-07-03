@@ -75,10 +75,22 @@ impl PDFolioApp {
         })
     }
 
+    pub(super) fn details_folder(&self) -> Option<&Folder> {
+        self.library
+            .details_folder_id
+            .as_ref()
+            .and_then(|selected| {
+                self.library
+                    .library_folders
+                    .iter()
+                    .find(|folder| &folder.id == selected)
+            })
+    }
+
     pub(super) fn selected_folder_sibling_order(
         &self,
     ) -> Option<(Option<FolderId>, Vec<FolderId>, usize)> {
-        let folder = self.selected_folder()?;
+        let folder = self.details_folder()?;
         let parent_id = folder.parent_id.clone();
         let mut siblings = self
             .library
@@ -146,7 +158,7 @@ impl PDFolioApp {
 
     pub(super) fn sync_folder_rename_input(&mut self) {
         self.library.folder_rename_input = self
-            .selected_folder()
+            .details_folder()
             .map_or_else(String::new, |folder| folder.name.clone());
     }
 

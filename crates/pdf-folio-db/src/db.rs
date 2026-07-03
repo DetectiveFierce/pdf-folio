@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
 const MANUAL_ORDER_GAP: i64 = 1024;
 
@@ -56,6 +56,61 @@ pub struct Folder {
     pub created_at: DateTime<Utc>,
     /// Folder update timestamp.
     pub updated_at: DateTime<Utc>,
+}
+
+/// External service whose items have been imported into the local library.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportSource {
+    /// Stable source identifier, e.g. `raindrop:123`.
+    pub id: String,
+    /// Source provider kind.
+    pub kind: String,
+    /// Provider account identifier, when known.
+    pub account_id: Option<String>,
+    /// User-visible account/source label.
+    pub display_name: Option<String>,
+    /// Source creation timestamp.
+    pub created_at: DateTime<Utc>,
+    /// Source update timestamp.
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A Raindrop.io collection mirrored into a local PDF-Folio folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaindropCollectionMapping {
+    /// PDF-Folio import source id.
+    pub source_id: String,
+    /// Raindrop collection id.
+    pub collection_id: i64,
+    /// Local folder id.
+    pub folder_id: FolderId,
+    /// Parent Raindrop collection id.
+    pub parent_collection_id: Option<i64>,
+    /// Most recent remote collection title seen by PDF-Folio.
+    pub title: String,
+}
+
+/// A Raindrop.io item imported into a local PDF-Folio entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaindropEntryMapping {
+    /// PDF-Folio import source id.
+    pub source_id: String,
+    /// Raindrop item id.
+    pub raindrop_id: i64,
+    /// Local entry id.
+    pub entry_id: EntryId,
+    /// Raindrop collection id containing the item.
+    pub collection_id: Option<i64>,
+    /// Remote link used to download/open the item.
+    pub remote_link: Option<String>,
+    /// Most recent remote title seen by PDF-Folio.
+    pub remote_title: Option<String>,
+    /// Most recent remote update timestamp seen by PDF-Folio.
+    pub remote_updated_at: Option<String>,
+    /// Remote filename, when supplied by Raindrop.
+    pub file_name: Option<String>,
+    /// Remote file size, when supplied by Raindrop.
+    pub file_size: Option<u64>,
 }
 
 /// Library layout preference.
@@ -605,6 +660,180 @@ impl Db {
         Ok(id)
     }
 
+    /// Creates or updates an external import source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the source.
+    pub fn upsert_import_source(
+        &self,
+        id: &str,
+        kind: &str,
+        account_id: Option<&str>,
+        display_name: Option<&str>,
+    ) -> Result<ImportSource> {
+        let connection = self.connection()?;
+        let now = Utc::now().timestamp();
+        connection.execute(
+            "INSERT INTO import_sources
+                (id, kind, account_id, display_name, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+                kind = excluded.kind,
+                account_id = excluded.account_id,
+                display_name = excluded.display_name,
+                updated_at = excluded.updated_at",
+            params![id, kind, account_id, display_name, now],
+        )?;
+        self.import_source(id)?
+            .with_context(|| format!("Import source {id} was not saved."))
+    }
+
+    /// Returns one import source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query the source.
+    pub fn import_source(&self, id: &str) -> Result<Option<ImportSource>> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT id, kind, account_id, display_name, created_at, updated_at
+                 FROM import_sources
+                 WHERE id = ?1",
+                params![id],
+                row_to_import_source,
+            )
+            .optional()
+            .context("Could not load import source.")
+    }
+
+    /// Creates or updates the local folder mirrored from a Raindrop collection.
+    ///
+    /// Parent collection mappings should be created before child mappings when possible.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the mapping or folder.
+    pub fn upsert_raindrop_collection_mapping(
+        &self,
+        source_id: &str,
+        collection_id: i64,
+        parent_collection_id: Option<i64>,
+        title: &str,
+        root_folder_id: Option<&FolderId>,
+    ) -> Result<(FolderId, bool)> {
+        let title = clean_folder_name(title)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let existing_folder_id: Option<FolderId> = transaction
+            .query_row(
+                "SELECT folder_id FROM raindrop_collections
+                 WHERE source_id = ?1 AND collection_id = ?2",
+                params![source_id, collection_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(FolderId::new);
+        let mapped_parent_folder_id = match parent_collection_id {
+            Some(parent_id) => transaction
+                .query_row(
+                    "SELECT folder_id FROM raindrop_collections
+                     WHERE source_id = ?1 AND collection_id = ?2",
+                    params![source_id, parent_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .map(FolderId::new),
+            None => None,
+        };
+        let parent_folder_id = mapped_parent_folder_id.or_else(|| {
+            parent_collection_id
+                .is_none()
+                .then(|| root_folder_id.cloned())
+                .flatten()
+        });
+        let now = Utc::now().timestamp();
+        let (folder_id, created) = if let Some(folder_id) = existing_folder_id {
+            transaction.execute(
+                "UPDATE folders
+                 SET name = ?1, parent_id = ?2, updated_at = ?3
+                 WHERE id = ?4",
+                params![
+                    title,
+                    parent_folder_id.as_ref().map(FolderId::as_str),
+                    now,
+                    folder_id.as_str()
+                ],
+            )?;
+            (folder_id, false)
+        } else {
+            let folder_id = FolderId::new(format!(
+                "folder-{}-{}",
+                Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+                next_folder_suffix(&transaction)?
+            ));
+            let manual_order = self.next_folder_manual_order_with_connection(
+                &transaction,
+                parent_folder_id.as_ref(),
+            )?;
+            transaction.execute(
+                "INSERT INTO folders
+                    (id, name, parent_id, manual_order, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                params![
+                    folder_id.as_str(),
+                    title,
+                    parent_folder_id.as_ref().map(FolderId::as_str),
+                    manual_order,
+                    now
+                ],
+            )?;
+            (folder_id, true)
+        };
+        transaction.execute(
+            "INSERT INTO raindrop_collections
+                (source_id, collection_id, folder_id, parent_collection_id, title)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(source_id, collection_id) DO UPDATE SET
+                folder_id = excluded.folder_id,
+                parent_collection_id = excluded.parent_collection_id,
+                title = excluded.title",
+            params![
+                source_id,
+                collection_id,
+                folder_id.as_str(),
+                parent_collection_id,
+                title
+            ],
+        )?;
+        transaction.commit()?;
+        Ok((folder_id, created))
+    }
+
+    /// Returns the local folder mapped to a Raindrop collection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query the mapping.
+    pub fn raindrop_collection_folder(
+        &self,
+        source_id: &str,
+        collection_id: i64,
+    ) -> Result<Option<FolderId>> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT folder_id FROM raindrop_collections
+                 WHERE source_id = ?1 AND collection_id = ?2",
+                params![source_id, collection_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map(|id| id.map(FolderId::new))
+            .context("Could not load Raindrop collection mapping.")
+    }
+
     /// Renames a folder.
     ///
     /// # Errors
@@ -977,6 +1206,60 @@ impl Db {
         Ok(())
     }
 
+    /// Creates or updates the mapping between a Raindrop item and a local entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the mapping.
+    pub fn upsert_raindrop_entry_mapping(&self, mapping: &RaindropEntryMapping) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO raindrop_entries
+                (source_id, raindrop_id, entry_id, collection_id, remote_link, remote_title,
+                 remote_updated_at, file_name, file_size)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(source_id, raindrop_id) DO UPDATE SET
+                entry_id = excluded.entry_id,
+                collection_id = excluded.collection_id,
+                remote_link = excluded.remote_link,
+                remote_title = excluded.remote_title,
+                remote_updated_at = excluded.remote_updated_at,
+                file_name = excluded.file_name,
+                file_size = excluded.file_size",
+            params![
+                mapping.source_id,
+                mapping.raindrop_id,
+                mapping.entry_id.as_str(),
+                mapping.collection_id,
+                mapping.remote_link,
+                mapping.remote_title,
+                mapping.remote_updated_at,
+                mapping.file_name,
+                mapping.file_size.map(|value| value as i64),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Returns the local entry id currently mapped to a Raindrop item.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query the mapping.
+    pub fn raindrop_entry_id(&self, source_id: &str, raindrop_id: i64) -> Result<Option<EntryId>> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT entry_id FROM raindrop_entries
+                 WHERE source_id = ?1 AND raindrop_id = ?2",
+                params![source_id, raindrop_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map(|id| id.map(EntryId::new))
+            .context("Could not load Raindrop entry mapping.")
+    }
+
     /// Removes a tag from an entry.
     ///
     /// # Errors
@@ -997,11 +1280,40 @@ impl Db {
     ///
     /// Returns an error when SQLite cannot delete the entry.
     pub fn delete_entry(&self, entry_id: &EntryId) -> Result<()> {
+        self.delete_entries([entry_id])
+    }
+
+    /// Deletes entries and their dependent rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot delete the entries.
+    pub fn delete_entries<'a>(
+        &self,
+        entry_ids: impl IntoIterator<Item = &'a EntryId>,
+    ) -> Result<()> {
+        const DELETE_CHUNK_SIZE: usize = 900;
+
+        let entry_ids = entry_ids.into_iter().collect::<Vec<_>>();
+        if entry_ids.is_empty() {
+            return Ok(());
+        }
+
         let connection = self.connection()?;
-        connection.execute(
-            "DELETE FROM entries WHERE id = ?1",
-            params![entry_id.as_str()],
-        )?;
+        let transaction = connection.unchecked_transaction()?;
+
+        for chunk in entry_ids.chunks(DELETE_CHUNK_SIZE) {
+            let placeholders = std::iter::repeat_n("?", chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!("DELETE FROM entries WHERE id IN ({placeholders})");
+            transaction.execute(
+                &sql,
+                params_from_iter(chunk.iter().map(|entry_id| entry_id.as_str())),
+            )?;
+        }
+
+        transaction.commit()?;
         Ok(())
     }
 
@@ -1274,6 +1586,37 @@ impl Db {
                 value       TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS import_sources (
+                id          TEXT PRIMARY KEY,
+                kind        TEXT NOT NULL,
+                account_id  TEXT,
+                display_name TEXT,
+                created_at  INTEGER NOT NULL,
+                updated_at  INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS raindrop_collections (
+                source_id   TEXT NOT NULL REFERENCES import_sources(id) ON DELETE CASCADE,
+                collection_id INTEGER NOT NULL,
+                folder_id   TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+                parent_collection_id INTEGER,
+                title       TEXT NOT NULL,
+                PRIMARY KEY (source_id, collection_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS raindrop_entries (
+                source_id   TEXT NOT NULL REFERENCES import_sources(id) ON DELETE CASCADE,
+                raindrop_id INTEGER NOT NULL,
+                entry_id    TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                collection_id INTEGER,
+                remote_link TEXT,
+                remote_title TEXT,
+                remote_updated_at TEXT,
+                file_name   TEXT,
+                file_size   INTEGER,
+                PRIMARY KEY (source_id, raindrop_id)
+            );
+
             INSERT OR IGNORE INTO schema_version (version) VALUES (1);
             "#,
         )?;
@@ -1387,6 +1730,19 @@ fn row_to_folder(row: &rusqlite::Row<'_>) -> rusqlite::Result<Folder> {
         name: row.get(1)?,
         parent_id: row.get::<_, Option<String>>(2)?.map(FolderId::new),
         manual_order: row.get(3)?,
+        created_at: DateTime::from_timestamp(created_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+        updated_at: DateTime::from_timestamp(updated_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+    })
+}
+
+fn row_to_import_source(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportSource> {
+    let created_at: i64 = row.get(4)?;
+    let updated_at: i64 = row.get(5)?;
+    Ok(ImportSource {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        account_id: row.get(2)?,
+        display_name: row.get(3)?,
         created_at: DateTime::from_timestamp(created_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
         updated_at: DateTime::from_timestamp(updated_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
     })

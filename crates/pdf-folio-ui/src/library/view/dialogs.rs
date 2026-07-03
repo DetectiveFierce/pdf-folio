@@ -1,11 +1,21 @@
 use super::*;
-use iced::widget::column;
+use iced::widget::{column, scrollable};
+use pdf_folio_raindrop::{RaindropImportDestination, RaindropImportPhase};
+
+const RAINDROP_INTEGRATIONS_URL: &str = "https://app.raindrop.io/settings/integrations";
+const FOLDER_PLUS_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"##;
+const RAINDROP_IMPORT_DIALOG_WIDTH: f32 = 820.0;
+const RAINDROP_IMPORT_DIALOG_HEIGHT: f32 = 660.0;
+const RAINDROP_IMPORT_PDF_PANEL_HEIGHT: f32 = 360.0;
 
 pub(crate) fn view_confirmation_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let Some(action) = app.chrome.pending_confirmation.as_ref() else {
         return container("").into();
     };
+    if let ConfirmationAction::DeleteFolder(folder_id) = action {
+        return view_delete_folder_confirmation_dialog(app, folder_id, tokens);
+    }
     let (title, body, confirm_label) = confirmation_copy(action, app);
     let dialog = column![
         text(title)
@@ -31,6 +41,121 @@ pub(crate) fn view_confirmation_dialog(app: &PDFolioApp) -> Element<'_, Message>
     .height(Length::Fill)
     .center(Length::Fill)
     .style(move |_| container_style(tokens, Class::PresentationOverlay))
+    .into()
+}
+
+pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
+    app: &'a PDFolioApp,
+    folder_id: &'a FolderId,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let folder_name = app
+        .library
+        .library_folders
+        .iter()
+        .find(|folder| &folder.id == folder_id)
+        .map_or("Selected folder", |folder| folder.name.as_str());
+    let pdf_count = folder_delete_entry_count(app, folder_id);
+    let nested_folder_count = folder_delete_nested_folder_count(app, folder_id);
+    let warning_background = mix_color(tokens.surface_raised, tokens.error, 0.16);
+    let warning_border = mix_color(tokens.border, tokens.error, 0.58);
+
+    let warning_panel = container(
+        column![
+            text("This cannot be undone from PDF-Folio.")
+                .size(FontSize::MD)
+                .font(ui_font(FontWeight::SEMIBOLD))
+                .color(tokens.text_primary),
+            text(format!(
+                "{} and {} in this folder tree will be deleted from the library. Files on disk will not be deleted.",
+                format_count(pdf_count, "PDF"),
+                format_count(nested_folder_count, "nested folder")
+            ))
+            .size(FontSize::MD)
+            .color(tokens.text_secondary),
+        ]
+        .spacing(Spacing::XS),
+    )
+    .width(Length::Fill)
+    .padding(Spacing::MD)
+    .style(move |_| {
+        let mut style = container_style(tokens, Class::SidebarDetailPanel);
+        style.background = Some(iced::Background::Color(warning_background));
+        style.border.color = warning_border;
+        style.border.width = 1.0;
+        style
+    });
+
+    let counts = row![
+        delete_folder_count_card("PDFs", pdf_count, tokens),
+        delete_folder_count_card("Nested folders", nested_folder_count, tokens),
+    ]
+    .spacing(Spacing::SM)
+    .width(Length::Fill);
+
+    let dialog = column![
+        column![
+            text("Delete Folder")
+                .size(FontSize::HEADING)
+                .font(display_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary),
+            text(truncate_for_width(folder_name, 460.0, 0.0))
+                .size(FontSize::MD)
+                .font(ui_font(FontWeight::SEMIBOLD))
+                .color(tokens.text_secondary)
+                .wrapping(Wrapping::None),
+        ]
+        .spacing(Spacing::XS),
+        warning_panel,
+        counts,
+        checkbox(app.chrome.folder_delete_skip_warning_checked)
+            .label("Do not show this warning again")
+            .on_toggle(Message::FolderDeleteWarningSuppressionToggled)
+            .size(FontSize::MD)
+            .text_size(FontSize::MD),
+        row![
+            toolbar_button("Cancel", tokens).on_press(Message::CancelConfirmation),
+            toolbar_button("Delete folder", tokens).on_press(Message::ConfirmPendingAction),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::LG)
+    .padding(Spacing::LG);
+
+    container(
+        container(dialog)
+            .width(520.0)
+            .style(move |_| container_style(tokens, Class::JumpOverlay)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center(Length::Fill)
+    .style(move |_| container_style(tokens, Class::PresentationOverlay))
+    .into()
+}
+
+fn delete_folder_count_card<'a>(
+    label: &'a str,
+    count: usize,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    container(
+        column![
+            text(count.to_string())
+                .size(FontSize::HEADING)
+                .font(display_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary),
+            text(label)
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(tokens.text_secondary),
+        ]
+        .spacing(Spacing::XS),
+    )
+    .width(Length::Fill)
+    .padding(Spacing::MD)
+    .style(move |_| container_style(tokens, Class::SidebarDetailRow))
     .into()
 }
 
@@ -115,6 +240,673 @@ pub(crate) fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message
     .into()
 }
 
+pub(crate) fn view_raindrop_connect_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let can_submit = !app.library.raindrop_client_id_input.trim().is_empty()
+        && !app.library.raindrop_client_secret_input.trim().is_empty();
+    let sign_in_button = if can_submit {
+        toolbar_button("Sign in", tokens).on_press(Message::SubmitRaindropSignIn)
+    } else {
+        toolbar_button("Sign in", tokens)
+    };
+    let copy_status = if app.library.raindrop_callback_copied {
+        "Callback url copied to clipboard!"
+    } else {
+        "Click to copy"
+    };
+
+    let dialog = column![
+        text("Connect Raindrop.io")
+            .size(FontSize::HEADING)
+            .color(tokens.text_primary),
+        text("Create a small Raindrop developer app once, then paste its credentials here. PDF-Folio will open your browser so you can sign in and authorize access.")
+            .size(FontSize::MD)
+            .color(tokens.text_secondary),
+        toolbar_button("Open Raindrop Integrations", tokens)
+            .on_press(Message::OpenRaindropIntegrations),
+        text(format!(
+            "1. Open Raindrop Integrations: {RAINDROP_INTEGRATIONS_URL}\n2. In For Developers, choose Create new app.\n3. Use these values:\n   Name: PDF-Folio\n   Description: Import my Raindrop PDF files into PDF-Folio.\n   Site: https://github.com/pdf-folio/pdf-folio\n   Redirect URI: {callback}\n4. Save the app in Raindrop.\n5. Copy the Client ID and Client Secret from Raindrop into the fields below.\n6. Click Sign in.\n\nIf Raindrop says \"Incorrect redirect_uri\", replace the Redirect URI in Raindrop with the exact value below and save the app again.",
+            callback = pdf_folio_raindrop::OAUTH_CALLBACK_URL
+        ))
+        .size(FontSize::SM)
+        .color(tokens.text_secondary),
+        row![
+            text("Redirect URI:")
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::SEMIBOLD))
+                .color(tokens.text_primary),
+            toolbar_button(pdf_folio_raindrop::OAUTH_CALLBACK_URL, tokens)
+                .on_press(Message::CopyRaindropCallbackUrl),
+            text(copy_status)
+                .size(FontSize::SM)
+                .color(if app.library.raindrop_callback_copied {
+                    tokens.text_primary
+                } else {
+                    tokens.text_secondary
+                }),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+        text_input("Client ID", &app.library.raindrop_client_id_input)
+            .on_input(Message::RaindropClientIdChanged)
+            .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+            .width(Length::Fill),
+        text_input("Client Secret", &app.library.raindrop_client_secret_input)
+            .on_input(Message::RaindropClientSecretChanged)
+            .on_submit(Message::SubmitRaindropSignIn)
+            .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+            .width(Length::Fill),
+        row![
+            toolbar_button("Cancel", tokens).on_press(Message::CloseOverlay),
+            sign_in_button,
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::SM)
+    .padding(Spacing::LG);
+
+    container(
+        container(dialog)
+            .width(560.0)
+            .style(move |_| container_style(tokens, Class::JumpOverlay)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center(Length::Fill)
+    .style(move |_| container_style(tokens, Class::PresentationOverlay))
+    .into()
+}
+
+pub(crate) fn view_raindrop_import_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let selected_count = app.library.selected_raindrop_pdf_ids.len();
+    let new_folder_ready = !app.library.raindrop_import_new_folder_active
+        || !app
+            .library
+            .raindrop_import_new_folder_name
+            .trim()
+            .is_empty();
+    let can_import = selected_count > 0 && new_folder_ready;
+    let import_button = if can_import {
+        toolbar_button("Import", tokens).on_press(Message::ImportSelectedRaindropPdfs)
+    } else {
+        toolbar_button("Import", tokens)
+    };
+
+    let pdf_count = app
+        .library
+        .raindrop_import_preview
+        .as_ref()
+        .map_or(0, |preview| preview.pdfs.len());
+    let account_label = app
+        .library
+        .raindrop_import_preview
+        .as_ref()
+        .map_or("Raindrop.io", |preview| preview.account_label.as_str());
+
+    let pdf_panel: Element<'_, Message> =
+        if let Some(preview) = app.library.raindrop_import_preview.as_ref() {
+            let mut rows = column![].spacing(Spacing::SM);
+            for pdf in &preview.pdfs {
+                rows = rows.push(raindrop_pdf_row(app, pdf, tokens));
+            }
+            container(
+                scrollable(rows)
+                    .height(RAINDROP_IMPORT_PDF_PANEL_HEIGHT)
+                    .style(move |_, status| scrollable_style(tokens, Class::LibraryRow, status)),
+            )
+            .width(Length::Fill)
+            .height(RAINDROP_IMPORT_PDF_PANEL_HEIGHT)
+            .padding(Spacing::SM)
+            .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
+            .into()
+        } else {
+            container(
+                column![
+                    text("Loading PDFs from Raindrop.io")
+                        .size(FontSize::MD)
+                        .font(ui_font(FontWeight::SEMIBOLD))
+                        .color(tokens.text_primary),
+                    text("Fetching your remote PDF list and preview images.")
+                        .size(FontSize::SM)
+                        .color(tokens.text_secondary),
+                    container(progress_bar(0.42, tokens)).width(Length::Fill),
+                ]
+                .spacing(Spacing::MD),
+            )
+            .width(Length::Fill)
+            .height(RAINDROP_IMPORT_PDF_PANEL_HEIGHT)
+            .center(Length::Fill)
+            .padding(Spacing::LG)
+            .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
+            .into()
+        };
+
+    let dialog = column![
+        row![
+            column![
+                text("Import from Raindrop.io")
+                    .size(FontSize::HEADING)
+                    .font(ui_font(FontWeight::SEMIBOLD))
+                    .color(tokens.text_primary),
+                text(if app.library.raindrop_import_preview.is_some() {
+                    format!(
+                        "{} found in {}. All PDFs are selected by default.",
+                        format_count(pdf_count, "PDF"),
+                        account_label
+                    )
+                } else {
+                    format!("Preparing import from {account_label}.")
+                })
+                .size(FontSize::MD)
+                .color(tokens.text_secondary),
+            ]
+            .spacing(Spacing::XS)
+            .width(Length::Fill),
+            text(format_count(selected_count, "PDF"))
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(tokens.text_secondary),
+        ]
+        .spacing(Spacing::LG)
+        .align_y(iced::Alignment::Center),
+        row![
+            toolbar_button("Select all", tokens).on_press(Message::SelectAllRaindropPdfs),
+            toolbar_button("Select none", tokens).on_press(Message::ClearAllRaindropPdfs),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+        pdf_panel,
+        row![
+            column![
+                text("Import destination")
+                    .size(FontSize::MD)
+                    .font(ui_font(FontWeight::SEMIBOLD))
+                    .color(tokens.text_primary),
+                text("Choose where selected Raindrop PDFs should land.")
+                    .size(FontSize::SM)
+                    .color(tokens.text_secondary),
+            ]
+            .spacing(Spacing::XS)
+            .width(Length::Fill),
+            raindrop_import_location_selector(app, tokens),
+        ]
+        .spacing(Spacing::LG)
+        .align_y(iced::Alignment::Start),
+        row![
+            toolbar_button("Cancel", tokens).on_press(Message::CloseOverlay),
+            import_button,
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::SM)
+    .padding(Spacing::LG);
+
+    container(
+        container(dialog)
+            .width(RAINDROP_IMPORT_DIALOG_WIDTH)
+            .height(RAINDROP_IMPORT_DIALOG_HEIGHT)
+            .style(move |_| container_style(tokens, Class::JumpOverlay)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center(Length::Fill)
+    .style(move |_| container_style(tokens, Class::PresentationOverlay))
+    .into()
+}
+
+pub(crate) fn view_raindrop_import_progress_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let Some(progress) = app.library.raindrop_import_progress.as_ref() else {
+        return container("").into();
+    };
+    let total = progress.total.max(1);
+    let value = progress.progress_basis_points.map_or_else(
+        || progress.completed as f32 / total as f32,
+        |basis_points| f32::from(basis_points) / 10_000.0,
+    );
+    let status = match progress.phase {
+        RaindropImportPhase::PreparingImports => String::from("Preparing Imports"),
+        RaindropImportPhase::DownloadingImportFiles => String::from("Downloading Import Files"),
+        RaindropImportPhase::ImportingDownloadedFiles if progress.failed => {
+            format!(
+                "Importing downloaded Files: skipped {} of {}",
+                progress.completed,
+                format_count(progress.total, "PDF")
+            )
+        }
+        RaindropImportPhase::ImportingDownloadedFiles => {
+            format!(
+                "Importing downloaded Files: imported {} of {}",
+                progress.completed,
+                format_count(progress.total, "PDF")
+            )
+        }
+    };
+
+    let content = column![
+        text("Importing from Raindrop.io")
+            .size(FontSize::HEADING)
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .color(tokens.text_primary),
+        text(status).size(FontSize::MD).color(tokens.text_secondary),
+        container(progress_bar(value, tokens)).width(Length::Fill),
+        text(truncate_for_width_with_font(
+            &progress.current_title,
+            400.0,
+            0.0,
+            FontSize::SM
+        ))
+        .size(FontSize::SM)
+        .font(ui_font(FontWeight::MEDIUM))
+        .color(if progress.failed {
+            tokens.error
+        } else {
+            tokens.text_secondary
+        })
+        .wrapping(Wrapping::None),
+        row![
+            text("Cancel rolls back PDFs imported so far.")
+                .size(FontSize::SM)
+                .color(tokens.text_secondary)
+                .width(Length::Fill),
+            toolbar_button("Cancel import", tokens).on_press(Message::CancelRaindropImport),
+        ]
+        .spacing(Spacing::MD)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::LG);
+
+    container(
+        container(content)
+            .width(460.0)
+            .style(move |_| container_style(tokens, Class::JumpOverlay)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center(Length::Fill)
+    .style(move |_| container_style(tokens, Class::PresentationOverlay))
+    .into()
+}
+
+fn raindrop_import_location_selector<'a>(
+    app: &'a PDFolioApp,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let preserve_structure =
+        raindrop_import_preserves_structure(&app.library.raindrop_import_destination);
+    let root_folder = raindrop_import_root_folder(&app.library.raindrop_import_destination);
+    let selected_label = if app.library.raindrop_import_new_folder_active {
+        String::from("New folder")
+    } else {
+        raindrop_import_root_label(app, root_folder.as_ref())
+    };
+
+    let mut content = column![
+        checkbox(preserve_structure)
+            .label("Preserve Raindrop folder structure")
+            .on_toggle(Message::RaindropPreserveFolderStructureToggled)
+            .size(FontSize::MD)
+            .text_size(FontSize::MD),
+        toolbar_button(format!("Import location: {selected_label}"), tokens)
+            .on_press(Message::ToggleRaindropImportLocationMenu)
+            .width(Length::Fill),
+    ]
+    .spacing(Spacing::SM)
+    .width(320.0);
+
+    if app.library.raindrop_import_location_menu_open {
+        content = content.push(raindrop_import_location_menu(
+            app,
+            root_folder.as_ref(),
+            tokens,
+        ));
+    }
+
+    if app.library.raindrop_import_new_folder_active {
+        content = content.push(
+            column![
+                text("New Folder Name:")
+                    .size(FontSize::SM)
+                    .font(ui_font(FontWeight::SEMIBOLD))
+                    .color(tokens.text_primary),
+                text_input("Folder name", &app.library.raindrop_import_new_folder_name)
+                    .on_input(Message::RaindropImportNewFolderNameChanged)
+                    .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+                    .width(Length::Fill),
+            ]
+            .spacing(Spacing::XS),
+        );
+    }
+
+    container(content).width(320.0).into()
+}
+
+fn raindrop_import_location_menu<'a>(
+    app: &'a PDFolioApp,
+    selected_folder: Option<&FolderId>,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let mut rows = column![raindrop_import_location_row(
+        "Library",
+        0,
+        !app.library.raindrop_import_new_folder_active && selected_folder.is_none(),
+        false,
+        false,
+        Message::RaindropImportRootChanged(None),
+        None,
+        tokens,
+    )]
+    .spacing(Spacing::XS);
+
+    rows = rows.push(raindrop_import_folder_rows(
+        app,
+        None,
+        selected_folder,
+        0,
+        tokens,
+    ));
+    rows = rows.push(raindrop_new_folder_row(tokens));
+
+    container(
+        scrollable(rows)
+            .height(220.0)
+            .style(move |_, status| scrollable_style(tokens, Class::LibraryRow, status)),
+    )
+    .width(Length::Fill)
+    .padding(Spacing::XS)
+    .style(move |_| container_style(tokens, Class::MenuPanel))
+    .into()
+}
+
+fn raindrop_import_folder_rows<'a>(
+    app: &'a PDFolioApp,
+    parent_id: Option<&FolderId>,
+    selected_folder: Option<&FolderId>,
+    depth: usize,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let mut folders = app
+        .library
+        .library_folders
+        .iter()
+        .filter(|folder| folder.parent_id.as_ref() == parent_id)
+        .collect::<Vec<_>>();
+    folders.sort_by(|a, b| {
+        a.manual_order
+            .cmp(&b.manual_order)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let mut rows = column![].spacing(Spacing::XS);
+    for folder in folders {
+        let has_children = app
+            .library
+            .library_folders
+            .iter()
+            .any(|child| child.parent_id.as_ref() == Some(&folder.id));
+        let expanded = app
+            .library
+            .expanded_raindrop_import_location_folders
+            .contains(&folder.id);
+        rows = rows.push(raindrop_import_location_row(
+            &folder.name,
+            depth + 1,
+            selected_folder == Some(&folder.id),
+            has_children,
+            expanded,
+            Message::RaindropImportRootChanged(Some(folder.id.clone())),
+            has_children.then(|| Message::ToggleRaindropImportLocationFolder(folder.id.clone())),
+            tokens,
+        ));
+        if has_children && expanded {
+            rows = rows.push(raindrop_import_folder_rows(
+                app,
+                Some(&folder.id),
+                selected_folder,
+                depth + 1,
+                tokens,
+            ));
+        }
+    }
+
+    rows.into()
+}
+
+fn raindrop_import_location_row<'a>(
+    label: &'a str,
+    depth: usize,
+    selected: bool,
+    has_children: bool,
+    expanded: bool,
+    select_message: Message,
+    toggle_message: Option<Message>,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let chevron = if has_children {
+        if expanded {
+            "v"
+        } else {
+            ">"
+        }
+    } else {
+        ""
+    };
+    let mut row_content = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
+    row_content = row_content.push(container("").width((depth as f32 * 14.0).min(70.0)));
+    let fold_control: Element<'a, Message> = if has_children {
+        button(
+            text(chevron)
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::SEMIBOLD))
+                .color(tokens.text_secondary),
+        )
+        .padding(0)
+        .width(20.0)
+        .on_press(toggle_message.unwrap_or_else(|| select_message.clone()))
+        .style(move |_, _| iced::widget::button::Style {
+            background: None,
+            text_color: tokens.text_secondary,
+            border: iced::Border::default(),
+            shadow: iced::Shadow::default(),
+            snap: true,
+        })
+        .into()
+    } else {
+        container("").width(20.0).into()
+    };
+    row_content = row_content.push(fold_control);
+    row_content = row_content.push(
+        text(label)
+            .size(FontSize::SM)
+            .font(ui_font(if selected {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::REGULAR
+            }))
+            .color(if selected {
+                tokens.text_primary
+            } else {
+                tokens.text_secondary
+            })
+            .width(Length::Fill),
+    );
+
+    button(container(row_content).padding([2.0, Spacing::XS]))
+        .width(Length::Fill)
+        .on_press(select_message)
+        .style(move |_, status| button_style(tokens, Class::MenuItem, status))
+        .into()
+}
+
+fn raindrop_new_folder_row<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(FOLDER_PLUS_SVG))
+        .width(18.0)
+        .height(18.0)
+        .style(move |_, _| iced::widget::svg::Style {
+            color: Some(tokens.text_primary),
+        });
+    let content = row![
+        icon,
+        text("New folder")
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .color(tokens.text_primary)
+    ]
+    .spacing(Spacing::SM)
+    .padding([2.0, Spacing::XS])
+    .align_y(iced::Alignment::Center);
+
+    button(content)
+        .width(Length::Fill)
+        .on_press(Message::StartNewRaindropImportFolder)
+        .style(move |_, status| button_style(tokens, Class::MenuItem, status))
+        .into()
+}
+
+fn raindrop_import_root_label(app: &PDFolioApp, root_folder: Option<&FolderId>) -> String {
+    root_folder
+        .and_then(|folder_id| {
+            app.library
+                .library_folders
+                .iter()
+                .find(|folder| &folder.id == folder_id)
+        })
+        .map_or_else(|| String::from("Library"), |folder| folder.name.clone())
+}
+
+fn raindrop_import_preserves_structure(destination: &RaindropImportDestination) -> bool {
+    matches!(
+        destination,
+        RaindropImportDestination::PreserveRaindropFolders
+            | RaindropImportDestination::PreserveRaindropFoldersUnder(_)
+    )
+}
+
+fn raindrop_import_root_folder(destination: &RaindropImportDestination) -> Option<FolderId> {
+    match destination {
+        RaindropImportDestination::PreserveRaindropFoldersUnder(folder_id) => folder_id.clone(),
+        RaindropImportDestination::LocalFolder(folder_id) => Some(folder_id.clone()),
+        RaindropImportDestination::PreserveRaindropFolders
+        | RaindropImportDestination::LibraryRoot => None,
+    }
+}
+
+fn raindrop_pdf_row<'a>(
+    app: &'a PDFolioApp,
+    pdf: &'a RaindropPdfCandidate,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let id = pdf.id;
+    let selected = app.library.selected_raindrop_pdf_ids.contains(&id);
+    let mut meta = Vec::new();
+    if let Some(file_name) = pdf.file_name.as_deref().filter(|name| *name != pdf.title) {
+        meta.push(file_name.to_owned());
+    }
+    if let Some(collection) = pdf.collection_title.as_deref() {
+        meta.push(collection.to_owned());
+    }
+    if let Some(file_size) = pdf.file_size {
+        meta.push(format_remote_file_size(file_size));
+    }
+
+    let tag_row = if pdf.tags.is_empty() {
+        text("No tags")
+            .size(FontSize::SM)
+            .color(tokens.text_secondary)
+            .into()
+    } else {
+        ghost_tags_row(pdf.tags.clone(), tokens, 1.0)
+    };
+
+    let details = column![
+        text(truncate_for_width_with_font(
+            &pdf.title,
+            500.0,
+            0.0,
+            FontSize::MD
+        ))
+        .size(FontSize::MD)
+        .font(ui_font(FontWeight::SEMIBOLD))
+        .color(tokens.text_primary)
+        .wrapping(Wrapping::None),
+        text(if meta.is_empty() {
+            String::from("Remote PDF")
+        } else {
+            meta.join(" . ")
+        })
+        .size(FontSize::SM)
+        .color(tokens.text_secondary),
+        tag_row,
+    ]
+    .spacing(Spacing::XS)
+    .width(Length::Fill);
+
+    let row_content = row![
+        selection_checkbox(selected, tokens, Message::RaindropPdfToggled(id, !selected),),
+        raindrop_thumbnail(app, pdf, tokens),
+        details,
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::SM)
+    .align_y(iced::Alignment::Center);
+
+    let surface = container(row_content).width(Length::Fill).style(move |_| {
+        library_entry_container_style(
+            tokens,
+            Class::LibraryRow,
+            LibraryEntryRenderMode::Normal,
+            selected,
+            0.0,
+        )
+    });
+
+    mouse_area(surface)
+        .on_press(Message::RaindropPdfToggled(id, !selected))
+        .into()
+}
+
+fn raindrop_thumbnail<'a>(
+    app: &'a PDFolioApp,
+    pdf: &RaindropPdfCandidate,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let width = 54.0;
+    let height = 72.0;
+    if let Some(handle) = app.library.raindrop_pdf_thumbnails.get(&pdf.id) {
+        container(
+            image(handle.clone())
+                .width(width)
+                .height(height)
+                .content_fit(ContentFit::Cover),
+        )
+        .width(width)
+        .height(height)
+        .clip(true)
+        .style(move |_| container_style(tokens, Class::PagePlaceholder))
+        .into()
+    } else {
+        container(document_preview_lines(width, height, tokens, 1.0))
+            .width(width)
+            .height(height)
+            .clip(true)
+            .style(move |_| container_style(tokens, Class::PagePlaceholder))
+            .into()
+    }
+}
+
+fn format_remote_file_size(bytes: u64) -> String {
+    let kib = bytes as f64 / 1024.0;
+    if kib < 1024.0 {
+        format!("{kib:.0} KiB")
+    } else {
+        format!("{:.1} MiB", kib / 1024.0)
+    }
+}
+
 pub(crate) fn confirmation_copy<'a>(
     action: &'a ConfirmationAction,
     app: &'a PDFolioApp,
@@ -144,13 +936,32 @@ pub(crate) fn confirmation_copy<'a>(
         ConfirmationAction::DeleteFolder(folder_id) => (
             "Delete folder?",
             format!(
-                "This removes the folder \"{}\" and any nested folders. PDFs remain in the library and on disk.",
+                "This removes the folder \"{}\" and any nested folders. {} in this folder tree will also be deleted from the library. Files on disk will not be deleted.",
                 app.library.library_folders
                     .iter()
                     .find(|folder| &folder.id == folder_id)
-                    .map_or("Selected folder", |folder| folder.name.as_str())
+                    .map_or("Selected folder", |folder| folder.name.as_str()),
+                format_count(folder_delete_entry_count(app, folder_id), "PDF")
             ),
             "Delete",
         ),
     }
+}
+
+fn folder_delete_entry_count(app: &PDFolioApp, folder_id: &FolderId) -> usize {
+    let folder_ids = app.folder_subtree_ids(folder_id);
+    app.library
+        .library_entries
+        .iter()
+        .filter(|entry| {
+            entry
+                .folders
+                .iter()
+                .any(|folder| folder_ids.contains(&folder.id))
+        })
+        .count()
+}
+
+fn folder_delete_nested_folder_count(app: &PDFolioApp, folder_id: &FolderId) -> usize {
+    app.folder_subtree_ids(folder_id).len().saturating_sub(1)
 }

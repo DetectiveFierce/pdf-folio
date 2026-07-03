@@ -22,7 +22,6 @@
 //!
 //! [`iced`]: https://docs.rs/iced
 
-
 pub use pdf_folio_style as style;
 pub use pdf_folio_style::theme;
 
@@ -90,8 +89,12 @@ use pdf_folio_core::{Annotation, OutlineNode, PageTextLayer, PdfDoc, TileCache, 
 #[cfg(test)]
 use pdf_folio_db::NewLibraryEntry;
 use pdf_folio_db::{
-    Db, EntryId, Folder, FolderId, LibraryEntry, LibraryLayoutMode, LibraryPreferences,
-    LibrarySortMode, LibraryWatchEvent,
+    Db, EntryId, Folder, FolderId, ImportedEntry, LibraryEntry, LibraryLayoutMode,
+    LibraryPreferences, LibrarySortMode, LibraryWatchEvent,
+};
+use pdf_folio_raindrop::{
+    RaindropImportDestination, RaindropImportPhase, RaindropImportPreview, RaindropImportProgress,
+    RaindropPdfCandidate,
 };
 
 use crate::library::drag::{
@@ -154,12 +157,12 @@ use crate::platform::file_manager_commands;
 #[cfg(test)]
 use crate::platform::{file_manager_command, file_uri};
 use crate::style::{
-    container_style, display_font, empty_state, icon_button, master_checkbox, mix_color,
-    progress_bar, search_input_with_class, section_heading, selection_checkbox, side_border,
-    side_border_for_class, sidebar_scrollable_style, tag_pill, text_input_style, toc_entry,
-    toolbar_button, ui_font, viewer_primitives, Class, ComponentState, FontSize, FontWeight,
-    LabelSection, MasterCheckboxState, Spacing, StyleBook, ThemeTokens, VisualOverride,
-    UI_FONT_FAMILY,
+    button_style, container_style, display_font, empty_state, icon_button, master_checkbox,
+    mix_color, progress_bar, scrollable_style, search_input_with_class, section_heading,
+    selection_checkbox, side_border, side_border_for_class, sidebar_scrollable_style, tag_pill,
+    text_input_style, toc_entry, toolbar_button, ui_font, viewer_primitives, Class, ComponentState,
+    FontSize, FontWeight, LabelSection, MasterCheckboxState, Spacing, StyleBook, ThemeTokens,
+    VisualOverride, UI_FONT_FAMILY,
 };
 #[cfg(test)]
 use crate::subscriptions::style_watch_event_should_reload;
@@ -180,7 +183,7 @@ use crate::viewer::zoom::{
 #[cfg(test)]
 use notify::EventKind;
 
-use app_update::update;
+use app_update::{pending_raindrop_rollback_check_task, update};
 use app_view::view;
 use app_viewer_layout::*;
 use pdf_folio_ui_components::library::view::with_alpha;
@@ -359,6 +362,7 @@ pub struct LibraryRuntime {
     pub library_folders: Vec<Folder>,
     pub library_sort_mode: LibrarySortMode,
     pub selected_folder: Option<FolderId>,
+    pub details_folder_id: Option<FolderId>,
     pub new_folder_name: String,
     pub create_folder_dialog_open: bool,
     pub folder_rename_input: String,
@@ -377,6 +381,7 @@ pub struct LibraryRuntime {
     pub library_sidebar_tab: LibrarySidebarTab,
     pub library_tree_root_expanded: bool,
     pub collapsed_library_tree_folders: HashSet<FolderId>,
+    pub folder_details_sidebar_open: bool,
     pub thumbnails: HashMap<ThumbnailCacheKey, ThumbnailView>,
     pub pending_thumbnails: HashSet<ThumbnailCacheKey>,
     pub active_tag_filter: Option<String>,
@@ -392,10 +397,29 @@ pub struct LibraryRuntime {
     pub details_author_input: String,
     pub library_status: Option<String>,
     pub library_error: Option<String>,
+    pub library_startup_loading: bool,
+    pub raindrop_connect_dialog_open: bool,
+    pub raindrop_callback_copied: bool,
+    pub raindrop_client_id_input: String,
+    pub raindrop_client_secret_input: String,
+    pub raindrop_import_dialog_open: bool,
+    pub raindrop_import_preview: Option<RaindropImportPreview>,
+    pub raindrop_pdf_thumbnails: HashMap<i64, image::Handle>,
+    pub selected_raindrop_pdf_ids: HashSet<i64>,
+    pub raindrop_import_destination: RaindropImportDestination,
+    pub raindrop_import_location_menu_open: bool,
+    pub expanded_raindrop_import_location_folders: HashSet<FolderId>,
+    pub raindrop_import_new_folder_active: bool,
+    pub raindrop_import_new_folder_name: String,
+    pub raindrop_import_progress: Option<RaindropImportProgressView>,
+    pub raindrop_rollback_recovery_active: bool,
+    pub raindrop_rollback_recovery_status: Option<String>,
     pub dismissed_library_errors: HashSet<String>,
     pub bulk_operation_progress: Option<BulkOperationProgress>,
     pub folder_drop_flash: Option<(FolderId, Instant)>,
     pub last_library_click: Option<(EntryId, Instant)>,
+    pub last_folder_click: Option<(Option<FolderId>, Instant)>,
+    pub folder_drag_started_in_tree: bool,
     pub library_card_hover_animations: HashMap<EntryId, Animation<bool>>,
     pub animation_now: Instant,
     pub library_drag: Option<LibraryDragState>,
@@ -406,6 +430,8 @@ pub struct LibraryRuntime {
 #[derive(Debug, Clone)]
 pub struct ChromeRuntime {
     pub pending_confirmation: Option<ConfirmationAction>,
+    pub folder_delete_warning_suppressed: bool,
+    pub folder_delete_skip_warning_checked: bool,
     pub open_app_menu: Option<AppMenu>,
     pub open_view_menu_flyout: Option<ViewMenuFlyout>,
     pub open_selection_menu: Option<SelectionMenu>,
@@ -450,6 +476,20 @@ pub struct BulkOperationProgress {
     pub total: usize,
     /// Time when the operation began, used for indeterminate animation.
     pub started_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+pub struct RaindropImportProgressView {
+    pub completed: usize,
+    pub total: usize,
+    pub current_title: String,
+    pub phase: RaindropImportPhase,
+    pub progress_basis_points: Option<u16>,
+    pub failed: bool,
+    pub started_at: Instant,
+    pub imported_entries: Vec<ImportedEntry>,
+    pub created_folders: Vec<FolderId>,
+    pub task_handle: Option<iced::task::Handle>,
 }
 
 #[derive(Debug, Clone)]
@@ -501,11 +541,9 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
                 .clone()
                 .map(open_document_task)
                 .unwrap_or_else(Task::none);
-            let load_task = Task::batch([app.clone().refresh_library(), app.refresh_folders()]);
-            let attribution_task = attribute_pending_metadata_task(Arc::clone(&app.db));
             (
                 app.clone(),
-                Task::batch([open_task, load_task, attribution_task]),
+                Task::batch([open_task, pending_raindrop_rollback_check_task()]),
             )
         },
         update,

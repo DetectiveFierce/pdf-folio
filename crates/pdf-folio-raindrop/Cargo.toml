@@ -1,28 +1,20 @@
 [package]
-name = "pdf-folio-ui"
+name = "pdf-folio-raindrop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[lib]
-path = "src/app.rs"
-
 [dependencies]
 anyhow.workspace = true
+blake3.workspace = true
 directories.workspace = true
-iced.workspace = true
-notify.workspace = true
 pdf-folio-core = { path = "../pdf-folio-core" }
 pdf-folio-db = { path = "../pdf-folio-db" }
-pdf-folio-raindrop = { path = "../pdf-folio-raindrop" }
-pdf-folio-style = { path = "../pdf-folio-style" }
-pdf-folio-viewer = { path = "../pdf-folio-viewer" }
-pdf-folio-ui-components = { path = "../pdf-folio-ui-components" }
 reqwest.workspace = true
-rfd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
-tracing.workspace = true
+url.workspace = true
 webbrowser.workspace = true
+zip.workspace = true

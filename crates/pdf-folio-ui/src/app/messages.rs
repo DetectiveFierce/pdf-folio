@@ -10,6 +10,9 @@ use pdf_folio_core::{Annotation, AnnotationId, PageTextLayer, PdfDoc, TileKey};
 use pdf_folio_db::{
     EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
 };
+use pdf_folio_raindrop::{
+    RaindropImportDestination, RaindropImportPreview, RaindropImportProgress, RaindropImportSummary,
+};
 
 use crate::library::state::{LibraryMetadataDensity, LibraryReadingFilter};
 use crate::library::thumbnails::ThumbnailSize;
@@ -59,6 +62,8 @@ pub enum AppMenuAction {
     OpenFile,
     /// Import PDFs from a folder.
     ImportFolder,
+    /// Import PDFs from Raindrop.io.
+    ImportRaindrop,
     /// Return from the viewer to the library.
     BackToLibrary,
     /// Reload the library from storage.
@@ -480,12 +485,68 @@ pub enum Message {
     ImportFolderSelected(PathBuf),
     /// Bulk import finished.
     ImportFinished(ImportSummary),
+    /// Start importing PDFs from Raindrop.io.
+    ImportRaindrop,
+    /// Raindrop.io remote PDF preview loaded.
+    RaindropImportPreviewLoaded(RaindropImportPreview),
+    /// Remote Raindrop PDF thumbnail images loaded.
+    RaindropPdfThumbnailsLoaded(Vec<(i64, Vec<u8>)>),
+    /// Toggle one remote Raindrop PDF in the import picker.
+    RaindropPdfToggled(i64, bool),
+    /// Select all remote Raindrop PDFs in the import picker.
+    SelectAllRaindropPdfs,
+    /// Clear all remote Raindrop PDFs in the import picker.
+    ClearAllRaindropPdfs,
+    /// Change the selected Raindrop import destination.
+    RaindropDestinationChanged(RaindropImportDestination),
+    /// Toggle whether Raindrop folder structure is preserved during import.
+    RaindropPreserveFolderStructureToggled(bool),
+    /// Toggle the Raindrop import root folder selector.
+    ToggleRaindropImportLocationMenu,
+    /// Select the local folder treated as the import root.
+    RaindropImportRootChanged(Option<FolderId>),
+    /// Expand or collapse a folder branch in the Raindrop import location selector.
+    ToggleRaindropImportLocationFolder(FolderId),
+    /// Start creating a new import root folder.
+    StartNewRaindropImportFolder,
+    /// Update the new import root folder name.
+    RaindropImportNewFolderNameChanged(String),
+    /// Import selected PDFs from the Raindrop picker.
+    ImportSelectedRaindropPdfs,
+    /// Raindrop import progress changed.
+    RaindropImportProgressUpdated(RaindropImportProgress),
+    /// Raindrop import created a local folder.
+    RaindropImportCreatedFolder(FolderId),
+    /// Cancel the active Raindrop import and roll back imported files.
+    CancelRaindropImport,
+    /// Active Raindrop import rollback finished.
+    RaindropImportRollbackFinished { removed: usize, errors: Vec<String> },
+    /// Pending Raindrop rollback recovery check completed at startup.
+    PendingRaindropRollbackChecked(Option<String>),
+    /// Pending Raindrop rollback recovery finished.
+    PendingRaindropRollbackFinished { removed: usize, errors: Vec<String> },
+    /// Open Raindrop.io integrations settings in the browser.
+    OpenRaindropIntegrations,
+    /// Copy the Raindrop OAuth callback URL to the clipboard.
+    CopyRaindropCallbackUrl,
+    /// Raindrop OAuth client id input changed.
+    RaindropClientIdChanged(String),
+    /// Raindrop OAuth client secret input changed.
+    RaindropClientSecretChanged(String),
+    /// Start browser OAuth sign-in and import from Raindrop.io.
+    SubmitRaindropSignIn,
+    /// Raindrop.io import finished.
+    RaindropImportFinished(RaindropImportSummary),
     /// Background author attribution finished.
     AuthorAttributionFinished,
     /// Open a library entry in the viewer.
     OpenLibraryEntry(EntryId),
     /// A library entry was clicked.
     LibraryEntryClicked(EntryId),
+    /// A library folder was clicked.
+    FolderClicked(Option<FolderId>),
+    /// A library folder tree row was clicked.
+    FolderTreeClicked(Option<FolderId>),
     /// A library entry selection checkbox was toggled.
     EntryCheckboxToggled(EntryId),
     /// The master visible-entry selection checkbox was clicked.
@@ -504,6 +565,8 @@ pub enum Message {
     LibraryEntryDragMoved(Point),
     /// Begin dragging a folder for nesting.
     BeginFolderDrag(FolderId),
+    /// Begin dragging a folder from the sidebar file tree.
+    BeginFolderTreeDrag(FolderId),
     /// Cursor moved while dragging a folder.
     FolderDragMoved(Point),
     /// A folder drop target changed while dragging PDFs.
@@ -635,6 +698,8 @@ pub enum Message {
     ConfirmPendingAction,
     /// Dismiss the active confirmation dialog.
     CancelConfirmation,
+    /// Toggle the session-only folder delete warning suppression checkbox.
+    FolderDeleteWarningSuppressionToggled(bool),
     /// Details-panel title override changed.
     DetailsTitleChanged(String),
     /// Details-panel author override changed.

@@ -1,5 +1,6 @@
 //! Tantivy full-text index setup.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -131,13 +132,30 @@ impl SearchIndex {
         &self,
         documents: impl IntoIterator<Item = IndexDocument>,
     ) -> Result<()> {
-        let mut writer: IndexWriter<TantivyDocument> = self.index.writer(50_000_000)?;
-        let mut documents = documents.into_iter().peekable();
-        let Some(first) = documents.peek() else {
+        self.replace_entries_pages(documents)
+    }
+
+    /// Replaces indexed pages for one or more entries in a single commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Tantivy cannot write or commit the replacement documents.
+    pub fn replace_entries_pages(
+        &self,
+        documents: impl IntoIterator<Item = IndexDocument>,
+    ) -> Result<()> {
+        let documents = documents.into_iter().collect::<Vec<_>>();
+        if documents.is_empty() {
             return Ok(());
-        };
-        let entry_id = first.id.clone();
-        writer.delete_term(Term::from_field_text(self.fields.id, &entry_id));
+        }
+
+        let mut writer: IndexWriter<TantivyDocument> = self.index.writer(50_000_000)?;
+        let mut deleted_entry_ids = HashSet::new();
+        for document in &documents {
+            if deleted_entry_ids.insert(document.id.clone()) {
+                writer.delete_term(Term::from_field_text(self.fields.id, &document.id));
+            }
+        }
 
         for document in documents {
             writer.add_document(doc!(
@@ -204,8 +222,24 @@ impl SearchIndex {
     ///
     /// Returns an error when Tantivy cannot commit the deletion.
     pub fn delete_entry(&self, entry_id: &str) -> Result<()> {
+        self.delete_entries([entry_id])
+    }
+
+    /// Deletes all pages for multiple entries from the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Tantivy cannot commit the deletion.
+    pub fn delete_entries<'a>(&self, entry_ids: impl IntoIterator<Item = &'a str>) -> Result<()> {
+        let entry_ids = entry_ids.into_iter().collect::<Vec<_>>();
+        if entry_ids.is_empty() {
+            return Ok(());
+        }
+
         let mut writer: IndexWriter<TantivyDocument> = self.index.writer(50_000_000)?;
-        writer.delete_term(Term::from_field_text(self.fields.id, entry_id));
+        for entry_id in entry_ids {
+            writer.delete_term(Term::from_field_text(self.fields.id, entry_id));
+        }
         writer.commit()?;
         Ok(())
     }

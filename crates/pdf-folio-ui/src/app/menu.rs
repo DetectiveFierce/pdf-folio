@@ -34,6 +34,7 @@ pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -
     Some(match action {
         AppMenuAction::OpenFile => Message::OpenFileDialog,
         AppMenuAction::ImportFolder => Message::ImportFolderDialog,
+        AppMenuAction::ImportRaindrop => Message::ImportRaindrop,
         AppMenuAction::BackToLibrary => Message::BackToLibrary,
         AppMenuAction::RefreshLibrary => Message::LibraryRefresh,
         AppMenuAction::SelectAllVisible => Message::SelectAllVisibleLibraryEntries,
@@ -245,6 +246,14 @@ pub(crate) fn app_menu_panel<'a>(
                     "",
                     app.mode == AppMode::Library,
                     AppMenuAction::ImportFolder,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "ImportRaindrop", "Import from Raindrop.io..."),
+                    "",
+                    app.mode == AppMode::Library,
+                    AppMenuAction::ImportRaindrop,
                     tokens,
                     app.layout().app_menu_item_height,
                 ))
@@ -492,6 +501,14 @@ pub(crate) fn app_menu_panel<'a>(
                     "",
                     app.mode == AppMode::Library,
                     AppMenuAction::ImportFolder,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "ImportRaindrop", "Import from Raindrop.io..."),
+                    "",
+                    app.mode == AppMode::Library,
+                    AppMenuAction::ImportRaindrop,
                     tokens,
                     app.layout().app_menu_item_height,
                 ))

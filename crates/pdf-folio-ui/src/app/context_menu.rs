@@ -33,8 +33,7 @@ impl PDFolioApp {
                 }
             }
             ContextMenuTarget::Folder(folder_id) => {
-                self.library.selected_folder = folder_id.clone();
-                self.sync_folder_rename_input();
+                self.select_folder_for_details(folder_id.clone());
             }
             ContextMenuTarget::LibraryBackground | ContextMenuTarget::ViewerCanvas => {}
         }
@@ -45,10 +44,7 @@ impl PDFolioApp {
         });
     }
 
-    pub(super) fn context_menu_action_message(
-        &self,
-        action: ContextMenuAction,
-    ) -> Option<Message> {
+    pub(super) fn context_menu_action_message(&self, action: ContextMenuAction) -> Option<Message> {
         let target = &self.chrome.open_context_menu.as_ref()?.target;
         match action {
             ContextMenuAction::Open => match target {
@@ -333,9 +329,9 @@ fn folder_context_groups(
 ) -> Vec<Vec<ContextMenuItemSpec>> {
     let has_folder = folder_id.is_some();
     let has_parent = app
-        .selected_folder()
+        .details_folder()
         .is_some_and(|folder| folder.parent_id.is_some());
-    let has_grandparent = app.selected_folder().is_some_and(|folder| {
+    let has_grandparent = app.details_folder().is_some_and(|folder| {
         folder.parent_id.as_ref().is_some_and(|parent_id| {
             app.library
                 .library_folders

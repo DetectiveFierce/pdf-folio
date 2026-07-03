@@ -13,7 +13,6 @@
 //!
 //! [`clap`]: https://docs.rs/clap
 
-
 use std::path::PathBuf;
 
 use anyhow::Result;

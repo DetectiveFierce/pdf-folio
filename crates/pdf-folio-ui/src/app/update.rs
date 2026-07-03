@@ -1,7 +1,414 @@
 use super::*;
+use directories::ProjectDirs;
+use iced::futures::SinkExt;
 
 #[path = "update/shortcuts.rs"]
 mod shortcuts;
+
+enum RaindropImportTaskEvent {
+    CreatedFolder(FolderId),
+    Progress(RaindropImportProgress),
+    Finished(anyhow::Result<pdf_folio_raindrop::RaindropImportSummary>),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct PendingRaindropRollback {
+    entries: Vec<PendingRaindropRollbackEntry>,
+    folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct PendingRaindropRollbackEntry {
+    id: String,
+    path: PathBuf,
+    inserted: bool,
+}
+
+impl PendingRaindropRollback {
+    fn from_progress(imported_entries: Vec<ImportedEntry>, created_folders: Vec<FolderId>) -> Self {
+        Self {
+            entries: imported_entries
+                .into_iter()
+                .map(|entry| PendingRaindropRollbackEntry {
+                    id: entry.id.as_str().to_owned(),
+                    path: entry.path,
+                    inserted: entry.inserted,
+                })
+                .collect(),
+            folders: created_folders
+                .into_iter()
+                .map(|folder_id| folder_id.as_str().to_owned())
+                .collect(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty() && self.folders.is_empty()
+    }
+}
+
+fn pending_raindrop_rollback_path() -> anyhow::Result<PathBuf> {
+    let project_dirs = ProjectDirs::from("dev", "pdf-folio", "PDF-Folio")
+        .ok_or_else(|| anyhow::anyhow!("Could not find a data directory for PDF-Folio."))?;
+    Ok(project_dirs
+        .data_dir()
+        .join("raindrop")
+        .join("pending-rollback.json"))
+}
+
+fn load_pending_raindrop_rollback() -> anyhow::Result<Option<PendingRaindropRollback>> {
+    let path = pending_raindrop_rollback_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let json = std::fs::read_to_string(&path)
+        .map_err(|error| anyhow::anyhow!("Could not read {}: {error}", path.display()))?;
+    let rollback = serde_json::from_str::<PendingRaindropRollback>(&json)
+        .map_err(|error| anyhow::anyhow!("Could not parse {}: {error}", path.display()))?;
+    Ok(Some(rollback))
+}
+
+fn save_pending_raindrop_rollback(rollback: &PendingRaindropRollback) -> anyhow::Result<()> {
+    let path = pending_raindrop_rollback_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| anyhow::anyhow!("Could not create {}: {error}", parent.display()))?;
+    }
+    std::fs::write(&path, serde_json::to_vec_pretty(rollback)?)
+        .map_err(|error| anyhow::anyhow!("Could not write {}: {error}", path.display()))?;
+    Ok(())
+}
+
+fn clear_pending_raindrop_rollback() -> anyhow::Result<()> {
+    let path = pending_raindrop_rollback_path()?;
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(anyhow::anyhow!(
+            "Could not remove {}: {error}",
+            path.display()
+        )),
+    }
+}
+
+fn cleanup_raindrop_import_files(
+    entries: Vec<PendingRaindropRollbackEntry>,
+    clear_when_done: bool,
+) {
+    if entries.is_empty() {
+        if clear_when_done {
+            if let Err(error) = clear_pending_raindrop_rollback() {
+                tracing::debug!(error = %error, "Could not clear pending Raindrop rollback");
+            }
+        }
+        return;
+    }
+
+    std::thread::spawn(move || {
+        for entry in entries {
+            if let Err(error) = std::fs::remove_file(&entry.path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::debug!(
+                        path = %entry.path.display(),
+                        error = %error,
+                        "Could not remove canceled Raindrop import file"
+                    );
+                }
+            }
+        }
+        if clear_when_done {
+            if let Err(error) = clear_pending_raindrop_rollback() {
+                tracing::debug!(error = %error, "Could not clear pending Raindrop rollback");
+            }
+        }
+    });
+}
+
+fn raindrop_thumbnail_task(pdfs: Vec<RaindropPdfCandidate>) -> Task<Message> {
+    let candidates = pdfs
+        .into_iter()
+        .filter_map(|pdf| pdf.thumbnail_url.map(|url| (pdf.id, url)))
+        .collect::<Vec<_>>();
+
+    if candidates.is_empty() {
+        return Task::none();
+    }
+
+    Task::perform(
+        async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(12))
+                .build()?;
+            let limiter = Arc::new(tokio::sync::Semaphore::new(12));
+            let mut tasks = Vec::with_capacity(candidates.len());
+
+            for (id, url) in candidates {
+                let client = client.clone();
+                let limiter = Arc::clone(&limiter);
+                tasks.push(tokio::spawn(async move {
+                    let _permit = limiter.acquire_owned().await.ok()?;
+                    let bytes = client
+                        .get(url)
+                        .send()
+                        .await
+                        .ok()?
+                        .error_for_status()
+                        .ok()?
+                        .bytes()
+                        .await
+                        .ok()?;
+                    Some((id, bytes.to_vec()))
+                }));
+            }
+
+            let mut loaded = Vec::new();
+            for task in tasks {
+                if let Ok(Some(thumbnail)) = task.await {
+                    loaded.push(thumbnail);
+                }
+            }
+
+            Ok::<_, anyhow::Error>(loaded)
+        },
+        |result| match result {
+            Ok(thumbnails) => Message::RaindropPdfThumbnailsLoaded(thumbnails),
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn raindrop_import_preserves_structure(destination: &RaindropImportDestination) -> bool {
+    matches!(
+        destination,
+        RaindropImportDestination::PreserveRaindropFolders
+            | RaindropImportDestination::PreserveRaindropFoldersUnder(_)
+    )
+}
+
+fn raindrop_import_root_folder(destination: &RaindropImportDestination) -> Option<FolderId> {
+    match destination {
+        RaindropImportDestination::PreserveRaindropFoldersUnder(folder_id) => folder_id.clone(),
+        RaindropImportDestination::LocalFolder(folder_id) => Some(folder_id.clone()),
+        RaindropImportDestination::PreserveRaindropFolders
+        | RaindropImportDestination::LibraryRoot => None,
+    }
+}
+
+fn raindrop_import_destination(
+    preserve_structure: bool,
+    root_folder: Option<FolderId>,
+) -> RaindropImportDestination {
+    if preserve_structure {
+        match root_folder {
+            Some(folder_id) => {
+                RaindropImportDestination::PreserveRaindropFoldersUnder(Some(folder_id))
+            }
+            None => RaindropImportDestination::PreserveRaindropFolders,
+        }
+    } else {
+        match root_folder {
+            Some(folder_id) => RaindropImportDestination::LocalFolder(folder_id),
+            None => RaindropImportDestination::LibraryRoot,
+        }
+    }
+}
+
+fn raindrop_import_task(
+    db: Arc<Db>,
+    preview: pdf_folio_raindrop::RaindropImportPreview,
+    preserve_structure: bool,
+    root_folder: Option<FolderId>,
+    new_folder_name: Option<String>,
+) -> (Task<Message>, iced::task::Handle) {
+    Task::run(
+        iced::stream::channel(100, async move |mut output| {
+            let root_folder = if let Some(name) = new_folder_name {
+                match db.create_folder(&name, root_folder.as_ref()) {
+                    Ok(folder_id) => {
+                        let _ = output
+                            .send(RaindropImportTaskEvent::CreatedFolder(folder_id.clone()))
+                            .await;
+                        Some(folder_id)
+                    }
+                    Err(error) => {
+                        let _ = output
+                            .send(RaindropImportTaskEvent::Finished(Err(error)))
+                            .await;
+                        return;
+                    }
+                }
+            } else {
+                root_folder
+            };
+            let (progress_sender, mut progress_receiver) =
+                tokio::sync::mpsc::unbounded_channel::<RaindropImportProgress>();
+            let import_db = Arc::clone(&db);
+            let mut import_task = tokio::spawn(async move {
+                let destination = raindrop_import_destination(preserve_structure, root_folder);
+                pdf_folio_raindrop::import_preview_pdfs_with_progress(
+                    &import_db,
+                    preview,
+                    destination,
+                    move |progress| {
+                        let _ = progress_sender.send(progress);
+                    },
+                )
+                .await
+            });
+
+            loop {
+                tokio::select! {
+                    Some(progress) = progress_receiver.recv() => {
+                        if output
+                            .send(RaindropImportTaskEvent::Progress(progress))
+                            .await
+                            .is_err()
+                        {
+                            import_task.abort();
+                            break;
+                        }
+                    }
+                    result = &mut import_task => {
+                        let result = match result {
+                            Ok(result) => result,
+                            Err(error) => Err(anyhow::anyhow!(error)),
+                        };
+                        if result.is_ok() {
+                            let _ = clear_pending_raindrop_rollback();
+                        }
+                        let _ = output.send(RaindropImportTaskEvent::Finished(result)).await;
+                        break;
+                    }
+                }
+            }
+        }),
+        |event| match event {
+            RaindropImportTaskEvent::CreatedFolder(folder_id) => {
+                Message::RaindropImportCreatedFolder(folder_id)
+            }
+            RaindropImportTaskEvent::Progress(progress) => {
+                Message::RaindropImportProgressUpdated(progress)
+            }
+            RaindropImportTaskEvent::Finished(Ok(summary)) => {
+                Message::RaindropImportFinished(summary)
+            }
+            RaindropImportTaskEvent::Finished(Err(error)) => {
+                Message::LibraryError(error.to_string())
+            }
+        },
+    )
+    .abortable()
+}
+
+fn rollback_pending_raindrop_import_task(
+    db: Arc<Db>,
+    rollback: PendingRaindropRollback,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let mut removed = 0;
+                let mut errors = Vec::new();
+                let search_index = pdf_folio_db::SearchIndex::open_default();
+                let mut rollback = rollback;
+                if let Err(error) = save_pending_raindrop_rollback(&rollback) {
+                    errors.push(error.to_string());
+                }
+
+                let entries = std::mem::take(&mut rollback.entries);
+                let mut inserted_entry_ids = entries
+                    .iter()
+                    .filter(|entry| entry.inserted)
+                    .map(|entry| EntryId::new(entry.id.clone()))
+                    .collect::<Vec<_>>();
+                inserted_entry_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+                inserted_entry_ids.dedup_by(|left, right| left.as_str() == right.as_str());
+                let index_entry_ids = inserted_entry_ids
+                    .iter()
+                    .map(|entry_id| entry_id.as_str().to_owned())
+                    .collect::<Vec<_>>();
+                let mut entries_to_cleanup = Vec::new();
+
+                if !inserted_entry_ids.is_empty() {
+                    tracing::info!(
+                        entry_count = inserted_entry_ids.len(),
+                        "Deleting canceled Raindrop import entries in one batch"
+                    );
+                    if let Err(error) = db.delete_entries(inserted_entry_ids.iter()) {
+                        errors.push(error.to_string());
+                        rollback.entries = entries;
+                    } else {
+                        removed += inserted_entry_ids.len();
+                        if let Ok(search_index) = search_index.as_ref() {
+                            if let Err(error) = search_index
+                                .delete_entries(index_entry_ids.iter().map(String::as_str))
+                            {
+                                errors.push(format!("search index: {error}"));
+                            }
+                        }
+                        entries_to_cleanup = entries;
+                    }
+                } else {
+                    entries_to_cleanup = entries;
+                }
+
+                let mut remaining_folders = Vec::new();
+                while let Some(folder_id) = rollback.folders.pop() {
+                    let folder_id = FolderId::new(folder_id);
+                    if let Err(error) = db.delete_folder(&folder_id) {
+                        errors.push(format!("{}: {error}", folder_id.as_str()));
+                        remaining_folders.push(folder_id.as_str().to_owned());
+                    }
+                }
+                rollback.folders = remaining_folders;
+
+                if rollback.is_empty() {
+                    if entries_to_cleanup.is_empty() {
+                        if let Err(error) = clear_pending_raindrop_rollback() {
+                            errors.push(error.to_string());
+                        }
+                    } else {
+                        cleanup_raindrop_import_files(entries_to_cleanup, true);
+                    }
+                } else {
+                    if !entries_to_cleanup.is_empty() {
+                        cleanup_raindrop_import_files(entries_to_cleanup, false);
+                    }
+                    if let Err(error) = save_pending_raindrop_rollback(&rollback) {
+                        errors.push(error.to_string());
+                    }
+                }
+
+                (removed, errors)
+            })
+            .await
+        },
+        |result| match result {
+            Ok((removed, errors)) => Message::RaindropImportRollbackFinished { removed, errors },
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+pub(super) fn pending_raindrop_rollback_check_task() -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::task::spawn_blocking(move || {
+                load_pending_raindrop_rollback().map(|rollback| {
+                    rollback.map(|_| {
+                        String::from("Finishing cleanup from an interrupted Raindrop import...")
+                    })
+                })
+            })
+            .await
+        },
+        |result| match result {
+            Ok(Ok(status)) => Message::PendingRaindropRollbackChecked(status),
+            Ok(Err(error)) => Message::LibraryError(error.to_string()),
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
 
 pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
     match message {
@@ -232,6 +639,9 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::LibraryLoaded(entries) => {
             app.library.library_entries = entries;
+            app.library.library_startup_loading = false;
+            app.library.raindrop_rollback_recovery_active = false;
+            app.library.raindrop_rollback_recovery_status = None;
             app.library.library_error = None;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
@@ -265,14 +675,76 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.sync_folder_rename_input();
                 return save_library_preferences_task(app);
             }
+            if app
+                .library
+                .details_folder_id
+                .as_ref()
+                .is_some_and(|selected| {
+                    !app.library
+                        .library_folders
+                        .iter()
+                        .any(|folder| &folder.id == selected)
+                })
+            {
+                app.library.details_folder_id = None;
+            }
             app.sync_folder_rename_input();
+        }
+        Message::PendingRaindropRollbackChecked(status) => {
+            if let Some(status) = status {
+                app.library.library_startup_loading = true;
+                app.library.raindrop_rollback_recovery_active = true;
+                app.library.raindrop_rollback_recovery_status = Some(status);
+                match load_pending_raindrop_rollback() {
+                    Ok(Some(rollback)) => {
+                        return rollback_pending_raindrop_import_task(
+                            Arc::clone(&app.db),
+                            rollback,
+                        );
+                    }
+                    Ok(None) => {
+                        app.library.raindrop_rollback_recovery_active = false;
+                        return Task::batch([
+                            app.refresh_folders(),
+                            app.refresh_library(),
+                            attribute_pending_metadata_task(Arc::clone(&app.db)),
+                        ]);
+                    }
+                    Err(error) => return Task::done(Message::LibraryError(error.to_string())),
+                }
+            }
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                attribute_pending_metadata_task(Arc::clone(&app.db)),
+            ]);
+        }
+        Message::PendingRaindropRollbackFinished { removed, errors } => {
+            app.library.raindrop_rollback_recovery_status = Some(format!(
+                "Finished interrupted Raindrop cleanup and removed {}.",
+                format_count(removed, "PDF")
+            ));
+            if errors.is_empty() {
+                app.library.library_error = None;
+            } else {
+                app.library.library_error = Some(errors.join("\n"));
+            }
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                attribute_pending_metadata_task(Arc::clone(&app.db)),
+            ]);
         }
         Message::LibraryRefresh => return app.refresh_library(),
         Message::LibraryError(error) => {
+            app.library.library_startup_loading = false;
+            app.library.raindrop_rollback_recovery_active = false;
+            app.library.raindrop_rollback_recovery_status = None;
             app.library.library_status = Some(String::from("Library operation failed."));
             if !app.library.dismissed_library_errors.contains(&error) {
                 app.library.library_error = Some(error);
             }
+            app.library.raindrop_import_progress = None;
             app.library.bulk_operation_progress = None;
             app.library.pending_thumbnails.clear();
         }
@@ -304,6 +776,388 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 },
             );
         }
+        Message::ImportRaindrop => {
+            app.library.library_error = None;
+            app.library.raindrop_import_preview = None;
+            app.library.raindrop_pdf_thumbnails.clear();
+            app.library.selected_raindrop_pdf_ids.clear();
+            app.library.raindrop_import_location_menu_open = false;
+            app.library.raindrop_import_new_folder_active = false;
+            app.library.raindrop_import_new_folder_name.clear();
+            if !pdf_folio_raindrop::can_import_without_prompt() {
+                app.library.raindrop_connect_dialog_open = true;
+                app.library.raindrop_callback_copied = false;
+                app.library.library_status =
+                    Some(String::from("Connect Raindrop.io to import PDFs."));
+                return scroll_library_to_offset_task(app.library.library_scroll_offset);
+            }
+            app.library.raindrop_import_dialog_open = true;
+            app.library.library_status = Some(String::from("Loading Raindrop PDFs..."));
+            return Task::perform(
+                async move { pdf_folio_raindrop::import_preview().await },
+                |result| match result {
+                    Ok(preview) => Message::RaindropImportPreviewLoaded(preview),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::RaindropImportPreviewLoaded(preview) => {
+            let thumbnail_pdfs = preview.pdfs.clone();
+            app.library.selected_raindrop_pdf_ids = preview
+                .pdfs
+                .iter()
+                .map(|pdf| pdf.id)
+                .collect::<HashSet<_>>();
+            app.library.raindrop_import_location_menu_open = false;
+            app.library.raindrop_import_preview = Some(preview);
+            app.library.raindrop_import_dialog_open = true;
+            app.library.raindrop_connect_dialog_open = false;
+            app.library.library_error = None;
+            app.library.library_status = Some(String::from("Choose Raindrop PDFs to import."));
+            return Task::batch([
+                scroll_library_to_offset_task(app.library.library_scroll_offset),
+                raindrop_thumbnail_task(thumbnail_pdfs),
+            ]);
+        }
+        Message::RaindropPdfThumbnailsLoaded(thumbnails) => {
+            for (id, bytes) in thumbnails {
+                app.library
+                    .raindrop_pdf_thumbnails
+                    .insert(id, image::Handle::from_bytes(bytes));
+            }
+        }
+        Message::RaindropPdfToggled(id, selected) => {
+            if selected {
+                app.library.selected_raindrop_pdf_ids.insert(id);
+            } else {
+                app.library.selected_raindrop_pdf_ids.remove(&id);
+            }
+        }
+        Message::SelectAllRaindropPdfs => {
+            if let Some(preview) = app.library.raindrop_import_preview.as_ref() {
+                app.library.selected_raindrop_pdf_ids = preview
+                    .pdfs
+                    .iter()
+                    .map(|pdf| pdf.id)
+                    .collect::<HashSet<_>>();
+            }
+        }
+        Message::ClearAllRaindropPdfs => {
+            app.library.selected_raindrop_pdf_ids.clear();
+        }
+        Message::RaindropDestinationChanged(destination) => {
+            app.library.raindrop_import_destination = destination;
+        }
+        Message::RaindropPreserveFolderStructureToggled(preserve_structure) => {
+            let root_folder = raindrop_import_root_folder(&app.library.raindrop_import_destination);
+            app.library.raindrop_import_destination =
+                raindrop_import_destination(preserve_structure, root_folder);
+        }
+        Message::ToggleRaindropImportLocationMenu => {
+            app.library.raindrop_import_location_menu_open =
+                !app.library.raindrop_import_location_menu_open;
+        }
+        Message::RaindropImportRootChanged(folder_id) => {
+            let preserve_structure =
+                raindrop_import_preserves_structure(&app.library.raindrop_import_destination);
+            app.library.raindrop_import_destination =
+                raindrop_import_destination(preserve_structure, folder_id);
+            app.library.raindrop_import_location_menu_open = false;
+            app.library.raindrop_import_new_folder_active = false;
+            app.library.raindrop_import_new_folder_name.clear();
+        }
+        Message::ToggleRaindropImportLocationFolder(folder_id) => {
+            if !app
+                .library
+                .expanded_raindrop_import_location_folders
+                .insert(folder_id.clone())
+            {
+                app.library
+                    .expanded_raindrop_import_location_folders
+                    .remove(&folder_id);
+            }
+        }
+        Message::StartNewRaindropImportFolder => {
+            let preserve_structure =
+                raindrop_import_preserves_structure(&app.library.raindrop_import_destination);
+            app.library.raindrop_import_destination =
+                raindrop_import_destination(preserve_structure, None);
+            app.library.raindrop_import_location_menu_open = false;
+            app.library.raindrop_import_new_folder_active = true;
+            app.library.raindrop_import_new_folder_name.clear();
+        }
+        Message::RaindropImportNewFolderNameChanged(value) => {
+            app.library.raindrop_import_new_folder_name = value;
+        }
+        Message::ImportSelectedRaindropPdfs => {
+            let selected_ids = app.library.selected_raindrop_pdf_ids.clone();
+            if selected_ids.is_empty() {
+                return Task::none();
+            }
+            let Some(preview) = app.library.raindrop_import_preview.as_ref() else {
+                app.library.library_error = Some(String::from(
+                    "Raindrop import metadata is still loading. Try again once the list appears.",
+                ));
+                return Task::none();
+            };
+            let selected_pdfs = preview
+                .pdfs
+                .iter()
+                .filter(|pdf| selected_ids.contains(&pdf.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            if selected_pdfs.is_empty() {
+                return Task::none();
+            }
+            let selected_preview = pdf_folio_raindrop::RaindropImportPreview {
+                account_id: preview.account_id.clone(),
+                account_label: preview.account_label.clone(),
+                pdfs: selected_pdfs,
+            };
+            if app.library.raindrop_import_new_folder_active
+                && app
+                    .library
+                    .raindrop_import_new_folder_name
+                    .trim()
+                    .is_empty()
+            {
+                app.library.library_error = Some(String::from(
+                    "Enter a new folder name before importing to a new folder.",
+                ));
+                return Task::none();
+            }
+            app.library.raindrop_import_dialog_open = false;
+            app.library.raindrop_import_progress = Some(RaindropImportProgressView {
+                completed: 0,
+                total: selected_preview.pdfs.len(),
+                current_title: String::from("Preparing import..."),
+                phase: pdf_folio_raindrop::RaindropImportPhase::PreparingImports,
+                progress_basis_points: None,
+                failed: false,
+                started_at: Instant::now(),
+                imported_entries: Vec::new(),
+                created_folders: Vec::new(),
+                task_handle: None,
+            });
+            app.library.library_error = None;
+            app.library.library_status = Some(format!(
+                "Importing {} Raindrop PDFs...",
+                selected_preview.pdfs.len()
+            ));
+            let db = Arc::clone(&app.db);
+            let preserve_structure =
+                raindrop_import_preserves_structure(&app.library.raindrop_import_destination);
+            let root_folder = raindrop_import_root_folder(&app.library.raindrop_import_destination);
+            let new_folder_name = app
+                .library
+                .raindrop_import_new_folder_active
+                .then(|| {
+                    app.library
+                        .raindrop_import_new_folder_name
+                        .trim()
+                        .to_owned()
+                })
+                .filter(|name| !name.is_empty());
+            let (task, handle) = raindrop_import_task(
+                db,
+                selected_preview,
+                preserve_structure,
+                root_folder,
+                new_folder_name,
+            );
+            if let Some(progress) = app.library.raindrop_import_progress.as_mut() {
+                progress.task_handle = Some(handle);
+            }
+            return task;
+        }
+        Message::RaindropImportProgressUpdated(progress) => {
+            let mut imported_entries = app
+                .library
+                .raindrop_import_progress
+                .as_ref()
+                .map_or_else(Vec::new, |progress| progress.imported_entries.clone());
+            let mut created_folders = app
+                .library
+                .raindrop_import_progress
+                .as_ref()
+                .map_or_else(Vec::new, |progress| progress.created_folders.clone());
+            if let Some(entry) = progress.entry.clone() {
+                if !imported_entries
+                    .iter()
+                    .any(|existing| existing.path == entry.path)
+                {
+                    imported_entries.push(entry);
+                }
+            }
+            for folder_id in progress.created_folders {
+                if !created_folders.contains(&folder_id) {
+                    created_folders.push(folder_id);
+                }
+            }
+            let pending_rollback = PendingRaindropRollback::from_progress(
+                imported_entries.clone(),
+                created_folders.clone(),
+            );
+            if !pending_rollback.is_empty() {
+                if let Err(error) = save_pending_raindrop_rollback(&pending_rollback) {
+                    app.library.library_error = Some(error.to_string());
+                }
+            }
+            let task_handle = app
+                .library
+                .raindrop_import_progress
+                .as_ref()
+                .and_then(|progress| progress.task_handle.clone());
+            app.library.raindrop_import_progress = Some(RaindropImportProgressView {
+                completed: progress.completed,
+                total: progress.total,
+                current_title: progress.current_title,
+                phase: progress.phase,
+                progress_basis_points: progress.progress_basis_points,
+                failed: progress.failed,
+                started_at: app
+                    .library
+                    .raindrop_import_progress
+                    .as_ref()
+                    .map_or_else(Instant::now, |progress| progress.started_at),
+                imported_entries,
+                created_folders,
+                task_handle,
+            });
+        }
+        Message::RaindropImportCreatedFolder(folder_id) => {
+            if let Some(progress) = app.library.raindrop_import_progress.as_mut() {
+                if !progress.created_folders.contains(&folder_id) {
+                    progress.created_folders.push(folder_id);
+                }
+            }
+        }
+        Message::CancelRaindropImport => {
+            let Some(progress) = app.library.raindrop_import_progress.take() else {
+                return Task::none();
+            };
+            if let Some(handle) = progress.task_handle {
+                handle.abort();
+            }
+            let pending_rollback = PendingRaindropRollback::from_progress(
+                progress.imported_entries,
+                progress.created_folders,
+            );
+            if pending_rollback.is_empty() {
+                app.library.library_status = Some(String::from("Cancelled Raindrop import."));
+                return Task::none();
+            }
+            if let Err(error) = save_pending_raindrop_rollback(&pending_rollback) {
+                app.library.library_error = Some(error.to_string());
+            }
+
+            app.library.library_startup_loading = false;
+            app.library.raindrop_rollback_recovery_active = true;
+            app.library.raindrop_rollback_recovery_status =
+                Some(String::from("Undoing imported Raindrop PDFs..."));
+            app.library.library_status = Some(String::from("Undoing cancelled Raindrop import..."));
+            return rollback_pending_raindrop_import_task(Arc::clone(&app.db), pending_rollback);
+        }
+        Message::RaindropImportRollbackFinished { removed, errors } => {
+            app.library.raindrop_import_progress = None;
+            app.library.raindrop_rollback_recovery_active = false;
+            app.library.raindrop_rollback_recovery_status = None;
+            app.library.library_status = Some(format!(
+                "Cancelled Raindrop import and removed {}.",
+                format_count(removed, "PDF")
+            ));
+            if errors.is_empty() {
+                app.library.library_error = None;
+            } else {
+                app.library.library_error = Some(errors.join("\n"));
+            }
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                attribute_pending_metadata_task(Arc::clone(&app.db)),
+            ]);
+        }
+        Message::OpenRaindropIntegrations => {
+            app.library.library_status = Some(String::from("Opening Raindrop.io integrations..."));
+            return Task::perform(
+                async {
+                    webbrowser::open("https://app.raindrop.io/settings/integrations")?;
+                    Ok::<_, anyhow::Error>(())
+                },
+                |result| match result {
+                    Ok(()) => Message::LibraryStatus(String::from(
+                        "Raindrop.io integrations opened in your browser.",
+                    )),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::CopyRaindropCallbackUrl => {
+            app.library.raindrop_callback_copied = true;
+            app.library.library_status = Some(String::from("Callback url copied to clipboard!"));
+            return clipboard::write(String::from(pdf_folio_raindrop::OAUTH_CALLBACK_URL));
+        }
+        Message::RaindropClientIdChanged(value) => {
+            app.library.raindrop_callback_copied = false;
+            app.library.raindrop_client_id_input = value;
+        }
+        Message::RaindropClientSecretChanged(value) => {
+            app.library.raindrop_callback_copied = false;
+            app.library.raindrop_client_secret_input = value;
+        }
+        Message::SubmitRaindropSignIn => {
+            let client_id = app.library.raindrop_client_id_input.trim().to_owned();
+            let client_secret = app.library.raindrop_client_secret_input.trim().to_owned();
+            if client_id.is_empty() || client_secret.is_empty() {
+                app.library.library_error = Some(String::from(
+                    "Enter a Raindrop OAuth client ID and client secret before signing in.",
+                ));
+                return Task::none();
+            }
+            app.library.raindrop_connect_dialog_open = false;
+            app.library.raindrop_import_dialog_open = true;
+            app.library.raindrop_import_preview = None;
+            app.library.raindrop_pdf_thumbnails.clear();
+            app.library.selected_raindrop_pdf_ids.clear();
+            app.library.raindrop_import_location_menu_open = false;
+            app.library.raindrop_import_new_folder_active = false;
+            app.library.raindrop_import_new_folder_name.clear();
+            app.library.library_error = None;
+            app.library.library_status = Some(String::from(
+                "Opening Raindrop.io in your browser for sign-in...",
+            ));
+            let oauth_config = pdf_folio_raindrop::RaindropOAuthConfig {
+                client_id,
+                client_secret,
+            };
+            return Task::perform(
+                async move { pdf_folio_raindrop::import_preview_with_auth(Some(oauth_config)).await },
+                |result| match result {
+                    Ok(preview) => Message::RaindropImportPreviewLoaded(preview),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::RaindropImportFinished(summary) => {
+            if let Err(error) = clear_pending_raindrop_rollback() {
+                app.library.library_error = Some(error.to_string());
+            }
+            app.library.raindrop_import_progress = None;
+            app.library.library_status = Some(format!(
+                "Imported {} Raindrop PDFs from {}{}",
+                summary.import.entries.len(),
+                summary.account_label,
+                if summary.import.errors.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({} skipped)", summary.import.errors.len())
+                }
+            ));
+            if !summary.import.errors.is_empty() {
+                app.library.library_error = Some(summary.import.errors.join("\n"));
+            }
+            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+        }
         Message::ImportFinished(summary) => {
             app.library.library_status = Some(format!(
                 "Imported {} PDFs{}",
@@ -333,6 +1187,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if app.library.library_drag.is_some() {
                 return Task::none();
             }
+            app.library.details_folder_id = None;
             app.select_library_entry(entry_id.clone());
             let now = Instant::now();
             let is_double_click =
@@ -348,6 +1203,48 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
 
             if is_double_click {
                 return Task::done(Message::OpenLibraryEntry(entry_id));
+            }
+        }
+        Message::FolderClicked(folder_id) => {
+            if app.library.folder_drag.is_some() {
+                return Task::none();
+            }
+            app.select_folder_for_details(folder_id.clone());
+            let now = Instant::now();
+            let is_double_click =
+                app.library
+                    .last_folder_click
+                    .as_ref()
+                    .is_some_and(|(last_id, last_click)| {
+                        last_id == &folder_id
+                            && now.duration_since(*last_click) <= Duration::from_millis(500)
+                    });
+
+            app.library.last_folder_click = Some((folder_id.clone(), now));
+
+            if is_double_click {
+                return Task::done(Message::FolderSelected(folder_id));
+            }
+        }
+        Message::FolderTreeClicked(folder_id) => {
+            if app.library.folder_drag.is_some() {
+                return Task::none();
+            }
+            app.select_folder_in_tree(folder_id.clone());
+            let now = Instant::now();
+            let is_double_click =
+                app.library
+                    .last_folder_click
+                    .as_ref()
+                    .is_some_and(|(last_id, last_click)| {
+                        last_id == &folder_id
+                            && now.duration_since(*last_click) <= Duration::from_millis(500)
+                    });
+
+            app.library.last_folder_click = Some((folder_id.clone(), now));
+
+            if is_double_click {
+                return Task::done(Message::FolderSelected(folder_id));
             }
         }
         Message::EntryCheckboxToggled(entry_id) => {
@@ -371,6 +1268,10 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::BeginFolderDrag(folder_id) => {
             app.begin_folder_drag(folder_id);
+            return scroll_library_to_offset_task(app.library.library_scroll_offset);
+        }
+        Message::BeginFolderTreeDrag(folder_id) => {
+            app.begin_folder_tree_drag(folder_id);
             return scroll_library_to_offset_task(app.library.library_scroll_offset);
         }
         Message::ClearLibrarySelection => {
@@ -538,7 +1439,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return app.request_visible_thumbnails();
         }
         Message::FolderSelected(folder_id) => {
-            app.library.selected_folder = folder_id;
+            app.library.selected_folder = folder_id.clone();
+            app.select_folder_for_details(folder_id);
             app.sync_folder_rename_input();
             app.library.library_drag = None;
             app.library.library_scroll_offset = 0.0;
@@ -558,6 +1460,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.active_reading_filter = None;
             app.library.missing_filter_active = false;
             app.library.selected_folder = None;
+            app.library.details_folder_id = None;
             app.library.library_drag = None;
             app.library.library_scroll_offset = 0.0;
             let visible_entries = app.visible_library_entries();
@@ -607,7 +1510,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             );
         }
         Message::RenameSelectedFolder => {
-            let Some(folder_id) = app.library.selected_folder.clone() else {
+            let Some(folder_id) = app.library.details_folder_id.clone() else {
                 return Task::none();
             };
             let name = app.library.folder_rename_input.trim().to_owned();
@@ -618,14 +1521,14 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return rename_folder_task(Arc::clone(&app.db), folder_id, name);
         }
         Message::MoveSelectedFolderToRoot => {
-            let Some(folder_id) = app.library.selected_folder.clone() else {
+            let Some(folder_id) = app.library.details_folder_id.clone() else {
                 return Task::none();
             };
             app.library.library_status = Some(String::from("Moving folder to library root..."));
             return move_folder_task(Arc::clone(&app.db), folder_id, None);
         }
         Message::MoveSelectedFolderUp => {
-            let Some(folder) = app.selected_folder().cloned() else {
+            let Some(folder) = app.details_folder().cloned() else {
                 return Task::none();
             };
             let Some(parent_id) = folder.parent_id.as_ref() else {
@@ -655,7 +1558,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return persist_manual_folder_order_task(Arc::clone(&app.db), parent_id, folder_ids);
         }
         Message::RequestDeleteSelectedFolder => {
-            if let Some(folder_id) = app.library.selected_folder.clone() {
+            if let Some(folder_id) = app.library.details_folder_id.clone() {
+                if app.chrome.folder_delete_warning_suppressed {
+                    return Task::done(Message::DeleteFolder(folder_id));
+                }
+                app.chrome.folder_delete_skip_warning_checked = false;
                 app.chrome.pending_confirmation = Some(ConfirmationAction::DeleteFolder(folder_id));
             }
         }
@@ -670,6 +1577,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::FolderCreated(folder_id) => {
             app.library.library_status = Some(String::from("Folder created."));
             app.library.selected_folder = Some(folder_id);
+            app.library.details_folder_id = app.library.selected_folder.clone();
             app.sync_folder_rename_input();
             app.library.library_scroll_offset = 0.0;
             return Task::batch([
@@ -715,15 +1623,31 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return app.refresh_library();
         }
         Message::RequestConfirmation(action) => {
+            if let ConfirmationAction::DeleteFolder(folder_id) = &action {
+                if app.chrome.folder_delete_warning_suppressed {
+                    return Task::done(Message::DeleteFolder(folder_id.clone()));
+                }
+                app.chrome.folder_delete_skip_warning_checked = false;
+            }
             app.chrome.pending_confirmation = Some(action);
         }
         Message::CancelConfirmation => {
             app.chrome.pending_confirmation = None;
+            app.chrome.folder_delete_skip_warning_checked = false;
+        }
+        Message::FolderDeleteWarningSuppressionToggled(checked) => {
+            app.chrome.folder_delete_skip_warning_checked = checked;
         }
         Message::ConfirmPendingAction => {
             let Some(action) = app.chrome.pending_confirmation.take() else {
                 return Task::none();
             };
+            if matches!(action, ConfirmationAction::DeleteFolder(_))
+                && app.chrome.folder_delete_skip_warning_checked
+            {
+                app.chrome.folder_delete_warning_suppressed = true;
+            }
+            app.chrome.folder_delete_skip_warning_checked = false;
             return Task::done(match action {
                 ConfirmationAction::BulkResetDisplayMetadata => Message::BulkResetDisplayMetadata,
                 ConfirmationAction::BulkDeleteFromLibrary => Message::BulkDeleteFromLibrary,
@@ -1164,6 +2088,10 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.viewer.viewer_find.open = false;
             } else if app.library.create_folder_dialog_open {
                 app.library.create_folder_dialog_open = false;
+            } else if app.library.raindrop_connect_dialog_open {
+                app.library.raindrop_connect_dialog_open = false;
+            } else if app.library.raindrop_import_dialog_open {
+                app.library.raindrop_import_dialog_open = false;
             } else if app.chrome.pending_confirmation.is_some() {
                 app.chrome.pending_confirmation = None;
             } else if app.chrome.open_app_menu.is_some() {

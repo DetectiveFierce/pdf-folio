@@ -198,6 +198,61 @@ fn folder_assignment_is_additive_across_folders() {
 }
 
 #[test]
+fn raindrop_mappings_preserve_remote_identity_and_local_folders() {
+    let db = test_db();
+    let source = db
+        .upsert_import_source(
+            "raindrop:test-user",
+            "raindrop",
+            Some("test-user"),
+            Some("Test User"),
+        )
+        .unwrap();
+    assert_eq!(source.kind, "raindrop");
+
+    let root = db
+        .upsert_raindrop_collection_mapping(&source.id, 10, None, "Papers", None)
+        .unwrap()
+        .0;
+    let child = db
+        .upsert_raindrop_collection_mapping(&source.id, 20, Some(10), "AI", None)
+        .unwrap()
+        .0;
+    assert_eq!(
+        db.raindrop_collection_folder(&source.id, 20).unwrap(),
+        Some(child.clone())
+    );
+
+    let folders = db.get_folders().unwrap();
+    assert_eq!(
+        folders
+            .iter()
+            .find(|folder| folder.id == child)
+            .and_then(|folder| folder.parent_id.as_ref()),
+        Some(&root)
+    );
+
+    db.insert_entry(&entry("paper", "Remote Paper")).unwrap();
+    db.upsert_raindrop_entry_mapping(&RaindropEntryMapping {
+        source_id: source.id.clone(),
+        raindrop_id: 99,
+        entry_id: EntryId::new("paper"),
+        collection_id: Some(20),
+        remote_link: Some(String::from("https://raindrop.io/file.pdf")),
+        remote_title: Some(String::from("Remote Paper")),
+        remote_updated_at: Some(String::from("2026-07-03T12:00:00.000Z")),
+        file_name: Some(String::from("paper.pdf")),
+        file_size: Some(2048),
+    })
+    .unwrap();
+
+    assert_eq!(
+        db.raindrop_entry_id(&source.id, 99).unwrap(),
+        Some(EntryId::new("paper"))
+    );
+}
+
+#[test]
 fn moving_entry_to_folder_replaces_existing_folder_memberships() {
     let db = test_db();
     let entry_id = EntryId::new("paper");

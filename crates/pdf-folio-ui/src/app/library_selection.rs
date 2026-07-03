@@ -103,6 +103,28 @@ impl PDFolioApp {
         self.sync_details_editor_to_selection();
     }
 
+    pub(super) fn select_folder_for_details(&mut self, folder_id: Option<FolderId>) {
+        self.library.selected_library_entries.clear();
+        self.library.library_selection_anchor = None;
+        self.library.details_entry_id = None;
+        self.library.details_title_input.clear();
+        self.library.details_author_input.clear();
+        self.library.details_folder_id = folder_id;
+        self.library.folder_details_sidebar_open = true;
+        self.sync_folder_rename_input();
+    }
+
+    pub(super) fn select_folder_in_tree(&mut self, folder_id: Option<FolderId>) {
+        self.library.selected_library_entries.clear();
+        self.library.library_selection_anchor = None;
+        self.library.details_entry_id = None;
+        self.library.details_title_input.clear();
+        self.library.details_author_input.clear();
+        self.library.details_folder_id = folder_id;
+        self.library.folder_details_sidebar_open = false;
+        self.sync_folder_rename_input();
+    }
+
     pub(super) fn prune_selection_to_visible_entries(&mut self, visible_entries: &[LibraryEntry]) {
         let visible_ids = visible_entries
             .iter()

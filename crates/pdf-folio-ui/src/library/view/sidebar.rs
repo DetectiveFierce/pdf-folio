@@ -8,6 +8,12 @@ pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message>
         view_selected_pdf_sidebar(app, entry, sidebar_width, tokens)
     } else if !app.library.selected_library_entries.is_empty() {
         view_multi_selection_sidebar(app, sidebar_width, tokens)
+    } else if app.library.folder_details_sidebar_open {
+        if let Some(folder) = app.details_folder().cloned() {
+            view_selected_folder_sidebar(app, folder, sidebar_width, tokens)
+        } else {
+            view_library_navigation_sidebar(app, sidebar_width, tokens)
+        }
     } else {
         view_library_navigation_sidebar(app, sidebar_width, tokens)
     };
@@ -149,9 +155,6 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
         });
 
     let mut content = column![heading].spacing(Spacing::SM).height(Length::Fill);
-    if let Some(panel) = selected_folder_actions_panel(app, sidebar_width, tokens) {
-        content = content.push(container(panel).padding([0.0, Spacing::MD]));
-    }
     content = content.push(tabbed_body);
 
     container(content).height(Length::Fill).into()
@@ -235,11 +238,11 @@ pub(crate) fn view_file_tree_sidebar<'a>(
         "Library",
         Some(folder_sidebar_count_label(library_counts)),
         0,
-        app.library.selected_folder.is_none(),
+        app.library.selected_folder.is_none() && app.library.details_folder_id.is_none(),
         true,
         app.library.library_tree_root_expanded,
         Message::ToggleLibraryTreeRoot,
-        Message::FolderSelected(None),
+        Message::FolderTreeClicked(None),
         sidebar_width,
         tokens,
         false,
@@ -337,6 +340,74 @@ pub(crate) fn selected_folder_actions_panel<'a>(
             .style(move |_| container_style(tokens, Class::SidebarFolderCard))
             .into(),
     )
+}
+
+pub(crate) fn view_selected_folder_sidebar<'a>(
+    app: &'a PDFolioApp,
+    folder: Folder,
+    sidebar_width: f32,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let counts = app.folder_smart_counts(Some(&folder.id));
+    let child_count = app
+        .library
+        .library_folders
+        .iter()
+        .filter(|child| child.parent_id.as_ref() == Some(&folder.id))
+        .count();
+    let details_width = (sidebar_width - Spacing::MD * 2.0).max(80.0);
+    let heading = row![
+        section_heading("Folder Details", tokens).width(Length::Fill),
+        sidebar_chevron_button(
+            CHEVRON_LEFT_SVG,
+            "Collapse Sidebar",
+            Message::CollapseLibrarySidebar,
+            tokens,
+        ),
+    ]
+    .spacing(Spacing::XS)
+    .align_y(iced::Alignment::Center);
+
+    let mut content = column![
+        heading,
+        text(truncate_for_width(&folder.name, details_width, 0.0))
+            .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
+            .color(sidebar_detail_primary_color(tokens))
+            .wrapping(Wrapping::None),
+        sidebar_detail_row("PDFs", counts.total.to_string(), details_width, tokens),
+        sidebar_detail_row("Folders", child_count.to_string(), details_width, tokens),
+        sidebar_detail_row(
+            "Reading",
+            counts.in_progress.to_string(),
+            details_width,
+            tokens
+        ),
+        sidebar_detail_row("Missing", counts.missing.to_string(), details_width, tokens),
+        sidebar_action_button("Open folder", tokens)
+            .on_press(Message::FolderSelected(Some(folder.id.clone()))),
+    ]
+    .spacing(Spacing::SM)
+    .padding(Spacing::MD);
+
+    if let Some(panel) = selected_folder_actions_panel(app, sidebar_width, tokens) {
+        content = content.push(panel);
+    }
+
+    content = content.push(
+        sidebar_action_button("Clear selection", tokens).on_press(Message::FolderClicked(None)),
+    );
+
+    container(
+        scrollable(content)
+            .direction(sidebar_scroll_direction())
+            .height(Length::Fill)
+            .style(move |_, status| sidebar_scrollable_style(tokens, status)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
+    .into()
 }
 
 pub(crate) fn view_tag_tree_sidebar<'a>(
@@ -678,7 +749,7 @@ pub(crate) fn folder_sidebar_rows<'a>(
             .library
             .collapsed_library_tree_folders
             .contains(&folder.id);
-        let active = app.library.selected_folder.as_ref() == Some(&folder.id);
+        let active = app.library.details_folder_id.as_ref() == Some(&folder.id);
         let drop_active = app.active_folder_drop_target() == Some(&folder.id);
         let flash_active = app.folder_drop_flash_active(&folder.id);
         let counts = app.folder_smart_counts(Some(&folder.id));
@@ -690,7 +761,7 @@ pub(crate) fn folder_sidebar_rows<'a>(
             has_children,
             expanded,
             Message::ToggleLibraryTreeFolder(folder.id.clone()),
-            Message::FolderSelected(Some(folder.id.clone())),
+            Message::FolderTreeClicked(Some(folder.id.clone())),
             sidebar_width,
             tokens,
             drop_active || flash_active,
@@ -702,7 +773,7 @@ pub(crate) fn folder_sidebar_rows<'a>(
                 ))))
                 .on_enter(Message::FolderDropTargetChanged(Some(folder.id.clone())))
                 .on_exit(Message::FolderDropTargetChanged(None))
-                .on_press(Message::BeginFolderDrag(folder.id.clone()))
+                .on_press(Message::BeginFolderTreeDrag(folder.id.clone()))
                 .on_release(Message::EndFolderDrag),
         );
         if expanded {

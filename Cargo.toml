@@ -3,6 +3,7 @@ members = [
     "crates/iced-widget-patch",
     "crates/pdf-folio-core",
     "crates/pdf-folio-db",
+    "crates/pdf-folio-raindrop",
     "crates/pdf-folio-style",
     "crates/pdf-folio-viewer",
     "crates/pdf-folio-ui-components",
@@ -31,6 +32,7 @@ notify = "9.0.0-rc.4"
 pdf-writer = "0.15.0"
 pdfium-render = { version = "0.9.2", features = ["thread_safe"] }
 rayon = "1.12.0"
+reqwest = { version = "0.12.26", default-features = false, features = ["brotli", "deflate", "gzip", "json", "rustls-tls", "zstd"] }
 rfd = "0.17.2"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -40,6 +42,9 @@ thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+url = "2.5.8"
+webbrowser = "1.0.6"
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 wasmtime = "46.0.1"
 
 [patch.crates-io]

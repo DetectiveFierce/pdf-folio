@@ -82,7 +82,7 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
             if app.mode == AppMode::Library && app.library.selected_library_entries.len() == 1 {
                 return operation::focus(Id::new(LIBRARY_DETAILS_TITLE_INPUT_ID));
             }
-            if app.mode == AppMode::Library && app.library.selected_folder.is_some() {
+            if app.mode == AppMode::Library && app.library.details_folder_id.is_some() {
                 return operation::focus(Id::new(LIBRARY_FOLDER_RENAME_INPUT_ID));
             }
             Task::none()
@@ -94,7 +94,7 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 ));
             }
             if app.mode == AppMode::Library {
-                if let Some(folder_id) = app.library.selected_folder.clone() {
+                if let Some(folder_id) = app.library.details_folder_id.clone() {
                     return Task::done(Message::RequestConfirmation(
                         ConfirmationAction::DeleteFolder(folder_id),
                     ));
@@ -144,6 +144,10 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 app.viewer.jump_input.clear();
             } else if app.library.create_folder_dialog_open {
                 app.library.create_folder_dialog_open = false;
+            } else if app.library.raindrop_connect_dialog_open {
+                app.library.raindrop_connect_dialog_open = false;
+            } else if app.library.raindrop_import_dialog_open {
+                app.library.raindrop_import_dialog_open = false;
             } else {
                 app.viewer.toc_open = false;
             }
