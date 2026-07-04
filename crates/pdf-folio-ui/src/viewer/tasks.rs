@@ -21,9 +21,16 @@ pub(crate) async fn render_page(
 
 pub(crate) fn open_document_task(path: PathBuf) -> Task<Message> {
     Task::perform(
-        async move { tokio::task::spawn_blocking(move || PdfDoc::open(&path)).await? },
+        async move {
+            let doc_path = path.clone();
+            let doc = tokio::task::spawn_blocking(move || PdfDoc::open(&path)).await??;
+            Ok::<_, anyhow::Error>((doc_path, doc))
+        },
         |result| match result {
-            Ok(doc) => Message::DocumentOpened(Arc::new(doc)),
+            Ok((path, doc)) => Message::DocumentOpened {
+                path,
+                doc: Arc::new(doc),
+            },
             Err(error) => Message::DocumentError(error.to_string()),
         },
     )

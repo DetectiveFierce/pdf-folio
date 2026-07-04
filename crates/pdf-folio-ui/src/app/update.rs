@@ -446,10 +446,12 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.chrome.open_context_menu = None;
             match action {
                 AppMenuAction::SetViewerScrollMode(mode) => {
-                    return app.set_viewer_scroll_mode(mode)
+                    let task = app.set_viewer_scroll_mode(mode);
+                    return with_session_save(task, app);
                 }
                 AppMenuAction::SetViewerSpreadMode(mode) => {
-                    return app.set_viewer_spread_mode(mode)
+                    let task = app.set_viewer_spread_mode(mode);
+                    return with_session_save(task, app);
                 }
                 _ => {}
             }
@@ -524,12 +526,16 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.viewer.pending_document_open = true;
             return open_document_task(path);
         }
-        Message::DocumentOpened(doc) => return app.open_document(doc),
-        Message::LibraryDocumentOpened { entry_id, doc } => {
-            return app.open_library_document(entry_id, doc);
+        Message::DocumentOpened { path, doc } => {
+            let task = app.open_document_with_path(doc, Some(path));
+            return with_session_save(task, app);
         }
-        Message::BackToLibrary => return app.return_to_library(),
-        Message::BackToViewer => return app.return_to_viewer(),
+        Message::LibraryDocumentOpened { entry_id, doc } => {
+            let task = app.open_library_document(entry_id, doc);
+            return with_session_save(task, app);
+        }
+        Message::BackToLibrary => return with_session_save(app.return_to_library(), app),
+        Message::BackToViewer => return with_session_save(app.return_to_viewer(), app),
         Message::DocumentError(error) => {
             app.viewer.pending_document_open = false;
             if !app.viewer.dismissed_document_errors.contains(&error) {
@@ -584,6 +590,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ThemeToggled => {
             app.appearance.theme = app.appearance.theme.toggled();
+            return save_app_session_task(app);
         }
         Message::ReloadStyles => {
             return Task::perform(async { StyleBook::load() }, Message::StylesReloaded);
@@ -604,21 +611,28 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.viewer.toc_open = !app.viewer.toc_open;
             app.viewer.viewer_viewport_width = app.estimated_viewer_viewport_width();
             app.viewer.viewer_viewport_height = app.estimated_viewer_viewport_height();
-            return app.apply_active_dimension_zoom();
+            return with_session_save(app.apply_active_dimension_zoom(), app);
         }
         Message::ViewerSidebarTabSelected(tab) => {
             app.viewer.viewer_sidebar_tab = tab;
-            return app.request_viewer_thumbnail_pages();
+            return with_session_save(app.request_viewer_thumbnail_pages(), app);
         }
         Message::ToggleViewMode => {
             app.library.compact_view_mode = !app.library.compact_view_mode;
-            return save_library_preferences_task(app);
+            return Task::batch([
+                save_library_preferences_task(app),
+                save_app_session_task(app),
+            ]);
         }
         Message::LibrarySortChanged(sort_mode) => {
             app.library.library_sort_mode = sort_mode;
             app.library.library_scroll_offset = 0.0;
             app.library.library_drag = None;
-            return Task::batch([save_library_preferences_task(app), app.refresh_library()]);
+            return Task::batch([
+                save_library_preferences_task(app),
+                save_app_session_task(app),
+                app.refresh_library(),
+            ]);
         }
         Message::LibraryGridZoomChanged(zoom) => {
             app.library.library_grid_zoom =
@@ -630,12 +644,16 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.update_library_drag_target_from_cursor();
             return Task::batch([
                 save_library_preferences_task(app),
+                save_app_session_task(app),
                 app.request_visible_thumbnails(),
             ]);
         }
         Message::LibraryMetadataDensityChanged(density) => {
             app.library.library_metadata_density = density;
-            return save_library_preferences_task(app);
+            return Task::batch([
+                save_library_preferences_task(app),
+                save_app_session_task(app),
+            ]);
         }
         Message::LibraryLoaded(entries) => {
             app.library.library_entries = entries;
@@ -650,10 +668,15 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 "{} PDFs in library",
                 app.library.library_entries.len()
             ));
+            let restore_task = app.apply_pending_session_to_loaded_library();
             if !app.library.search_query.trim().is_empty() {
-                return Task::done(Message::SearchDebounced(app.library.search_query.clone()));
+                return Task::batch([
+                    restore_task,
+                    Task::done(Message::SearchDebounced(app.library.search_query.clone())),
+                ]);
             }
             return Task::batch([
+                restore_task,
                 app.request_visible_thumbnails(),
                 scroll_library_to_offset_task(app.library.library_scroll_offset),
             ]);
@@ -1204,6 +1227,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if is_double_click {
                 return Task::done(Message::OpenLibraryEntry(entry_id));
             }
+            return save_app_session_task(app);
         }
         Message::FolderClicked(folder_id) => {
             if app.library.folder_drag.is_some() {
@@ -1329,9 +1353,9 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if query.trim().is_empty() {
                 app.library.search_results = None;
                 app.library.search_hit_pages.clear();
-                return app.request_visible_thumbnails();
+                return with_session_save(app.request_visible_thumbnails(), app);
             }
-            return schedule_search(query);
+            return with_session_save(schedule_search(query), app);
         }
         Message::SearchDebounced(query) => {
             if query == app.library.search_query {
@@ -1350,7 +1374,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.search_hit_pages = hit_pages;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
-            return app.request_visible_thumbnails();
+            return with_session_save(app.request_visible_thumbnails(), app);
         }
         Message::LibraryScrolled {
             offset_y,
@@ -1365,7 +1389,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_viewport_width = viewport_width.max(1.0);
             app.library.library_viewport_height = viewport_height.max(1.0);
             app.update_library_drag_target_from_cursor();
-            return app.request_visible_thumbnails();
+            return with_session_save(app.request_visible_thumbnails(), app);
         }
         Message::CollapseLibrarySidebar => {
             let columns = app.library_entries_per_row();
@@ -1373,14 +1397,14 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.resizing_library_tag_sidebar = false;
             app.recalculate_library_viewport_width();
             app.fit_library_grid_zoom_to_columns(columns);
-            return app.request_visible_thumbnails();
+            return with_session_save(app.request_visible_thumbnails(), app);
         }
         Message::ExpandLibrarySidebar => {
             let columns = app.library_entries_per_row();
             app.library.library_tag_sidebar_open = true;
             app.recalculate_library_viewport_width();
             app.fit_library_grid_zoom_to_columns(columns);
-            return app.request_visible_thumbnails();
+            return with_session_save(app.request_visible_thumbnails(), app);
         }
         Message::BeginTagSidebarResize => {
             app.library.resizing_library_tag_sidebar = true;
@@ -1396,14 +1420,21 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::EndTagSidebarResize => {
             app.library.resizing_library_tag_sidebar = false;
-            return save_library_preferences_task(app);
+            return Task::batch([
+                save_library_preferences_task(app),
+                save_app_session_task(app),
+            ]);
         }
         Message::LibrarySidebarTabChanged(tab) => {
             app.library.library_sidebar_tab = tab;
+            return save_app_session_task(app);
         }
         Message::ToggleLibraryTreeRoot => {
             app.library.library_tree_root_expanded = !app.library.library_tree_root_expanded;
-            return save_library_preferences_task(app);
+            return Task::batch([
+                save_library_preferences_task(app),
+                save_app_session_task(app),
+            ]);
         }
         Message::ToggleLibraryTreeFolder(folder_id) => {
             if !app
@@ -1415,7 +1446,10 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     .collapsed_library_tree_folders
                     .remove(&folder_id);
             }
-            return save_library_preferences_task(app);
+            return Task::batch([
+                save_library_preferences_task(app),
+                save_app_session_task(app),
+            ]);
         }
         Message::LibraryWatchEvent(event) => {
             let db = Arc::clone(&app.db);
@@ -1439,7 +1473,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_drag = None;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
-            return app.request_visible_thumbnails();
+            return with_session_save(app.request_visible_thumbnails(), app);
         }
         Message::TagPillClicked(tag) => {
             app.library.previous_tag_pill_view = Some(LibraryViewSnapshot {
@@ -1468,6 +1502,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return Task::batch([
                 app.request_visible_thumbnails(),
                 scroll_library_to_offset_task(0.0),
+                save_app_session_task(app),
             ]);
         }
         Message::RestoreLibraryViewBeforeTag => {
@@ -1488,6 +1523,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 return Task::batch([
                     app.request_visible_thumbnails(),
                     scroll_library_to_offset_task(app.library.library_scroll_offset),
+                    save_app_session_task(app),
                 ]);
             }
         }
@@ -1497,7 +1533,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_drag = None;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
-            return app.request_visible_thumbnails();
+            return with_session_save(app.request_visible_thumbnails(), app);
         }
         Message::MissingFilterChanged(active) => {
             app.library.missing_filter_active = active;
@@ -1505,7 +1541,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_drag = None;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
-            return app.request_visible_thumbnails();
+            return with_session_save(app.request_visible_thumbnails(), app);
         }
         Message::FolderSelected(folder_id) => {
             app.library.selected_folder = folder_id.clone();
@@ -1518,6 +1554,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.prune_selection_to_visible_entries(&visible_entries);
             return Task::batch([
                 save_library_preferences_task(app),
+                save_app_session_task(app),
                 app.request_visible_thumbnails(),
                 scroll_library_to_offset_task(0.0),
             ]);
@@ -2199,7 +2236,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 },
             );
         }
-        Message::ProgressSaved | Message::LibraryPreferencesSaved => {}
+        Message::ProgressSaved | Message::LibraryPreferencesSaved | Message::SessionSaved => {}
         Message::OpenJumpDialog => {
             app.viewer.page_input_editing = false;
             app.viewer.jump_dialog_open = true;
@@ -2215,9 +2252,10 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::CloseViewerFind => {
             app.viewer.viewer_find.open = false;
+            return save_app_session_task(app);
         }
         Message::ViewerFindQueryChanged(query) => {
-            return app.set_viewer_find_query(query);
+            return with_session_save(app.set_viewer_find_query(query), app);
         }
         Message::ViewerFindPrevious => {
             app.viewer.viewer_find.select_previous();
@@ -2229,16 +2267,17 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ViewerFindHighlightAllToggled(value) => {
             app.viewer.viewer_find.highlight_all = value;
+            return save_app_session_task(app);
         }
         Message::ViewerFindMatchCaseToggled(value) => {
             app.viewer.viewer_find.match_case = value;
             app.refresh_viewer_find_matches();
-            return app.scroll_to_selected_viewer_find_match();
+            return with_session_save(app.scroll_to_selected_viewer_find_match(), app);
         }
         Message::ViewerFindMatchDiacriticsToggled(value) => {
             app.viewer.viewer_find.match_diacritics = value;
             app.refresh_viewer_find_matches();
-            return app.scroll_to_selected_viewer_find_match();
+            return with_session_save(app.scroll_to_selected_viewer_find_match(), app);
         }
         Message::CloseOverlay => {
             if app.viewer.jump_dialog_open {
@@ -2291,10 +2330,10 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.viewer.page_input_editing = false;
             app.viewer.jump_input.clear();
         }
-        Message::JumpToPage(page) => return app.jump_to_page(page),
+        Message::JumpToPage(page) => return with_session_save(app.jump_to_page(page), app),
         Message::PreviousPage => {
             let page = app.current_page().saturating_sub(1);
-            return app.jump_to_page(page);
+            return with_session_save(app.jump_to_page(page), app);
         }
         Message::NextPage => {
             if let Some(doc) = &app.viewer.doc {
@@ -2302,13 +2341,14 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     .current_page()
                     .saturating_add(1)
                     .min(doc.page_count().saturating_sub(1));
-                return app.jump_to_page(page);
+                return with_session_save(app.jump_to_page(page), app);
             }
         }
         Message::ToggleOutlineNode(path) => {
             if !app.viewer.expanded_outline_paths.insert(path.clone()) {
                 app.viewer.expanded_outline_paths.remove(&path);
             }
+            return save_app_session_task(app);
         }
         Message::ViewerTextLayerLoaded { page, layer } => {
             app.viewer.pending_text_layers.remove(&page);
@@ -2368,7 +2408,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                             page: app.current_page(),
                         })
                     });
-            return Task::batch([render_task, progress_task]);
+            return Task::batch([render_task, progress_task, save_app_session_task(app)]);
         }
         Message::ViewportChanged {
             horizontal_offset,
@@ -2386,6 +2426,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return Task::batch([
                 app.apply_active_dimension_zoom(),
                 app.request_visible_pages(),
+                save_app_session_task(app),
             ]);
         }
         Message::WindowResized { width, height } => {
@@ -2398,9 +2439,9 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.library.library_viewport_height =
                     (app.viewer.viewport_height - app_menu_bar_height(app) - Spacing::LG * 2.0)
                         .max(1.0);
-                return app.request_visible_thumbnails();
+                return with_session_save(app.request_visible_thumbnails(), app);
             }
-            return app.apply_active_dimension_zoom();
+            return with_session_save(app.apply_active_dimension_zoom(), app);
         }
         Message::ViewportWheelScrolled {
             delta_x,
@@ -2425,7 +2466,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 let width = (i32::from(app.viewer.zoom_width) + step)
                     .clamp(i32::from(MIN_ZOOM_WIDTH), i32::from(MAX_ZOOM_WIDTH))
                     as u16;
-                return app.zoom_to_width(width, Some(cursor), ZoomRenderPolicy::Debounced);
+                let task = app.zoom_to_width(width, Some(cursor), ZoomRenderPolicy::Debounced);
+                return with_session_save(task, app);
             }
 
             if app.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
@@ -2434,7 +2476,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 } else {
                     -1
                 };
-                return app.scroll_page_mode_by(direction);
+                let task = app.scroll_page_mode_by(direction);
+                return with_session_save(task, app);
             }
 
             if app.viewer.viewer_scroll_mode == ViewerScrollMode::Horizontal {
@@ -2444,6 +2487,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 return Task::batch([
                     app.request_visible_pages(),
                     app.scroll_viewer_to_offsets_task(),
+                    save_app_session_task(app),
                 ]);
             }
 
@@ -2454,12 +2498,13 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 return Task::batch([
                     app.request_visible_pages(),
                     app.scroll_viewer_to_offsets_task(),
+                    save_app_session_task(app),
                 ]);
             } else {
                 app.viewer.last_scroll_offset = app.viewer.scroll_offset;
                 app.viewer.scroll_offset =
                     (app.viewer.scroll_offset - delta_y).clamp(0.0, app.max_scroll_offset());
-                return app.request_visible_pages();
+                return with_session_save(app.request_visible_pages(), app);
             }
         }
         Message::ModifiersChanged(modifiers) => {
@@ -2472,24 +2517,27 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ZoomIn => {
             app.viewer.active_zoom_preset = None;
-            return app.zoom_to_width(
+            let task = app.zoom_to_width(
                 app.viewer.zoom_width.saturating_add(100),
                 None,
                 ZoomRenderPolicy::Immediate,
             );
+            return with_session_save(task, app);
         }
         Message::ZoomOut => {
             app.viewer.active_zoom_preset = None;
-            return app.zoom_to_width(
+            let task = app.zoom_to_width(
                 app.viewer.zoom_width.saturating_sub(100),
                 None,
                 ZoomRenderPolicy::Immediate,
             );
+            return with_session_save(task, app);
         }
         Message::ShortcutPressed(shortcut) => return shortcuts::handle_shortcut(app, shortcut),
         Message::ZoomSet(width) => {
             app.viewer.active_zoom_preset = None;
-            return app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+            let task = app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+            return with_session_save(task, app);
         }
         Message::StartZoomInputEdit => {
             app.viewer.zoom_editing = true;
@@ -2505,7 +2553,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.viewer.zoom_editing = false;
             if let Some(width) = width {
                 app.viewer.active_zoom_preset = None;
-                return app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+                let task = app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate);
+                return with_session_save(task, app);
             }
             app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);
         }
@@ -2528,7 +2577,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if matches!(preset, ZoomPreset::PageWidth) {
                 app.viewer.horizontal_offset = 0.0;
             }
-            return task;
+            return with_session_save(task, app);
         }
         _ => {}
     }

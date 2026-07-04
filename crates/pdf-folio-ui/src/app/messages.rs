@@ -324,7 +324,7 @@ pub enum Message {
     /// A file was selected.
     FileSelected(PathBuf),
     /// A document was opened successfully.
-    DocumentOpened(Arc<PdfDoc>),
+    DocumentOpened { path: PathBuf, doc: Arc<PdfDoc> },
     /// A document operation failed.
     DocumentError(String),
     /// Dismiss the current document error banner.
@@ -468,6 +468,8 @@ pub enum Message {
     LibraryMetadataDensityChanged(LibraryMetadataDensity),
     /// Library view preferences were persisted.
     LibraryPreferencesSaved,
+    /// Last app session was persisted.
+    SessionSaved,
     /// Add an annotation.
     AnnotationAdded(Annotation),
     /// Delete an annotation.

@@ -64,6 +64,7 @@ impl PDFolioApp {
             viewer: ViewerRuntime {
                 doc: None,
                 current_entry_id: None,
+                current_document_path: None,
                 rendered_pages: HashMap::new(),
                 page_aspect_ratios: Vec::new(),
                 viewport_height: 900.0,
@@ -207,27 +208,55 @@ impl PDFolioApp {
             },
             settings,
             db,
+            pending_session_restore: None,
         })
     }
 
     /// Creates application state and records the startup PDF path when available.
     pub fn with_initial_file(initial_file: Option<PathBuf>) -> Result<Self> {
+        Self::with_initial_file_and_session(initial_file, None)
+    }
+
+    pub(super) fn with_initial_file_and_session(
+        initial_file: Option<PathBuf>,
+        session: Option<AppSession>,
+    ) -> Result<Self> {
         let mut app = Self::new()?;
+        app.pending_session_restore = session;
+        if let Some(session) = app.pending_session_restore.as_ref() {
+            let [width, height] = session.window_size();
+            app.viewer.viewport_width = width;
+            app.viewer.viewport_height = height;
+            app.viewer.viewer_viewport_width = app.estimated_viewer_viewport_width();
+            app.viewer.viewer_viewport_height = app.estimated_viewer_viewport_height();
+        }
         let Some(path) = initial_file else {
             return Ok(app);
         };
 
         app.mode = AppMode::Viewer;
+        app.pending_session_restore = None;
         app.viewer.document_error = Some(format!("Opening {}...", path.display()));
         app.viewer.pending_document_open = true;
 
         Ok(app)
     }
 
+    #[allow(dead_code)]
     pub(super) fn open_document(&mut self, doc: Arc<PdfDoc>) -> Task<Message> {
+        self.open_document_with_path(doc, None)
+    }
+
+    pub(super) fn open_document_with_path(
+        &mut self,
+        doc: Arc<PdfDoc>,
+        path: Option<PathBuf>,
+    ) -> Task<Message> {
         self.mode = AppMode::Viewer;
         self.clear_library_transient_interactions();
         self.viewer.doc = Some(Arc::clone(&doc));
+        self.viewer.current_document_path = path;
+        self.viewer.current_entry_id = None;
         self.viewer.cache.clear();
         self.viewer.rendered_pages.clear();
         self.viewer.page_aspect_ratios = (0..doc.page_count())
@@ -262,7 +291,10 @@ impl PDFolioApp {
         self.viewer.page_input_editing = false;
         self.viewer.jump_input.clear();
 
-        self.request_visible_pages()
+        Task::batch([
+            self.request_visible_pages(),
+            self.apply_pending_session_to_open_document(),
+        ])
     }
 
     pub(super) fn return_to_library(&mut self) -> Task<Message> {
@@ -294,13 +326,20 @@ impl PDFolioApp {
         doc: Arc<PdfDoc>,
     ) -> Task<Message> {
         self.viewer.current_entry_id = Some(entry_id.clone());
+        self.viewer.current_document_path = self
+            .library
+            .library_entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+            .map(|entry| entry.path.clone());
         let last_page = self
             .library
             .library_entries
             .iter()
             .find(|entry| entry.id == entry_id)
             .map_or(0, |entry| entry.last_page);
-        let task = self.open_document(doc);
+        let task = self.open_document_with_path(doc, self.viewer.current_document_path.clone());
+        self.viewer.current_entry_id = Some(entry_id);
         self.viewer.last_scroll_offset = self.viewer.scroll_offset;
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
             self.viewer.page_scroll_page = last_page;
@@ -312,6 +351,7 @@ impl PDFolioApp {
         self.clamp_scroll_offset();
         Task::batch([
             task,
+            self.apply_pending_session_to_open_document(),
             self.request_visible_pages(),
             self.scroll_viewer_to_offsets_task(),
         ])

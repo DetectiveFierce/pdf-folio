@@ -39,6 +39,8 @@ mod app_library_layout;
 mod app_library_selection;
 #[path = "app/library_view_state.rs"]
 mod app_library_view_state;
+#[path = "app/session.rs"]
+mod app_session;
 #[path = "app/update.rs"]
 mod app_update;
 #[path = "app/view.rs"]
@@ -184,6 +186,7 @@ use crate::viewer::zoom::{
 #[cfg(test)]
 use notify::EventKind;
 
+use app_session::{load_app_session, save_app_session, AppSession};
 use app_update::{pending_raindrop_rollback_check_task, update};
 use app_view::view;
 use app_viewer_layout::*;
@@ -302,6 +305,8 @@ pub struct PDFolioApp {
     pub settings: Settings,
     /// Library database handle.
     pub db: Arc<Db>,
+    /// Last-run state that is waiting for library/document prerequisites.
+    pending_session_restore: Option<AppSession>,
 }
 
 /// Runtime state owned by the PDF viewer surface.
@@ -309,6 +314,7 @@ pub struct PDFolioApp {
 pub struct ViewerRuntime {
     pub doc: Option<Arc<PdfDoc>>,
     pub current_entry_id: Option<EntryId>,
+    pub current_document_path: Option<PathBuf>,
     pub rendered_pages: HashMap<TileKey, RenderedPageView>,
     pub page_aspect_ratios: Vec<f32>,
     pub viewport_height: f32,
@@ -556,7 +562,22 @@ enum FolderCardRenderMode {
 /// Returns an error when startup state cannot be created.
 pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
     let startup_file = initial_file.clone();
-    let app = PDFolioApp::with_initial_file(initial_file)?;
+    let startup_session = if startup_file.is_none() {
+        match load_app_session() {
+            Ok(session) => session,
+            Err(error) => {
+                tracing::warn!(%error, "Failed to load previous PDF-Folio session");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let initial_size = startup_session
+        .as_ref()
+        .map(AppSession::window_size)
+        .unwrap_or_else(initial_window_size);
+    let app = PDFolioApp::with_initial_file_and_session(initial_file, startup_session.clone())?;
 
     tracing::info!(
         mode = ?app.mode,
@@ -568,6 +589,7 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
         move || {
             let open_task = startup_file
                 .clone()
+                .or_else(|| startup_session.as_ref()?.viewer.document_path.clone())
                 .map(open_document_task)
                 .unwrap_or_else(Task::none);
             (
@@ -592,7 +614,7 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
         .default_font(iced::Font::with_name(UI_FONT_FAMILY))
         .subscription(subscription)
         .scale_factor(|app| app.viewer.scale_factor)
-        .window_size(initial_window_size())
+        .window_size(initial_size)
         .centered()
         .run()?;
 
@@ -604,6 +626,24 @@ fn initial_window_size() -> [f32; 2] {
         .unwrap_or_else(|_| StyleBook::bundled())
         .layout()
         .window_size()
+}
+
+fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
+    let session = app.snapshot_session();
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || save_app_session(&session)).await??;
+            Ok::<_, anyhow::Error>(())
+        },
+        |result| match result {
+            Ok(()) => Message::SessionSaved,
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn with_session_save(task: Task<Message>, app: &PDFolioApp) -> Task<Message> {
+    Task::batch([task, save_app_session_task(app)])
 }
 
 fn open_file_manager_task(path: PathBuf, reveal: bool) -> Task<Message> {
