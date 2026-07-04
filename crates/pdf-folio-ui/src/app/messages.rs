@@ -219,6 +219,8 @@ pub enum ConfirmationAction {
     ResetDetailsMetadata(EntryId),
     /// Delete one folder without deleting PDFs on disk.
     DeleteFolder(FolderId),
+    /// Delete a whole discrete library database.
+    DeleteLibrary(String),
 }
 
 /// Top selection-toolbar actions chosen from compact dropdown menus.
@@ -478,6 +480,38 @@ pub enum Message {
     ExportAnnotations,
     /// Library entries loaded.
     LibraryLoaded(Vec<LibraryEntry>),
+    /// Open the library switcher screen.
+    OpenLibrarySwitcher,
+    /// Return from the library switcher to the active library.
+    CloseLibrarySwitcher,
+    /// Switch to a different discrete library.
+    SelectLibrary(String),
+    /// Toggle an existing library card overflow menu.
+    ToggleLibraryCardMenu(String),
+    /// Close the open library card overflow menu.
+    CloseLibraryCardMenu,
+    /// Open the create-library modal.
+    OpenCreateLibraryDialog,
+    /// Open the rename-library modal.
+    OpenRenameLibraryDialog(String),
+    /// Dismiss the active create/rename library modal.
+    CancelLibraryNameDialog,
+    /// Confirm the active create/rename library modal.
+    ConfirmLibraryNameDialog,
+    /// New-library name input changed.
+    NewLibraryNameChanged(String),
+    /// Create a new discrete library.
+    CreateLibrary,
+    /// A library registry mutation finished.
+    LibraryRegistryUpdated(crate::app_libraries::LibraryRegistryRuntime),
+    /// Existing-library rename input changed.
+    LibraryRenameInputChanged { library_id: String, value: String },
+    /// Rename an existing discrete library.
+    RenameLibrary(String),
+    /// Request confirmation before deleting a discrete library.
+    RequestDeleteLibrary(String),
+    /// Delete a discrete library after confirmation.
+    DeleteLibrary(String),
     /// Library folders loaded.
     LibraryFoldersLoaded(Vec<Folder>),
     /// Reload library entries from storage.

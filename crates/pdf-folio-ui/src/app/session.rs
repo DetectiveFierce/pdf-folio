@@ -14,6 +14,8 @@ const SESSION_SCHEMA_VERSION: u16 = 1;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct AppSession {
     version: u16,
+    #[serde(default = "default_session_library_id")]
+    pub(super) active_library_id: String,
     mode: SessionMode,
     window: SessionWindow,
     appearance: SessionAppearance,
@@ -93,9 +95,11 @@ impl PDFolioApp {
     pub(super) fn snapshot_session(&self) -> AppSession {
         AppSession {
             version: SESSION_SCHEMA_VERSION,
+            active_library_id: self.libraries.active_library_id.clone(),
             mode: match self.mode {
                 AppMode::Library => SessionMode::Library,
                 AppMode::Viewer => SessionMode::Viewer,
+                AppMode::LibrarySwitcher => SessionMode::Library,
             },
             window: SessionWindow {
                 width: self.viewer.viewport_width.max(1.0),
@@ -515,4 +519,8 @@ fn parse_reading_filter(value: &str) -> LibraryReadingFilter {
         "finished" => LibraryReadingFilter::Finished,
         _ => LibraryReadingFilter::Reading,
     }
+}
+
+fn default_session_library_id() -> String {
+    String::from("default")
 }

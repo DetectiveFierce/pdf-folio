@@ -27,6 +27,8 @@ pub use pdf_folio_style::theme;
 
 #[path = "app/context_menu.rs"]
 mod app_context_menu;
+#[path = "app/libraries.rs"]
+pub mod app_libraries;
 #[path = "app/library_data.rs"]
 mod app_library_data;
 #[path = "app/library_drag.rs"]
@@ -186,6 +188,9 @@ use crate::viewer::zoom::{
 #[cfg(test)]
 use notify::EventKind;
 
+use app_libraries::{
+    load_library_registry, LibraryNameDialog, LibraryProfile, LibraryRegistryRuntime,
+};
 use app_session::{load_app_session, save_app_session, AppSession};
 use app_update::{pending_raindrop_rollback_check_task, update};
 use app_view::view;
@@ -204,6 +209,7 @@ const FILE_TREE_ROW_HEIGHT: f32 = 26.0;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
 const VIEWER_SCROLLABLE_ID: &str = "viewer-scrollable";
 const LIBRARY_SEARCH_INPUT_ID: &str = "library-search-input";
+const LIBRARY_NAME_DIALOG_INPUT_ID: &str = "library-name-dialog-input";
 const VIEWER_FIND_INPUT_ID: &str = "viewer-find-input";
 const LIBRARY_FOLDER_RENAME_INPUT_ID: &str = "library-folder-rename-input";
 const LIBRARY_DETAILS_TITLE_INPUT_ID: &str = "library-details-title-input";
@@ -265,6 +271,8 @@ pub enum AppMode {
     Library,
     /// PDF viewer view.
     Viewer,
+    /// Top-level library/vault selector.
+    LibrarySwitcher,
 }
 
 /// User-configurable application settings.
@@ -297,6 +305,8 @@ pub struct PDFolioApp {
     pub viewer: ViewerRuntime,
     /// Library browsing, selection, filtering, and drag state.
     pub library: LibraryRuntime,
+    /// User-created discrete libraries.
+    pub libraries: LibraryRegistryRuntime,
     /// App chrome state shared by menus, dialogs, and overlays.
     pub chrome: ChromeRuntime,
     /// Runtime styling and theme state.

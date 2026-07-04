@@ -3,6 +3,7 @@ use iced::widget::column;
 
 const FILE_TREE_CHEVRON_RIGHT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M6.25 4.25 10 8l-3.75 3.75"/></svg>"##;
 const FILE_TREE_CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4.25 6.25 8 10l3.75-3.75"/></svg>"##;
+const LIBRARIES_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="9" width="5" height="6" rx="1"/><rect x="9.5" y="9" width="5" height="6" rx="1"/><rect x="17.5" y="9" width="5" height="6" rx="1"/></svg>"##;
 
 pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
@@ -21,7 +22,14 @@ pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message>
         view_library_navigation_sidebar(app, sidebar_width, tokens)
     };
 
-    let sidebar = container(sidebar_body)
+    let sidebar_content = column![
+        container(sidebar_body).height(Length::Fill),
+        library_switcher_sidebar_button(app, tokens),
+    ]
+    .spacing(0)
+    .height(Length::Fill);
+
+    let sidebar = container(sidebar_content)
         .width(sidebar_width)
         .height(Length::Fill)
         .style(move |_| container_style(tokens, Class::Sidebar));
@@ -56,6 +64,66 @@ pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message>
     .interaction(mouse::Interaction::ResizingHorizontally);
 
     row![sidebar, resize_handle].height(Length::Fill).into()
+}
+
+fn library_switcher_sidebar_button(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(LIBRARIES_SVG))
+        .width(22.0)
+        .height(22.0)
+        .style(move |_, _| iced::widget::svg::Style {
+            color: Some(tokens.text_secondary),
+        });
+    let active_name = app.active_library_name().to_owned();
+    let button = button(
+        row![
+            container(icon)
+                .width(30.0)
+                .height(30.0)
+                .center(Length::Fill),
+            text(truncate_for_width(&active_name, 170.0, 0.0))
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(tokens.text_secondary)
+                .wrapping(Wrapping::None),
+        ]
+        .spacing(Spacing::XS)
+        .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Shrink)
+    .height(34.0)
+    .padding([0.0, Spacing::XS])
+    .style(move |_, status| {
+        let mut style = button_style(tokens, Class::SidebarToggleButton, status);
+        style.background = None;
+        style.border.width = 0.0;
+        style.shadow = iced::Shadow::default();
+        style
+    })
+    .on_press(Message::OpenLibrarySwitcher);
+
+    container(
+        tooltip(
+            button,
+            container(
+                text("Switch Library")
+                    .size(FontSize::SM)
+                    .font(ui_font(FontWeight::MEDIUM))
+                    .color(tokens.text_primary),
+            )
+            .padding(Spacing::SM)
+            .style(move |_| container_style(tokens, Class::Tooltip)),
+            tooltip::Position::Right,
+        )
+        .delay(Duration::from_millis(500)),
+    )
+    .width(Length::Fill)
+    .padding(iced::Padding {
+        top: Spacing::SM,
+        right: Spacing::SM,
+        bottom: Spacing::SM,
+        left: Spacing::SM,
+    })
+    .into()
 }
 
 pub(crate) fn view_library_navigation_sidebar<'a>(

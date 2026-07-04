@@ -48,8 +48,16 @@ impl PDFolioApp {
     ///
     /// Returns an error when the library database cannot be opened.
     pub fn new() -> Result<Self> {
+        Self::with_active_library_id(None)
+    }
+
+    fn with_active_library_id(active_library_id: Option<&str>) -> Result<Self> {
         let settings = Settings::default();
-        let db = Arc::new(Db::open_default()?);
+        let libraries = load_library_registry(active_library_id)?;
+        let Some(active_profile) = libraries.active_profile() else {
+            anyhow::bail!("No active library is available.");
+        };
+        let db = Arc::new(Db::open(active_profile.db_path.clone())?);
         let preferences = db.library_preferences().unwrap_or_default();
         let (style_book, style_load_error) = match StyleBook::load() {
             Ok(style_book) => (style_book, None),
@@ -191,6 +199,7 @@ impl PDFolioApp {
                 folder_drag: None,
                 move_picker: None,
             },
+            libraries,
             chrome: ChromeRuntime {
                 pending_confirmation: None,
                 folder_delete_warning_suppressed: false,
@@ -221,7 +230,11 @@ impl PDFolioApp {
         initial_file: Option<PathBuf>,
         session: Option<AppSession>,
     ) -> Result<Self> {
-        let mut app = Self::new()?;
+        let mut app = Self::with_active_library_id(
+            session
+                .as_ref()
+                .map(|session| session.active_library_id.as_str()),
+        )?;
         app.pending_session_restore = session;
         if let Some(session) = app.pending_session_restore.as_ref() {
             let [width, height] = session.window_size();

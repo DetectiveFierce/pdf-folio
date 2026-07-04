@@ -1,4 +1,7 @@
 use super::*;
+use crate::app_libraries::{
+    create_library_profile, delete_library_profile, rename_library_profile,
+};
 use directories::ProjectDirs;
 use iced::futures::SinkExt;
 
@@ -657,6 +660,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::LibraryLoaded(entries) => {
             app.library.library_entries = entries;
+            app.set_active_library_preview_from_entries();
             app.library.library_startup_loading = false;
             app.library.raindrop_rollback_recovery_active = false;
             app.library.raindrop_rollback_recovery_status = None;
@@ -680,6 +684,157 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.request_visible_thumbnails(),
                 scroll_library_to_offset_task(app.library.library_scroll_offset),
             ]);
+        }
+        Message::OpenLibrarySwitcher => {
+            app.open_library_switcher();
+            return save_app_session_task(app);
+        }
+        Message::CloseLibrarySwitcher => {
+            app.libraries.open_menu_library_id = None;
+            app.mode = AppMode::Library;
+            return save_app_session_task(app);
+        }
+        Message::SelectLibrary(library_id) => {
+            app.libraries.open_menu_library_id = None;
+            return match app.select_library(library_id) {
+                Ok(task) => task,
+                Err(error) => Task::done(Message::LibraryError(error.to_string())),
+            };
+        }
+        Message::ToggleLibraryCardMenu(library_id) => {
+            app.libraries.open_menu_library_id = (app.libraries.open_menu_library_id.as_ref()
+                != Some(&library_id))
+            .then_some(library_id);
+        }
+        Message::CloseLibraryCardMenu => {
+            app.libraries.open_menu_library_id = None;
+        }
+        Message::OpenCreateLibraryDialog => {
+            app.libraries.open_menu_library_id = None;
+            app.libraries.new_library_name.clear();
+            app.libraries.name_dialog = Some(LibraryNameDialog::Create);
+            return operation::focus(Id::new(LIBRARY_NAME_DIALOG_INPUT_ID));
+        }
+        Message::OpenRenameLibraryDialog(library_id) => {
+            let Some(profile) = app
+                .libraries
+                .profiles
+                .iter()
+                .find(|profile| profile.id == library_id)
+            else {
+                return Task::none();
+            };
+            app.libraries.open_menu_library_id = None;
+            app.libraries.new_library_name = profile.name.clone();
+            app.libraries.name_dialog = Some(LibraryNameDialog::Rename(library_id));
+            return operation::focus(Id::new(LIBRARY_NAME_DIALOG_INPUT_ID));
+        }
+        Message::CancelLibraryNameDialog => {
+            app.libraries.name_dialog = None;
+            app.libraries.new_library_name.clear();
+        }
+        Message::ConfirmLibraryNameDialog => {
+            let Some(dialog) = app.libraries.name_dialog.clone() else {
+                return Task::none();
+            };
+            let name = app.libraries.new_library_name.trim().to_owned();
+            if name.is_empty() {
+                return Task::none();
+            }
+            return Task::done(match dialog {
+                LibraryNameDialog::Create => Message::CreateLibrary,
+                LibraryNameDialog::Rename(library_id) => {
+                    app.libraries.rename_inputs.insert(library_id.clone(), name);
+                    Message::RenameLibrary(library_id)
+                }
+            });
+        }
+        Message::NewLibraryNameChanged(value) => {
+            app.libraries.new_library_name = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(80)
+                .collect();
+        }
+        Message::CreateLibrary => {
+            let name = app.libraries.new_library_name.trim().to_owned();
+            if name.is_empty() {
+                return Task::none();
+            }
+            let registry = app.libraries.clone();
+            app.library.library_status = Some(format!("Creating library {name}..."));
+            app.libraries.name_dialog = None;
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || create_library_profile(registry, name))
+                        .await?
+                },
+                |result| match result {
+                    Ok(registry) => Message::LibraryRegistryUpdated(registry),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::LibraryRegistryUpdated(registry) => {
+            return match app.apply_library_registry(registry) {
+                Ok(task) => task,
+                Err(error) => Task::done(Message::LibraryError(error.to_string())),
+            };
+        }
+        Message::LibraryRenameInputChanged { library_id, value } => {
+            app.libraries.rename_inputs.insert(
+                library_id,
+                value
+                    .chars()
+                    .filter(|ch| !ch.is_control())
+                    .take(80)
+                    .collect(),
+            );
+        }
+        Message::RenameLibrary(library_id) => {
+            let name = app
+                .libraries
+                .rename_inputs
+                .get(&library_id)
+                .cloned()
+                .unwrap_or_default();
+            if name.trim().is_empty() {
+                return Task::none();
+            }
+            let registry = app.libraries.clone();
+            app.libraries.name_dialog = None;
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        rename_library_profile(registry, library_id, name)
+                    })
+                    .await?
+                },
+                |result| match result {
+                    Ok(registry) => Message::LibraryRegistryUpdated(registry),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::RequestDeleteLibrary(library_id) => {
+            app.libraries.open_menu_library_id = None;
+            app.chrome.pending_confirmation = Some(ConfirmationAction::DeleteLibrary(library_id));
+        }
+        Message::DeleteLibrary(library_id) => {
+            let registry = app.libraries.clone();
+            app.library.library_status = Some(String::from("Deleting library..."));
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        delete_library_profile(registry, library_id)
+                    })
+                    .await?
+                },
+                |result| match result {
+                    Ok(registry) => Message::LibraryRegistryUpdated(registry),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
         }
         Message::LibraryFoldersLoaded(folders) => {
             app.library.library_folders = folders;
@@ -1853,6 +2008,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     Message::ResetDetailsMetadata(entry_id)
                 }
                 ConfirmationAction::DeleteFolder(folder_id) => Message::DeleteFolder(folder_id),
+                ConfirmationAction::DeleteLibrary(library_id) => Message::DeleteLibrary(library_id),
             });
         }
         Message::SelectionToolbarActionSelected(action) => {
@@ -2280,7 +2436,15 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return with_session_save(app.scroll_to_selected_viewer_find_match(), app);
         }
         Message::CloseOverlay => {
-            if app.viewer.jump_dialog_open {
+            if app.libraries.name_dialog.is_some() {
+                app.libraries.name_dialog = None;
+                app.libraries.new_library_name.clear();
+            } else if app.libraries.open_menu_library_id.is_some() {
+                app.libraries.open_menu_library_id = None;
+            } else if app.mode == AppMode::LibrarySwitcher {
+                app.mode = AppMode::Library;
+                return save_app_session_task(app);
+            } else if app.viewer.jump_dialog_open {
                 app.viewer.jump_dialog_open = false;
                 app.viewer.jump_input.clear();
             } else if app.viewer.page_input_editing {

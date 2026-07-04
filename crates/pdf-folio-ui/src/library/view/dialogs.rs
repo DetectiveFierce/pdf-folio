@@ -1118,6 +1118,18 @@ pub(crate) fn confirmation_copy<'a>(
             ),
             "Delete",
         ),
+        ConfirmationAction::DeleteLibrary(library_id) => (
+            "Delete library?",
+            format!(
+                "This permanently deletes the \"{}\" library database. PDF files on disk remain where they are.",
+                app.libraries
+                    .profiles
+                    .iter()
+                    .find(|profile| &profile.id == library_id)
+                    .map_or("Selected library", |profile| profile.name.as_str())
+            ),
+            "Delete",
+        ),
     }
 }
 

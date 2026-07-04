@@ -19,92 +19,96 @@ use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{canvas, column, row, stack};
 use std::time::Duration;
 
+const OVERFLOW_HORIZONTAL_SVG: &[u8] = include_bytes!("../../assets/icons/overflow-horizontal.svg");
+const OVERFLOW_VERTICAL_SVG: &[u8] = include_bytes!("../../assets/icons/overflow-vertical.svg");
+
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
-    let base_content: Element<'_, Message> =
-        if app.mode == AppMode::Viewer && app.viewer.doc.is_some() {
-            let sidebar: Element<'_, Message> = if app.viewer.toc_open {
-                view_sidebar(app).into()
-            } else {
-                container("").width(Length::Shrink).into()
-            };
-
-            let content_size = app.viewer_content_size(app.viewer.viewer_viewport_width);
-            let viewer = canvas(ViewerCanvas { app })
-                .width(Length::Fixed(content_size.width))
-                .height(Length::Fixed(content_size.height));
-            let selection_overlay = canvas(ViewerSelectionOverlay { app })
-                .width(Length::Fixed(content_size.width))
-                .height(Length::Fixed(content_size.height));
-            let viewer_content = stack![viewer, selection_overlay]
-                .width(Length::Fixed(content_size.width))
-                .height(Length::Fixed(content_size.height));
-            let viewer_scroll = scrollable(viewer_content)
-                .id(Id::new(VIEWER_SCROLLABLE_ID))
-                .direction(Direction::Both {
-                    vertical: Scrollbar::default(),
-                    horizontal: Scrollbar::default(),
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(move |_, status| scrollable_style(tokens, Class::ViewerCanvas, status))
-                .on_scroll(|viewport| {
-                    let offset = viewport.absolute_offset();
-                    let bounds = viewport.bounds();
-                    Message::ViewportChanged {
-                        horizontal_offset: offset.x,
-                        scroll_offset: offset.y,
-                        width: bounds.width,
-                        height: bounds.height,
-                    }
-                });
-            let mut viewer_stack = stack![viewer_scroll]
-                .width(Length::Fill)
-                .height(Length::Fill);
-            if !app.viewer.toc_open {
-                viewer_stack = viewer_stack.push(
-                    pin(viewer_floating_sidebar_toggle(tokens))
-                        .x(Spacing::SM)
-                        .y(Spacing::SM),
-                );
-            }
-            if app.viewer.viewer_find.open {
-                let find_width = app
-                    .layout()
-                    .viewer_find_bar_width
-                    .min((app.viewer.viewer_viewport_width - Spacing::MD * 2.0).max(320.0));
-                viewer_stack = viewer_stack.push(viewer_find_anchor(app, tokens, find_width));
-            }
-            let mut main = column![].spacing(0);
-            if let Some(error) = app.viewer.document_error.as_deref() {
-                main = main.push(dismissible_error_banner(
-                    error,
-                    tokens,
-                    Message::DismissDocumentError,
-                ));
-            }
-            if app.viewer.jump_dialog_open {
-                main = main.push(view_jump_dialog(app));
-            }
-            main = main.push(viewer_stack);
-
-            column![
-                view_app_menu_bar(app),
-                view_viewer_toolbar(app),
-                row![sidebar, main.width(Length::Fill)].height(Length::Fill)
-            ]
-            .into()
+    let base_content: Element<'_, Message> = if app.mode == AppMode::LibrarySwitcher {
+        view_library_switcher(app, tokens)
+    } else if app.mode == AppMode::Viewer && app.viewer.doc.is_some() {
+        let sidebar: Element<'_, Message> = if app.viewer.toc_open {
+            view_sidebar(app).into()
         } else {
-            let mut library_shell = column![view_app_menu_bar(app)];
-            if let Some(error) = app.viewer.document_error.as_deref() {
-                library_shell = library_shell.push(dismissible_error_banner(
-                    error,
-                    tokens,
-                    Message::DismissDocumentError,
-                ));
-            }
-            library_shell.push(view_library(app)).into()
+            container("").width(Length::Shrink).into()
         };
+
+        let content_size = app.viewer_content_size(app.viewer.viewer_viewport_width);
+        let viewer = canvas(ViewerCanvas { app })
+            .width(Length::Fixed(content_size.width))
+            .height(Length::Fixed(content_size.height));
+        let selection_overlay = canvas(ViewerSelectionOverlay { app })
+            .width(Length::Fixed(content_size.width))
+            .height(Length::Fixed(content_size.height));
+        let viewer_content = stack![viewer, selection_overlay]
+            .width(Length::Fixed(content_size.width))
+            .height(Length::Fixed(content_size.height));
+        let viewer_scroll = scrollable(viewer_content)
+            .id(Id::new(VIEWER_SCROLLABLE_ID))
+            .direction(Direction::Both {
+                vertical: Scrollbar::default(),
+                horizontal: Scrollbar::default(),
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_, status| scrollable_style(tokens, Class::ViewerCanvas, status))
+            .on_scroll(|viewport| {
+                let offset = viewport.absolute_offset();
+                let bounds = viewport.bounds();
+                Message::ViewportChanged {
+                    horizontal_offset: offset.x,
+                    scroll_offset: offset.y,
+                    width: bounds.width,
+                    height: bounds.height,
+                }
+            });
+        let mut viewer_stack = stack![viewer_scroll]
+            .width(Length::Fill)
+            .height(Length::Fill);
+        if !app.viewer.toc_open {
+            viewer_stack = viewer_stack.push(
+                pin(viewer_floating_sidebar_toggle(tokens))
+                    .x(Spacing::SM)
+                    .y(Spacing::SM),
+            );
+        }
+        if app.viewer.viewer_find.open {
+            let find_width = app
+                .layout()
+                .viewer_find_bar_width
+                .min((app.viewer.viewer_viewport_width - Spacing::MD * 2.0).max(320.0));
+            viewer_stack = viewer_stack.push(viewer_find_anchor(app, tokens, find_width));
+        }
+        let mut main = column![].spacing(0);
+        if let Some(error) = app.viewer.document_error.as_deref() {
+            main = main.push(dismissible_error_banner(
+                error,
+                tokens,
+                Message::DismissDocumentError,
+            ));
+        }
+        if app.viewer.jump_dialog_open {
+            main = main.push(view_jump_dialog(app));
+        }
+        main = main.push(viewer_stack);
+
+        column![
+            view_app_menu_bar(app),
+            view_viewer_toolbar(app),
+            row![sidebar, main.width(Length::Fill)].height(Length::Fill)
+        ]
+        .into()
+    } else {
+        let mut library_shell = column![view_app_menu_bar(app)];
+        if let Some(error) = app.viewer.document_error.as_deref() {
+            library_shell = library_shell.push(dismissible_error_banner(
+                error,
+                tokens,
+                Message::DismissDocumentError,
+            ));
+        }
+        library_shell.push(view_library(app)).into()
+    };
 
     let menu_content = if app.chrome.open_app_menu.is_some() {
         stack![
@@ -146,7 +150,12 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         base_content
     };
 
-    let content = if app.chrome.pending_confirmation.is_some() {
+    let content = if app.libraries.name_dialog.is_some() {
+        stack![menu_content, view_library_name_dialog(app, tokens)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if app.chrome.pending_confirmation.is_some() {
         stack![menu_content, view_confirmation_dialog(app)]
             .width(Length::Fill)
             .height(Length::Fill)
@@ -209,6 +218,617 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     } else {
         shell
     }
+}
+
+const LIBRARY_SWITCHER_CARD_WIDTH: f32 = 230.0;
+const LIBRARY_SWITCHER_CARD_HEIGHT: f32 = 362.0;
+const LIBRARY_CARD_OVERLAY_GUTTER: f32 = 72.0;
+const LIBRARY_CARD_TOP_SPACER: f32 = 12.0;
+const LIBRARY_CARD_MENU_X: f32 = 7.0;
+const LIBRARY_CARD_MENU_Y: f32 = 2.0;
+const LIBRARY_CARD_MENU_OFFSET: f32 = 6.0;
+const LIBRARY_CARD_MENU_DOWN_SHIFT: f32 = 4.0;
+const LIBRARY_CARD_TITLE_HEIGHT: f32 = 38.0;
+const LIBRARY_PREVIEW_COLUMNS: usize = 4;
+const LIBRARY_PREVIEW_ROWS: usize = 3;
+const LIBRARY_PREVIEW_HEIGHT: f32 = 280.0;
+const LIBRARY_PREVIEW_TILE_WIDTH: f32 = 48.0;
+const LIBRARY_PREVIEW_TILE_HEIGHT: f32 = 77.0;
+const LIBRARY_PREVIEW_ROW_HEIGHT: f32 = LIBRARY_PREVIEW_TILE_HEIGHT;
+const LIBRARY_PREVIEW_ROW_OFFSET: f32 = 5.0;
+const LIBRARY_PREVIEW_ELLIPSIS_ROW_HEIGHT: f32 = 25.0;
+const LIBRARY_PREVIEW_COLUMN_GAP: f32 = 5.0;
+const LIBRARY_PREVIEW_GRID_WIDTH: f32 = LIBRARY_PREVIEW_TILE_WIDTH * 4.0
+    + LIBRARY_PREVIEW_COLUMN_GAP * (LIBRARY_PREVIEW_COLUMNS as f32 - 1.0);
+const LIBRARY_PREVIEW_PANEL_PADDING: f32 = 4.0;
+const LIBRARY_PREVIEW_IMAGE_WIDTH: f32 = 38.0;
+const LIBRARY_PREVIEW_IMAGE_SLOT_HEIGHT: f32 = 49.0;
+const LIBRARY_PREVIEW_IMAGE_MIN_HEIGHT: f32 = 28.0;
+const LIBRARY_PREVIEW_TITLE_FONT_SIZE: u32 = 8;
+const LIBRARY_PREVIEW_TITLE_HEIGHT: f32 = 22.0;
+const LIBRARY_PREVIEW_TITLE_LINES: usize = 3;
+
+fn view_library_switcher(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let mut cards = Vec::new();
+    for profile in &app.libraries.profiles {
+        cards.push(library_profile_card(
+            app,
+            profile,
+            tokens,
+            LIBRARY_SWITCHER_CARD_WIDTH,
+            LIBRARY_SWITCHER_CARD_HEIGHT,
+        ));
+    }
+    cards.push(new_library_card(
+        tokens,
+        LIBRARY_SWITCHER_CARD_WIDTH,
+        LIBRARY_SWITCHER_CARD_HEIGHT,
+    ));
+
+    let mut grid = column![]
+        .spacing(Spacing::MD)
+        .align_x(iced::Alignment::Center);
+    let mut current_row = row![].spacing(Spacing::MD).align_y(iced::Alignment::Center);
+    for (index, card) in cards.into_iter().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            grid = grid.push(current_row);
+            current_row = row![].spacing(Spacing::MD).align_y(iced::Alignment::Center);
+        }
+        current_row = current_row.push(card);
+    }
+    if !app.libraries.profiles.is_empty() {
+        grid = grid.push(current_row);
+    }
+
+    let content = column![
+        text("Choose a Library")
+            .size(34)
+            .font(display_font(FontWeight::MEDIUM))
+            .color(tokens.text_primary),
+        text("Keep separate PDF collections, reading state, folders, and imports.")
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary),
+        grid,
+        toolbar_button("Back to Library", tokens).on_press(Message::CloseLibrarySwitcher),
+    ]
+    .spacing(Spacing::LG)
+    .align_x(iced::Alignment::Center);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center(Length::Fill)
+        .padding(Spacing::XL)
+        .style(move |_| container_style(tokens, Class::AppShell))
+        .into()
+}
+
+fn library_profile_card<'a>(
+    app: &'a PDFolioApp,
+    profile: &'a LibraryProfile,
+    tokens: ThemeTokens,
+    width: f32,
+    height: f32,
+) -> Element<'a, Message> {
+    let active = profile.id == app.libraries.active_library_id;
+    let open_message = if active {
+        Message::CloseLibrarySwitcher
+    } else {
+        Message::SelectLibrary(profile.id.clone())
+    };
+    let preview = app.libraries.previews.get(&profile.id);
+    let total_entries = preview.map_or(0, |preview| preview.total_entries);
+    let content_width = width - Spacing::MD * 2.0;
+    let title_size = 18;
+
+    let body = column![
+        container("").height(LIBRARY_CARD_TOP_SPACER),
+        library_preview_panel(preview, tokens),
+        container("").height(Spacing::XS),
+        container(
+            column![
+                text(truncate_for_width_with_font(
+                    &profile.name,
+                    content_width,
+                    0.0,
+                    title_size,
+                ))
+                .size(title_size)
+                .font(display_font(FontWeight::SEMIBOLD))
+                .color(tokens.text_primary)
+                .wrapping(Wrapping::None)
+                .width(Length::Fill),
+                text(format_count(total_entries, "PDF"))
+                    .size(FontSize::MD)
+                    .font(ui_font(FontWeight::MEDIUM))
+                    .color(if active {
+                        tokens.accent
+                    } else {
+                        tokens.text_secondary
+                    })
+                    .width(Length::Fill),
+            ]
+            .spacing(2.0)
+            .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(LIBRARY_CARD_TITLE_HEIGHT)
+        .align_y(iced::alignment::Vertical::Center),
+    ]
+    .spacing(0)
+    .align_x(iced::Alignment::Start);
+
+    let card = mouse_area(
+        container(body)
+            .width(width)
+            .height(height)
+            .padding(Spacing::MD)
+            .style(move |_| {
+                let mut style = container_style(tokens, Class::LibraryCard);
+                if active {
+                    style.border.color = tokens.accent;
+                    style.border.width = 1.5;
+                }
+                style
+            }),
+    )
+    .on_press(open_message);
+
+    let mut layered = stack![pin(card).y(LIBRARY_CARD_OVERLAY_GUTTER)]
+        .width(width)
+        .height(height + LIBRARY_CARD_OVERLAY_GUTTER);
+
+    layered = layered.push(
+        pin(library_card_menu_button(profile, tokens))
+            .x(LIBRARY_CARD_MENU_X)
+            .y(LIBRARY_CARD_OVERLAY_GUTTER + LIBRARY_CARD_MENU_Y),
+    );
+    if app.libraries.open_menu_library_id.as_ref() == Some(&profile.id) {
+        let menu_height = library_card_overflow_menu_height(app);
+        layered = layered.push(
+            pin(library_card_overflow_menu(app, profile, tokens))
+                .x(LIBRARY_CARD_MENU_X - LIBRARY_CARD_MENU_OFFSET)
+                .y(LIBRARY_CARD_OVERLAY_GUTTER + LIBRARY_CARD_MENU_Y
+                    - menu_height
+                    - LIBRARY_CARD_MENU_OFFSET
+                    + LIBRARY_CARD_MENU_DOWN_SHIFT),
+        );
+    }
+
+    layered.into()
+}
+
+fn new_library_card(tokens: ThemeTokens, width: f32, height: f32) -> Element<'static, Message> {
+    let create_action = column![
+        text("+")
+            .size(48)
+            .font(ui_font(FontWeight::REGULAR))
+            .wrapping(Wrapping::None),
+        text("Create New Library")
+            .size(FontSize::CONTROL)
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .wrapping(Wrapping::None),
+    ]
+    .spacing(Spacing::SM)
+    .align_x(iced::Alignment::Center);
+
+    let body = column![
+        container("").height(LIBRARY_CARD_TOP_SPACER + 12.0),
+        container(create_action)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .align_y(iced::alignment::Vertical::Center),
+        container("").height(Spacing::LG),
+    ]
+    .spacing(0)
+    .align_x(iced::Alignment::Center);
+
+    let card = button(body)
+        .width(width)
+        .height(height)
+        .padding(Spacing::MD)
+        .style(move |_, status| {
+            let mut style = button_style(tokens, Class::LibraryCard, status);
+            match status {
+                button::Status::Active => {
+                    style.background = Some(iced::Background::Color(with_alpha(
+                        tokens.surface_raised,
+                        0.42,
+                    )));
+                    style.text_color = with_alpha(tokens.text_primary, 0.58);
+                    style.border.color = with_alpha(tokens.text_secondary, 0.34);
+                    style.border.width = 1.0;
+                }
+                button::Status::Hovered => {
+                    style.background = Some(iced::Background::Color(tokens.surface_raised));
+                    style.text_color = tokens.text_primary;
+                    style.border.color = tokens.accent;
+                    style.border.width = 1.5;
+                }
+                button::Status::Pressed => {
+                    style.background = Some(iced::Background::Color(mix_color(
+                        tokens.surface_raised,
+                        tokens.accent,
+                        0.16,
+                    )));
+                    style.text_color = tokens.text_primary;
+                    style.border.color = tokens.accent;
+                    style.border.width = 1.5;
+                }
+                button::Status::Disabled => {}
+            }
+            style
+        })
+        .on_press(Message::OpenCreateLibraryDialog);
+
+    stack![pin(card).y(LIBRARY_CARD_OVERLAY_GUTTER)]
+        .width(width)
+        .height(height + LIBRARY_CARD_OVERLAY_GUTTER)
+        .into()
+}
+
+fn library_preview_panel<'a>(
+    preview: Option<&'a crate::app_libraries::LibraryPreview>,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let Some(preview) = preview else {
+        return library_empty_preview_panel(tokens);
+    };
+    if preview.thumbnails.is_empty() {
+        return library_empty_preview_panel(tokens);
+    }
+
+    let mut grid = column![].spacing(0).align_x(iced::Alignment::Center);
+    let mut rendered_rows = 0;
+    for (row_index, chunk) in preview
+        .thumbnails
+        .chunks(LIBRARY_PREVIEW_COLUMNS)
+        .take(LIBRARY_PREVIEW_ROWS)
+        .enumerate()
+    {
+        if row_index > 0 {
+            grid = grid.push(container("").height(LIBRARY_PREVIEW_ROW_OFFSET));
+        }
+        let mut row = row![]
+            .spacing(LIBRARY_PREVIEW_COLUMN_GAP)
+            .align_y(iced::Alignment::Center);
+        for thumbnail in chunk {
+            row = row.push(library_preview_pdf_tile(thumbnail, tokens));
+        }
+        for _ in chunk.len()..LIBRARY_PREVIEW_COLUMNS {
+            row = row.push(
+                container("")
+                    .width(LIBRARY_PREVIEW_TILE_WIDTH)
+                    .height(LIBRARY_PREVIEW_TILE_HEIGHT),
+            );
+        }
+        grid = grid.push(
+            container(row.width(Length::Fixed(LIBRARY_PREVIEW_GRID_WIDTH)))
+                .width(Length::Fill)
+                .height(LIBRARY_PREVIEW_ROW_HEIGHT)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+        );
+        rendered_rows += 1;
+    }
+    for _ in rendered_rows..LIBRARY_PREVIEW_ROWS {
+        grid = grid.push(
+            container("")
+                .width(Length::Fill)
+                .height(LIBRARY_PREVIEW_ROW_HEIGHT),
+        );
+    }
+    if preview.total_entries > preview.thumbnails.len() {
+        let mut row = row![]
+            .spacing(LIBRARY_PREVIEW_COLUMN_GAP)
+            .align_y(iced::Alignment::Center);
+        for _ in 0..LIBRARY_PREVIEW_COLUMNS {
+            row = row.push(library_preview_column_ellipsis(tokens));
+        }
+        grid = grid.push(
+            container(row.width(Length::Fixed(LIBRARY_PREVIEW_GRID_WIDTH)))
+                .width(Length::Fill)
+                .height(LIBRARY_PREVIEW_ELLIPSIS_ROW_HEIGHT)
+                .center_x(Length::Fill)
+                .align_y(iced::alignment::Vertical::Top),
+        );
+    }
+
+    container(grid)
+        .width(Length::Fill)
+        .height(LIBRARY_PREVIEW_HEIGHT)
+        .padding(LIBRARY_PREVIEW_PANEL_PADDING)
+        .center_x(Length::Fill)
+        .align_y(iced::alignment::Vertical::Top)
+        .style(move |_| container_style(tokens, Class::SidebarDetailRow))
+        .into()
+}
+
+fn library_empty_preview_panel(tokens: ThemeTokens) -> Element<'static, Message> {
+    container(
+        text("No PDFs")
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary),
+    )
+    .width(Length::Fill)
+    .height(LIBRARY_PREVIEW_HEIGHT)
+    .center_x(Length::Fill)
+    .center_y(Length::Fill)
+    .style(move |_| container_style(tokens, Class::SidebarDetailRow))
+    .into()
+}
+
+fn library_preview_pdf_tile<'a>(
+    thumbnail: &'a crate::app_libraries::LibraryPreviewThumbnail,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let image_width = LIBRARY_PREVIEW_IMAGE_WIDTH;
+    let image_height =
+        (image_width * f32::from(thumbnail.height) / f32::from(thumbnail.width.max(1))).clamp(
+            LIBRARY_PREVIEW_IMAGE_MIN_HEIGHT,
+            LIBRARY_PREVIEW_IMAGE_SLOT_HEIGHT,
+        );
+    container(
+        column![
+            container(
+                image(thumbnail.handle.clone())
+                    .width(image_width)
+                    .height(image_height)
+                    .content_fit(ContentFit::Contain),
+            )
+            .width(LIBRARY_PREVIEW_TILE_WIDTH)
+            .height(LIBRARY_PREVIEW_IMAGE_SLOT_HEIGHT)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .clip(true),
+            text(wrap_preview_title(
+                &thumbnail.title,
+                LIBRARY_PREVIEW_TILE_WIDTH - 4.0,
+                LIBRARY_PREVIEW_TITLE_FONT_SIZE,
+                LIBRARY_PREVIEW_TITLE_LINES,
+            ))
+            .size(LIBRARY_PREVIEW_TITLE_FONT_SIZE)
+            .line_height(1.04)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary)
+            .wrapping(Wrapping::WordOrGlyph)
+            .width(LIBRARY_PREVIEW_TILE_WIDTH - 4.0)
+            .height(LIBRARY_PREVIEW_TITLE_HEIGHT),
+        ]
+        .spacing(2.0),
+    )
+    .width(LIBRARY_PREVIEW_TILE_WIDTH)
+    .height(LIBRARY_PREVIEW_TILE_HEIGHT)
+    .padding(2.0)
+    .into()
+}
+
+fn wrap_preview_title(label: &str, width: f32, font_size: u32, max_lines: usize) -> String {
+    const ELLIPSIS: &str = "...";
+
+    let label = label.split_whitespace().collect::<Vec<_>>().join(" ");
+    if label.is_empty() || max_lines == 0 {
+        return String::new();
+    }
+
+    let approx_char_width = (font_size as f32 * 0.48).max(1.0);
+    let max_chars = (width / approx_char_width)
+        .floor()
+        .max(ELLIPSIS.len() as f32) as usize;
+    let mut remaining = label.as_str();
+    let mut lines = Vec::new();
+
+    for line_index in 0..max_lines {
+        let remaining_chars = remaining.chars().count();
+        if remaining_chars <= max_chars {
+            lines.push(remaining.to_owned());
+            break;
+        }
+
+        let last_line = line_index + 1 == max_lines;
+        if last_line {
+            let keep = max_chars.saturating_sub(ELLIPSIS.len()).max(1);
+            let mut line: String = remaining.chars().take(keep).collect();
+            line.push_str(ELLIPSIS);
+            lines.push(line);
+            break;
+        }
+
+        let candidate: String = remaining.chars().take(max_chars).collect();
+        let split_at = candidate
+            .char_indices()
+            .rev()
+            .find_map(|(index, character)| character.is_whitespace().then_some(index))
+            .filter(|index| *index >= max_chars / 2)
+            .unwrap_or_else(|| candidate.len());
+        let (line, rest) = remaining.split_at(split_at);
+        lines.push(line.trim().to_owned());
+        remaining = rest.trim_start();
+    }
+
+    lines.join("\n")
+}
+
+fn library_preview_column_ellipsis(tokens: ThemeTokens) -> Element<'static, Message> {
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(
+        OVERFLOW_VERTICAL_SVG,
+    ))
+    .width(6.0)
+    .height(34.0)
+    .style(move |_, _| iced::widget::svg::Style {
+        color: Some(with_alpha(tokens.text_secondary, 0.92)),
+    });
+
+    container(icon)
+        .width(LIBRARY_PREVIEW_TILE_WIDTH)
+        .height(LIBRARY_PREVIEW_ELLIPSIS_ROW_HEIGHT)
+        .center_x(Length::Fill)
+        .align_y(iced::alignment::Vertical::Top)
+        .into()
+}
+
+fn library_card_menu_button<'a>(
+    profile: &'a LibraryProfile,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(
+        OVERFLOW_HORIZONTAL_SVG,
+    ))
+    .width(18.0)
+    .height(6.0)
+    .style(move |_, _| iced::widget::svg::Style {
+        color: Some(tokens.text_secondary),
+    });
+
+    button(
+        container(icon)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill),
+    )
+    .width(28.0)
+    .height(22.0)
+    .padding(0)
+    .style(move |_, status| {
+        let mut style = button_style(tokens, Class::SidebarToggleButton, status);
+        if matches!(status, button::Status::Active) {
+            style.background = None;
+            style.border.width = 0.0;
+        } else {
+            style.border.width = 0.0;
+            style.background = Some(iced::Background::Color(with_alpha(
+                tokens.surface_raised,
+                0.72,
+            )));
+        }
+        style.shadow = iced::Shadow::default();
+        style
+    })
+    .on_press(Message::ToggleLibraryCardMenu(profile.id.clone()))
+    .into()
+}
+
+fn library_card_overflow_menu<'a>(
+    app: &'a PDFolioApp,
+    profile: &'a LibraryProfile,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let delete_enabled = app.libraries.profiles.len() > 1;
+    let item_height = app.layout().app_menu_item_height;
+    let menu = column![
+        library_card_menu_row(
+            "Rename",
+            true,
+            Message::OpenRenameLibraryDialog(profile.id.clone()),
+            tokens,
+            item_height,
+        ),
+        library_card_menu_row(
+            "Delete",
+            delete_enabled,
+            Message::RequestDeleteLibrary(profile.id.clone()),
+            tokens,
+            item_height,
+        ),
+    ]
+    .spacing(0);
+
+    container(menu)
+        .width(118.0)
+        .padding(Spacing::XS)
+        .style(move |_| container_style(tokens, Class::MenuPanel))
+        .into()
+}
+
+fn library_card_overflow_menu_height(app: &PDFolioApp) -> f32 {
+    app.layout().app_menu_item_height * 2.0 + Spacing::XS * 2.0
+}
+
+fn library_card_menu_row<'a>(
+    label: &'a str,
+    enabled: bool,
+    message: Message,
+    tokens: ThemeTokens,
+    item_height: f32,
+) -> Element<'a, Message> {
+    let label_color = if enabled {
+        tokens.text_primary
+    } else {
+        tokens.text_secondary
+    };
+    let content = row![text(label)
+        .size(FontSize::MD)
+        .font(ui_font(FontWeight::REGULAR))
+        .color(label_color)
+        .wrapping(Wrapping::None)
+        .width(Length::Fill),]
+    .align_y(iced::Alignment::Center);
+
+    if enabled {
+        button(content)
+            .width(Length::Fill)
+            .height(item_height)
+            .padding([Spacing::XS, Spacing::MD])
+            .style(move |_, status| button_style(tokens, Class::MenuItem, status))
+            .on_press(message)
+            .into()
+    } else {
+        container(content)
+            .width(Length::Fill)
+            .height(item_height)
+            .padding([Spacing::XS, Spacing::MD])
+            .style(move |_| {
+                let disabled_style =
+                    tokens.class_styles[Class::MenuItem.index()].resolve(ComponentState::Disabled);
+                container_style(tokens, Class::MenuItem).with_visual_override(disabled_style)
+            })
+            .into()
+    }
+}
+
+fn view_library_name_dialog(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let Some(dialog) = app.libraries.name_dialog.as_ref() else {
+        return container("").into();
+    };
+    let (title, confirm_label) = match dialog {
+        LibraryNameDialog::Create => ("Create Library", "Create"),
+        LibraryNameDialog::Rename(_) => ("Rename Library", "Rename"),
+    };
+    let dialog = column![
+        text(title)
+            .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
+            .color(tokens.text_primary),
+        text_input("Library name", &app.libraries.new_library_name)
+            .id(Id::new(LIBRARY_NAME_DIALOG_INPUT_ID))
+            .on_input(Message::NewLibraryNameChanged)
+            .on_submit(Message::ConfirmLibraryNameDialog)
+            .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+            .width(Length::Fill),
+        row![
+            toolbar_button("Cancel", tokens).on_press(Message::CancelLibraryNameDialog),
+            container("").width(Length::Fill),
+            toolbar_button(confirm_label, tokens).on_press(Message::ConfirmLibraryNameDialog),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::LG);
+
+    container(
+        container(dialog)
+            .width(360.0)
+            .style(move |_| container_style(tokens, Class::JumpOverlay)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center(Length::Fill)
+    .style(move |_| container_style(tokens, Class::PresentationOverlay))
+    .into()
 }
 
 fn viewer_find_anchor(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> Element<'_, Message> {

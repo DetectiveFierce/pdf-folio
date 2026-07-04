@@ -251,7 +251,7 @@ impl PDFolioApp {
     }
 
     pub(super) fn title(&self) -> String {
-        if self.mode == AppMode::Library {
+        if matches!(self.mode, AppMode::Library | AppMode::LibrarySwitcher) {
             return String::from("PDF-Folio");
         }
 
