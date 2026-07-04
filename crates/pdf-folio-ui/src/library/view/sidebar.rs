@@ -1,6 +1,9 @@
 use super::*;
 use iced::widget::column;
 
+const FILE_TREE_CHEVRON_RIGHT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M6.25 4.25 10 8l-3.75 3.75"/></svg>"##;
+const FILE_TREE_CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4.25 6.25 8 10l3.75-3.75"/></svg>"##;
+
 pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let sidebar_width = app.library.library_tag_sidebar_width;
@@ -611,7 +614,7 @@ pub(crate) fn view_multi_selection_sidebar<'a>(
         heading,
         text(format_count(selected_count, "PDF"))
             .size(FontSize::HEADING)
-            .font(ui_font(FontWeight::SEMIBOLD))
+            .font(display_font(FontWeight::MEDIUM))
             .color(sidebar_detail_primary_color(tokens)),
         sidebar_detail_row(
             "Known pages",
@@ -831,12 +834,12 @@ pub(crate) fn file_tree_row<'a>(
 
     let chevron: Element<'_, Message> = if has_children {
         let icon = Svg::new(iced::widget::svg::Handle::from_memory(if expanded {
-            CHEVRON_DOWN_SVG
+            FILE_TREE_CHEVRON_DOWN_SVG
         } else {
-            CHEVRON_RIGHT_SVG
+            FILE_TREE_CHEVRON_RIGHT_SVG
         }))
-        .width(13.0)
-        .height(13.0)
+        .width(14.0)
+        .height(14.0)
         .style(move |_, status| iced::widget::svg::Style {
             color: Some(match status {
                 iced::widget::svg::Status::Hovered => fold_button_hovered_style

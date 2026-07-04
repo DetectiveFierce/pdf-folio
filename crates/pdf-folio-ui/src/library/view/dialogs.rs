@@ -20,6 +20,7 @@ pub(crate) fn view_confirmation_dialog(app: &PDFolioApp) -> Element<'_, Message>
     let dialog = column![
         text(title)
             .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
             .color(tokens.text_primary),
         text(body).size(FontSize::MD).color(tokens.text_secondary),
         row![
@@ -209,6 +210,7 @@ pub(crate) fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message
     let dialog = column![
         text("New Folder")
             .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
             .color(tokens.text_primary),
         text(format!("Create a folder in {parent}."))
             .size(FontSize::MD)
@@ -428,6 +430,7 @@ pub(crate) fn view_raindrop_connect_dialog(app: &PDFolioApp) -> Element<'_, Mess
     let dialog = column![
         text("Connect Raindrop.io")
             .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
             .color(tokens.text_primary),
         text("Create a small Raindrop developer app once, then paste its credentials here. PDF-Folio will open your browser so you can sign in and authorize access.")
             .size(FontSize::MD)
@@ -558,7 +561,7 @@ pub(crate) fn view_raindrop_import_dialog(app: &PDFolioApp) -> Element<'_, Messa
             column![
                 text("Import from Raindrop.io")
                     .size(FontSize::HEADING)
-                    .font(ui_font(FontWeight::SEMIBOLD))
+                    .font(display_font(FontWeight::MEDIUM))
                     .color(tokens.text_primary),
                 text(if app.library.raindrop_import_preview.is_some() {
                     format!(
@@ -659,7 +662,7 @@ pub(crate) fn view_raindrop_import_progress_dialog(app: &PDFolioApp) -> Element<
     let content = column![
         text("Importing from Raindrop.io")
             .size(FontSize::HEADING)
-            .font(ui_font(FontWeight::SEMIBOLD))
+            .font(display_font(FontWeight::MEDIUM))
             .color(tokens.text_primary),
         text(status).size(FontSize::MD).color(tokens.text_secondary),
         container(progress_bar(value, tokens)).width(Length::Fill),

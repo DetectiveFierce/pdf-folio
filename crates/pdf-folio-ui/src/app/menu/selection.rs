@@ -85,7 +85,7 @@ pub(crate) fn view_selection_context_row(
     controls = controls.push(
         text("PDF-Folio")
             .size(FontSize::HEADING)
-            .font(ui_font(FontWeight::BOLD))
+            .font(display_font(FontWeight::SEMIBOLD))
             .color(tokens.text_secondary)
             .width(Length::Fill)
             .align_x(iced::alignment::Horizontal::Right)

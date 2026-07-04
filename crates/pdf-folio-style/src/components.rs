@@ -9,7 +9,8 @@ use crate::classes::{
 };
 use crate::side_border::side_border;
 use crate::tokens::{
-    ui_font, ContentAlignment, FontSize, FontWeight, Spacing, TextAlignment, ThemeTokens,
+    display_font, ui_font, ContentAlignment, FontSize, FontWeight, Spacing, TextAlignment,
+    ThemeTokens,
 };
 
 const CHECK_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"##;
@@ -156,8 +157,8 @@ pub fn section_heading<'a>(
     tokens: ThemeTokens,
 ) -> iced::widget::Text<'a> {
     text(label.into())
-        .size(FontSize::SM)
-        .font(ui_font(FontWeight::MEDIUM))
+        .size(FontSize::CONTROL)
+        .font(display_font(FontWeight::SEMIBOLD))
         .color(tokens.text_secondary)
         .align_x(TextAlignment::Start.horizontal())
 }
@@ -170,7 +171,7 @@ pub fn empty_state<'a, Message: 'a>(
     let content = container(
         text(label.into())
             .size(FontSize::HEADING)
-            .font(ui_font(FontWeight::MEDIUM)),
+            .font(display_font(FontWeight::MEDIUM)),
     )
     .center(Length::Fill)
     .height(Length::Fill)

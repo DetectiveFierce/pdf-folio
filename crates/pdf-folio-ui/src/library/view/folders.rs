@@ -96,7 +96,7 @@ pub(crate) fn view_parent_directory_drop_box<'a>(
         icon,
         text("Move to Parent Directory")
             .size(FontSize::CONTROL)
-            .font(ui_font(FontWeight::SEMIBOLD))
+            .font(display_font(FontWeight::SEMIBOLD))
             .color(border_color)
     ]
     .spacing(Spacing::SM)
@@ -157,7 +157,7 @@ pub(crate) fn folder_grid_card<'a>(
         column![
             text(title)
                 .size(folder_title_size)
-                .font(ui_font(FontWeight::SEMIBOLD))
+                .font(display_font(FontWeight::MEDIUM))
                 .color(with_alpha(tokens.text_primary, content_alpha))
                 .wrapping(Wrapping::None),
             text(meta)

@@ -14,8 +14,8 @@
 //! - [`layout`] holds shared layout constants such as window size, card grid
 //!   dimensions, and scroll increment.
 //!
-//! Bundled IBM Plex Sans font bytes are re-exported so the UI crate can
-//! register them with iced at startup.
+//! Bundled IBM Plex Sans and Vollkorn font bytes are re-exported so the UI
+//! crate can register them with iced at startup.
 
 pub mod book;
 pub mod classes;
@@ -30,6 +30,32 @@ pub const IBM_PLEX_SANS_MEDIUM: &[u8] = include_bytes!("../assets/fonts/IBMPlexS
 pub const IBM_PLEX_SANS_SEMIBOLD: &[u8] =
     include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf");
 pub const IBM_PLEX_SANS_BOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Bold.ttf");
+pub const VOLLKORN_REGULAR: &[u8] = include_bytes!("../assets/fonts/Vollkorn-Regular.ttf");
+pub const VOLLKORN_MEDIUM: &[u8] = include_bytes!("../assets/fonts/Vollkorn-Medium.ttf");
+pub const VOLLKORN_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/Vollkorn-SemiBold.ttf");
+pub const VOLLKORN_BOLD: &[u8] = include_bytes!("../assets/fonts/Vollkorn-Bold.ttf");
+pub const VOLLKORN_ITALIC: &[u8] = include_bytes!("../assets/fonts/Vollkorn-Italic.ttf");
+pub const VOLLKORN_MEDIUM_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/Vollkorn-MediumItalic.ttf");
+pub const VOLLKORN_SEMIBOLD_ITALIC: &[u8] =
+    include_bytes!("../assets/fonts/Vollkorn-SemiBoldItalic.ttf");
+pub const VOLLKORN_BOLD_ITALIC: &[u8] = include_bytes!("../assets/fonts/Vollkorn-BoldItalic.ttf");
+
+/// All application fonts embedded into the executable and registered with iced.
+pub const BUNDLED_FONT_BYTES: &[&[u8]] = &[
+    IBM_PLEX_SANS_REGULAR,
+    IBM_PLEX_SANS_MEDIUM,
+    IBM_PLEX_SANS_SEMIBOLD,
+    IBM_PLEX_SANS_BOLD,
+    VOLLKORN_REGULAR,
+    VOLLKORN_MEDIUM,
+    VOLLKORN_SEMIBOLD,
+    VOLLKORN_BOLD,
+    VOLLKORN_ITALIC,
+    VOLLKORN_MEDIUM_ITALIC,
+    VOLLKORN_SEMIBOLD_ITALIC,
+    VOLLKORN_BOLD_ITALIC,
+];
 
 pub use book::{fallback_dark_tokens, fallback_light_tokens, StyleBook};
 pub use classes::{
@@ -54,3 +80,48 @@ pub use tokens::{
     FontSize, FontWeight, IconSize, LabelSection, Radius, Spacing, TextAlignment, ThemeTokens,
     DISPLAY_FONT_FAMILY, UI_FONT_FAMILY,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fontdb::{Database, Family, Query, Stretch, Style, Weight};
+    use std::sync::Arc;
+
+    #[test]
+    fn bundled_fonts_include_display_family_weights() {
+        let mut db = Database::new();
+
+        for font in BUNDLED_FONT_BYTES {
+            db.load_font_source(fontdb::Source::Binary(Arc::new(font.to_vec())));
+        }
+
+        for style in [Style::Normal, Style::Italic] {
+            for weight in [
+                Weight::NORMAL,
+                Weight::MEDIUM,
+                Weight::SEMIBOLD,
+                Weight::BOLD,
+            ] {
+                let query = Query {
+                    families: &[Family::Name(DISPLAY_FONT_FAMILY)],
+                    weight,
+                    stretch: Stretch::Normal,
+                    style,
+                };
+
+                let id = db.query(&query).unwrap_or_else(|| {
+                    panic!("missing embedded display font style {style:?} weight {weight:?}")
+                });
+                let face = db.face(id).expect("fontdb face for queried font");
+
+                assert!(
+                    face.families
+                        .iter()
+                        .any(|(family, _)| family == DISPLAY_FONT_FAMILY),
+                    "display font resolved to {:?}",
+                    face.families
+                );
+            }
+        }
+    }
+}

@@ -196,10 +196,6 @@ const CHEVRON_UP_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width
 const CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"##;
 const GRID_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>"##;
 const LIST_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>"##;
-const IBM_PLEX_SANS_REGULAR: &[u8] = pdf_folio_style::IBM_PLEX_SANS_REGULAR;
-const IBM_PLEX_SANS_MEDIUM: &[u8] = pdf_folio_style::IBM_PLEX_SANS_MEDIUM;
-const IBM_PLEX_SANS_SEMIBOLD: &[u8] = pdf_folio_style::IBM_PLEX_SANS_SEMIBOLD;
-const IBM_PLEX_SANS_BOLD: &[u8] = pdf_folio_style::IBM_PLEX_SANS_BOLD;
 const FILE_TREE_LABEL_SIZE: u32 = FontSize::MD;
 const FILE_TREE_ROW_HEIGHT: f32 = 26.0;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
@@ -568,7 +564,7 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
         "Initialized PDF-Folio application state"
     );
 
-    iced::application(
+    let mut application = iced::application(
         move || {
             let open_task = startup_file
                 .clone()
@@ -586,17 +582,19 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
     .theme(|app: &PDFolioApp| match app.appearance.theme {
         AppTheme::Light => Theme::Light,
         AppTheme::Dark => Theme::Dark,
-    })
-    .font(IBM_PLEX_SANS_REGULAR)
-    .font(IBM_PLEX_SANS_MEDIUM)
-    .font(IBM_PLEX_SANS_SEMIBOLD)
-    .font(IBM_PLEX_SANS_BOLD)
-    .default_font(iced::Font::with_name(UI_FONT_FAMILY))
-    .subscription(subscription)
-    .scale_factor(|app| app.viewer.scale_factor)
-    .window_size(initial_window_size())
-    .centered()
-    .run()?;
+    });
+
+    for font in pdf_folio_style::BUNDLED_FONT_BYTES {
+        application = application.font(*font);
+    }
+
+    application
+        .default_font(iced::Font::with_name(UI_FONT_FAMILY))
+        .subscription(subscription)
+        .scale_factor(|app| app.viewer.scale_factor)
+        .window_size(initial_window_size())
+        .centered()
+        .run()?;
 
     Ok(())
 }
@@ -757,7 +755,7 @@ fn truncated_title<'a>(
     let text_color = with_alpha(tokens.text_primary, alpha);
     let label = text(visible)
         .size(font_size)
-        .font(display_font(FontWeight::MEDIUM))
+        .font(display_font(FontWeight::BOLD))
         .color(text_color)
         .wrapping(Wrapping::None)
         .width(width);

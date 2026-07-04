@@ -886,13 +886,13 @@ pub struct FontSize;
 
 impl FontSize {
     /// Small metadata text.
-    pub const SM: u32 = 11;
+    pub const SM: u32 = 12;
     /// Body text.
     pub const MD: u32 = 13;
     /// Control label text.
     pub const CONTROL: u32 = 14;
     /// Section heading text.
-    pub const HEADING: u32 = 15;
+    pub const HEADING: u32 = 16;
 }
 
 /// Font-weight tokens for semantic text roles.
@@ -911,8 +911,8 @@ impl FontWeight {
 
 /// Primary application font family.
 pub const UI_FONT_FAMILY: &str = "IBM Plex Sans";
-/// Display font family for bookish titles and brand marks.
-pub const DISPLAY_FONT_FAMILY: &str = "Noto Serif";
+/// Bundled Vollkorn family for bookish titles and brand marks.
+pub const DISPLAY_FONT_FAMILY: &str = "Vollkorn";
 
 /// Returns the primary UI font with a semantic weight.
 pub fn ui_font(weight: iced::font::Weight) -> Font {
@@ -923,7 +923,7 @@ pub fn ui_font(weight: iced::font::Weight) -> Font {
     }
 }
 
-/// Returns the display font with a semantic weight.
+/// Returns the bundled display font with a semantic variable weight.
 pub fn display_font(weight: iced::font::Weight) -> Font {
     Font {
         family: font::Family::Name(DISPLAY_FONT_FAMILY),

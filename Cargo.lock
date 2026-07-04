@@ -3858,6 +3858,7 @@ dependencies = [
 name = "pdf-folio-style"
 version = "0.1.0"
 dependencies = [
+ "fontdb",
  "iced",
  "kdl",
 ]

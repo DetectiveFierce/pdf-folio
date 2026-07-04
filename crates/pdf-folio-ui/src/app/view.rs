@@ -338,7 +338,7 @@ fn startup_library_loading_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Eleme
                 column![
                     text("Restoring library")
                         .size(FontSize::HEADING)
-                        .font(ui_font(FontWeight::SEMIBOLD))
+                        .font(display_font(FontWeight::MEDIUM))
                         .color(tokens.text_primary),
                     text(status).size(FontSize::MD).color(tokens.text_secondary),
                     container(progress_bar(0.42, tokens)).width(Length::Fill),

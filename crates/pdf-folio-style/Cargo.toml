@@ -8,3 +8,6 @@ repository.workspace = true
 [dependencies]
 iced.workspace = true
 kdl.workspace = true
+
+[dev-dependencies]
+fontdb.workspace = true
