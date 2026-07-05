@@ -66,6 +66,9 @@ pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -
             return None;
         }
         AppMenuAction::SortLibrary(sort_mode) => Message::LibrarySortChanged(sort_mode),
+        AppMenuAction::ToggleMissingFiles => {
+            Message::MissingFilterChanged(!app.library.missing_filter_active)
+        }
         AppMenuAction::CreateFolder => Message::OpenCreateFolderDialog,
         AppMenuAction::RestoreTagPillView => Message::RestoreLibraryViewBeforeTag,
         AppMenuAction::ResetMetadata => {
@@ -579,6 +582,13 @@ pub(crate) fn app_menu_panel<'a>(
         AppMenu::Library => {
             let has_selection = !app.library.selected_library_entries.is_empty();
             let has_active_folder = app.library.selected_folder.is_some();
+            let missing_count = app
+                .library
+                .library_entries
+                .iter()
+                .filter(|entry| entry.missing)
+                .count();
+            let missing_detail = format!("{missing_count} files");
             panel = panel
                 .push(app_menu_item(
                     app_menu_action_label(labels, "RestoreTagPillView", "< Previous Library View"),
@@ -647,6 +657,14 @@ pub(crate) fn app_menu_panel<'a>(
                     "",
                     has_selection && has_active_folder,
                     AppMenuAction::RemoveFromFolder,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "ShowMissingFiles", "Show Missing Files"),
+                    &missing_detail,
+                    app.mode == AppMode::Library,
+                    AppMenuAction::ToggleMissingFiles,
                     tokens,
                     app.layout().app_menu_item_height,
                 ))
@@ -816,13 +834,15 @@ fn view_menu_flyout_panel<'a>(
 }
 
 pub(crate) fn app_menu_item<'a>(
-    label: &'a str,
-    shortcut: &'a str,
+    label: impl Into<String>,
+    shortcut: impl Into<String>,
     enabled: bool,
     action: AppMenuAction,
     tokens: ThemeTokens,
     item_height: f32,
 ) -> Element<'a, Message> {
+    let label = label.into();
+    let shortcut = shortcut.into();
     let item_layout = tokens.class_styles[Class::MenuItem.index()].layout;
     let item_text = tokens.class_styles[Class::MenuItem.index()].text;
     let state = if enabled {

@@ -1171,6 +1171,13 @@ pub(crate) fn confirmation_copy<'a>(
             ),
             "Move to Trash",
         ),
+        ConfirmationAction::DeleteTag(tag) => (
+            "Delete tag?",
+            format!(
+                "This will remove the tag \"{tag}\" from all files and remove it from the tag menu."
+            ),
+            "Delete Tag",
+        ),
         ConfirmationAction::DeleteLibrary(library_id) => (
             "Delete library?",
             format!(

@@ -1868,6 +1868,35 @@ impl Db {
         Ok(())
     }
 
+    /// Renames a tag everywhere it is used.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot update the tag rows.
+    pub fn rename_tag(&self, old_tag: &str, new_tag: &str) -> Result<usize> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO tags (entry_id, tag)
+             SELECT entry_id, ?1 FROM tags WHERE tag = ?2",
+            params![new_tag, old_tag],
+        )?;
+        let removed = transaction.execute("DELETE FROM tags WHERE tag = ?1", params![old_tag])?;
+        transaction.commit()?;
+        Ok(removed)
+    }
+
+    /// Deletes a tag everywhere it is used.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot delete the tag rows.
+    pub fn delete_tag(&self, tag: &str) -> Result<usize> {
+        let connection = self.connection()?;
+        let removed = connection.execute("DELETE FROM tags WHERE tag = ?1", params![tag])?;
+        Ok(removed)
+    }
+
     /// Deletes an entry and its dependent rows.
     ///
     /// # Errors

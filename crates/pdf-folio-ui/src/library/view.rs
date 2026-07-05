@@ -18,6 +18,8 @@ use pdf_folio_ui_components::library::view::{
 };
 use std::time::Duration;
 
+const SEARCH_CLEAR_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"##;
+
 #[path = "view/dialogs.rs"]
 mod dialogs;
 #[path = "view/entries.rs"]
@@ -272,9 +274,12 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_| container_style(tokens, Class::AppShell));
-    let main_content = mouse_area(main_content).on_right_press(Message::ContextMenuOpened(
+    let mut main_content = mouse_area(main_content).on_right_press(Message::ContextMenuOpened(
         ContextMenuTarget::LibraryBackground,
     ));
+    if app.library.renaming_tag.is_some() {
+        main_content = main_content.on_press(Message::CancelTagRename);
+    }
 
     let mut layout = row![].height(Length::Fill);
     if app.library.library_tag_sidebar_open {
@@ -380,16 +385,57 @@ pub(crate) fn library_search_input<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    search_input_with_class(
-        "Search library",
-        &app.library.search_query,
-        tokens,
-        Class::LibrarySearchInput,
-        Message::SearchQueryChanged,
-    )
-    .id(Id::new(LIBRARY_SEARCH_INPUT_ID))
-    .width(Length::Fill)
-    .into()
+    let input = text_input("Search library", &app.library.search_query)
+        .on_input(Message::SearchQueryChanged)
+        .padding(iced::Padding {
+            top: Spacing::SM,
+            right: if app.library.search_query.is_empty() {
+                Spacing::MD
+            } else {
+                Spacing::XL
+            },
+            bottom: Spacing::SM,
+            left: Spacing::MD,
+        })
+        .size(FontSize::MD)
+        .font(ui_font(FontWeight::REGULAR))
+        .style(move |_, status| text_input_style(tokens, Class::LibrarySearchInput, status))
+        .id(Id::new(LIBRARY_SEARCH_INPUT_ID))
+        .width(Length::Fill);
+
+    let mut search = stack![input].width(Length::Fill);
+    if !app.library.search_query.is_empty() {
+        let icon = Svg::new(iced::widget::svg::Handle::from_memory(SEARCH_CLEAR_SVG))
+            .width(Length::Fixed(12.0))
+            .height(Length::Fixed(12.0))
+            .style(move |_, _| iced::widget::svg::Style {
+                color: Some(tokens.text_secondary),
+            });
+        let clear_button = button(container(icon).center(Length::Fill))
+            .width(Length::Fixed(24.0))
+            .height(Length::Fixed(24.0))
+            .padding(0)
+            .on_press(Message::SearchQueryChanged(String::new()))
+            .style(move |_, _| iced::widget::button::Style {
+                text_color: tokens.text_secondary,
+                ..iced::widget::button::Style::default()
+            });
+        search = search.push(
+            container(clear_button)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .center_y(Length::Fill)
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: Spacing::XS,
+                    bottom: 0.0,
+                    left: 0.0,
+                }),
+        );
+    }
+
+    search.into()
 }
 
 pub(crate) fn library_toolbar_available_width(app: &PDFolioApp) -> f32 {
@@ -465,38 +511,10 @@ pub(crate) fn library_history_icon_button<'a>(
 }
 
 pub(crate) fn library_quick_filter_chips<'a>(
-    app: &'a PDFolioApp,
-    tokens: ThemeTokens,
+    _app: &'a PDFolioApp,
+    _tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    if app.library.trash_view_active {
-        return container("").width(Length::Shrink).into();
-    }
-    let mut chips = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
-
-    let missing_active = app.library.missing_filter_active;
-    let library_menu_text = tokens.class_styles[Class::LibraryControlBar.index()]
-        .resolve(ComponentState::Normal)
-        .text_color
-        .unwrap_or(tokens.text_secondary);
-    chips = chips.push(
-        button(
-            text("Missing")
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::MEDIUM))
-                .color(library_menu_text),
-        )
-        .on_press(Message::MissingFilterChanged(!missing_active))
-        .padding([Spacing::XS, Spacing::MD])
-        .style(move |_, status| {
-            if missing_active {
-                crate::style::button_style(tokens, Class::LibraryImportButton, status)
-            } else {
-                crate::style::button_style(tokens, Class::TagPill, status)
-            }
-        }),
-    );
-
-    chips.into()
+    container("").width(Length::Shrink).into()
 }
 
 pub(crate) fn library_filter_summary<'a>(

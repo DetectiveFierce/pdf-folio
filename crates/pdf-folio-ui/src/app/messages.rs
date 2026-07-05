@@ -124,6 +124,8 @@ pub enum AppMenuAction {
     SetViewerSpreadMode(ViewerSpreadMode),
     /// Change the library sort mode.
     SortLibrary(LibrarySortMode),
+    /// Toggle the missing-files library filter.
+    ToggleMissingFiles,
     /// Create a folder under the active folder.
     CreateFolder,
     /// Clear display metadata for selected PDFs.
@@ -171,6 +173,8 @@ pub enum ContextMenuTarget {
     LibraryEntry(EntryId),
     /// A library folder, or the library root when `None`.
     Folder(Option<FolderId>),
+    /// A library sidebar tag.
+    Tag(String),
     /// Empty/library background space.
     LibraryBackground,
     /// The open document viewer canvas.
@@ -199,6 +203,8 @@ pub enum ContextMenuAction {
     SelectFolder,
     NewFolder,
     RenameFolder,
+    RenameTag,
+    DeleteTag,
     MoveFolderTo,
     MoveFolderToRoot,
     MoveFolderUp,
@@ -235,6 +241,8 @@ pub enum ConfirmationAction {
     ResetDetailsMetadata(EntryId),
     /// Delete one folder without deleting PDFs on disk.
     DeleteFolder(FolderId),
+    /// Remove a tag from every PDF that uses it.
+    DeleteTag(String),
     /// Delete a whole discrete library database.
     DeleteLibrary(String),
 }
@@ -724,6 +732,8 @@ pub enum Message {
     LibraryWatchEvent(LibraryWatchEvent),
     /// Tag filter changed.
     TagFilterChanged(Option<String>),
+    /// A tag row in the sidebar was clicked.
+    TagTreeClicked(String),
     /// A tag pill on a library card or row was clicked.
     TagPillClicked(String),
     /// Restore the library view shown before the last tag pill click.
@@ -783,6 +793,16 @@ pub enum Message {
     TagInputChanged(String),
     /// Submit the active inline tag.
     SubmitTag,
+    /// Start renaming one sidebar tag.
+    StartTagRename(String),
+    /// Inline sidebar tag rename text changed.
+    TagRenameInputChanged(String),
+    /// Submit the active sidebar tag rename.
+    SubmitTagRename,
+    /// Cancel the active sidebar tag rename.
+    CancelTagRename,
+    /// Delete one tag from all PDFs.
+    DeleteTag(String),
     /// A library entry was tagged.
     EntryTagged { id: EntryId, tag: String },
     /// A library entry tag was removed.

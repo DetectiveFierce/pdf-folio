@@ -416,6 +416,8 @@ pub(super) fn pending_raindrop_rollback_check_task() -> Task<Message> {
 pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
     match message {
         Message::AppMenuOpened(menu) => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.chrome.open_selection_menu = None;
             app.chrome.open_view_menu_flyout = None;
             app.chrome.open_context_menu = None;
@@ -479,12 +481,16 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.chrome.cursor_position = position;
         }
         Message::ContextMenuOpened(target) => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.open_context_menu(target);
             if app.mode == AppMode::Library {
                 return scroll_library_to_offset_task(app.library.library_scroll_offset);
             }
         }
         Message::ContextMenuOpenedAt { target, position } => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.chrome.cursor_position = position;
             app.open_context_menu(target);
             if app.mode == AppMode::Library {
@@ -1439,6 +1445,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if app.library.library_drag.is_some() {
                 return Task::none();
             }
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.library.details_folder_id = None;
             app.select_library_entry(entry_id.clone());
             let now = Instant::now();
@@ -1462,6 +1470,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if app.library.folder_drag.is_some() {
                 return Task::none();
             }
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.select_folder_for_details(folder_id.clone());
             let now = Instant::now();
             let is_double_click =
@@ -1483,6 +1493,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if app.library.folder_drag.is_some() {
                 return Task::none();
             }
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.select_folder_in_tree(folder_id.clone());
             let now = Instant::now();
             let is_double_click =
@@ -1511,6 +1523,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             ]);
         }
         Message::OpenTrashCan => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.library.trash_view_active = true;
             app.library.selected_folder = None;
             app.library.details_folder_id = None;
@@ -1746,6 +1760,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             ]);
         }
         Message::SearchQueryChanged(query) => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.library.search_query = query;
             app.library.library_drag = None;
             app.library.search_generation = app.library.search_generation.wrapping_add(1);
@@ -1828,6 +1844,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             ]);
         }
         Message::LibrarySidebarTabChanged(tab) => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.library.library_sidebar_tab = tab;
             return save_app_session_task(app);
         }
@@ -1870,12 +1888,41 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             );
         }
         Message::TagFilterChanged(tag) => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.library.active_tag_filter = tag;
             app.library.previous_tag_pill_view = None;
+            if app.library.active_tag_filter.is_some() {
+                app.library.selected_folder = None;
+                app.library.details_folder_id = None;
+            }
             app.library.library_drag = None;
+            app.library.library_scroll_offset = 0.0;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
-            return with_session_save(app.request_visible_thumbnails(), app);
+            return Task::batch([
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(0.0),
+                save_app_session_task(app),
+            ]);
+        }
+        Message::TagTreeClicked(tag) => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
+            let now = Instant::now();
+            let is_double_click =
+                app.library
+                    .last_tag_click
+                    .as_ref()
+                    .is_some_and(|(last_tag, last_click)| {
+                        last_tag == &tag
+                            && now.duration_since(*last_click) <= Duration::from_millis(500)
+                    });
+            app.library.last_tag_click = Some((tag.clone(), now));
+            if is_double_click {
+                return Task::done(Message::StartTagRename(tag));
+            }
+            return Task::done(Message::TagFilterChanged(Some(tag)));
         }
         Message::TagPillClicked(tag) => {
             app.library.previous_tag_pill_view = Some(LibraryViewSnapshot {
@@ -1946,6 +1993,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return with_session_save(app.request_visible_thumbnails(), app);
         }
         Message::FolderSelected(folder_id) => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.library.selected_folder = folder_id.clone();
             app.library.previous_tag_pill_view = None;
             app.select_folder_for_details(folder_id);
@@ -1962,6 +2011,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             ]);
         }
         Message::ClearLibraryFilters => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
             app.library.search_query.clear();
             app.library.search_results = None;
             app.library.search_hit_pages.clear();
@@ -2214,6 +2265,52 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 }
             }
         }
+        Message::StartTagRename(tag) => {
+            app.library.renaming_tag = Some(tag.clone());
+            app.library.tag_rename_input = tag;
+            return operation::focus(Id::new(LIBRARY_TAG_RENAME_INPUT_ID));
+        }
+        Message::TagRenameInputChanged(value) => {
+            app.library.tag_rename_input = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(80)
+                .collect();
+        }
+        Message::SubmitTagRename => {
+            let Some(old_tag) = app.library.renaming_tag.take() else {
+                return Task::none();
+            };
+            let new_tag = app.library.tag_rename_input.trim().to_owned();
+            app.library.tag_rename_input.clear();
+            if new_tag.is_empty() || new_tag == old_tag {
+                return Task::none();
+            }
+            if app.all_tags().iter().any(|tag| tag == &new_tag) {
+                app.library.library_error = Some(format!("The tag \"{new_tag}\" already exists."));
+                return Task::none();
+            }
+            if app.library.active_tag_filter.as_ref() == Some(&old_tag) {
+                app.library.active_tag_filter = Some(new_tag.clone());
+            }
+            app.library.library_status = Some(format!("Renaming tag \"{old_tag}\"..."));
+            return rename_tag_task(Arc::clone(&app.db), old_tag, new_tag);
+        }
+        Message::CancelTagRename => {
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
+        }
+        Message::DeleteTag(tag) => {
+            if app.library.active_tag_filter.as_ref() == Some(&tag) {
+                app.library.active_tag_filter = None;
+            }
+            if app.library.renaming_tag.as_ref() == Some(&tag) {
+                app.library.renaming_tag = None;
+                app.library.tag_rename_input.clear();
+            }
+            app.library.library_status = Some(format!("Deleting tag \"{tag}\"..."));
+            return delete_tag_task(Arc::clone(&app.db), tag);
+        }
         Message::EntryTagged { .. } | Message::EntryUntagged { .. } | Message::EntryDeleted(_) => {
             return app.refresh_library();
         }
@@ -2256,6 +2353,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     Message::ResetDetailsMetadata(entry_id)
                 }
                 ConfirmationAction::DeleteFolder(folder_id) => Message::DeleteFolder(folder_id),
+                ConfirmationAction::DeleteTag(tag) => Message::DeleteTag(tag),
                 ConfirmationAction::DeleteLibrary(library_id) => Message::DeleteLibrary(library_id),
             });
         }

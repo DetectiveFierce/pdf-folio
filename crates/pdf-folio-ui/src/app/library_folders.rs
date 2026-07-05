@@ -10,6 +10,10 @@ impl PDFolioApp {
     }
 
     pub(super) fn child_folders(&self) -> Vec<Folder> {
+        if self.library.active_tag_filter.is_some() {
+            return Vec::new();
+        }
+
         let mut folders = self
             .active_library_folders()
             .iter()

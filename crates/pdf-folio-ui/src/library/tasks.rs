@@ -139,6 +139,72 @@ where
     )
 }
 
+pub(crate) fn rename_tag_task(db: Arc<Db>, old_tag: String, new_tag: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let before = db.library_organization_snapshot()?;
+                let updated = db.rename_tag(&old_tag, &new_tag)?;
+                let after = db.library_organization_snapshot()?;
+                Ok::<_, anyhow::Error>((
+                    LibraryHistoryAction {
+                        label: String::from("Rename Tag"),
+                        refresh_search_on_restore: before.search_state_differs_from(&after),
+                        before,
+                        after,
+                    },
+                    String::from("Renamed tag"),
+                    updated,
+                    Vec::<String>::new(),
+                ))
+            })
+            .await?
+        },
+        |result| match result {
+            Ok((action, label, updated, errors)) => Message::LibraryHistoryActionFinished {
+                action,
+                label,
+                updated,
+                errors,
+            },
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+pub(crate) fn delete_tag_task(db: Arc<Db>, tag: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let before = db.library_organization_snapshot()?;
+                let updated = db.delete_tag(&tag)?;
+                let after = db.library_organization_snapshot()?;
+                Ok::<_, anyhow::Error>((
+                    LibraryHistoryAction {
+                        label: String::from("Delete Tag"),
+                        refresh_search_on_restore: before.search_state_differs_from(&after),
+                        before,
+                        after,
+                    },
+                    String::from("Deleted tag from"),
+                    updated,
+                    Vec::<String>::new(),
+                ))
+            })
+            .await?
+        },
+        |result| match result {
+            Ok((action, label, updated, errors)) => Message::LibraryHistoryActionFinished {
+                action,
+                label,
+                updated,
+                errors,
+            },
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
 pub(crate) fn rename_folder_task(db: Arc<Db>, folder_id: FolderId, name: String) -> Task<Message> {
     Task::perform(
         async move {

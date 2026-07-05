@@ -136,6 +136,9 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
         Shortcut::Escape => {
             if app.chrome.pending_confirmation.is_some() {
                 app.chrome.pending_confirmation = None;
+            } else if app.library.renaming_tag.is_some() {
+                app.library.renaming_tag = None;
+                app.library.tag_rename_input.clear();
             } else if app.chrome.open_app_menu.is_some() {
                 app.chrome.open_app_menu = None;
                 app.chrome.open_view_menu_flyout = None;

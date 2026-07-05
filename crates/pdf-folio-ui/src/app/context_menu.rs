@@ -7,6 +7,7 @@ struct ContextMenuItemSpec {
     label: &'static str,
     detail: &'static str,
     enabled: bool,
+    destructive: bool,
     action: ContextMenuAction,
 }
 
@@ -30,6 +31,7 @@ impl PDFolioApp {
             ContextMenuTarget::Folder(folder_id) => {
                 self.select_folder_for_details(folder_id.clone());
             }
+            ContextMenuTarget::Tag(_) => {}
             ContextMenuTarget::LibraryBackground | ContextMenuTarget::ViewerCanvas => {}
         }
 
@@ -49,6 +51,7 @@ impl PDFolioApp {
                 ContextMenuTarget::Folder(folder_id) => {
                     Some(Message::FolderSelected(folder_id.clone()))
                 }
+                ContextMenuTarget::Tag(_) => None,
                 ContextMenuTarget::LibraryBackground => None,
                 ContextMenuTarget::ViewerCanvas => None,
             },
@@ -109,6 +112,16 @@ impl PDFolioApp {
             },
             ContextMenuAction::NewFolder => Some(Message::OpenCreateFolderDialog),
             ContextMenuAction::RenameFolder => Some(Message::RenameSelectedFolder),
+            ContextMenuAction::RenameTag => match target {
+                ContextMenuTarget::Tag(tag) => Some(Message::StartTagRename(tag.clone())),
+                _ => None,
+            },
+            ContextMenuAction::DeleteTag => match target {
+                ContextMenuTarget::Tag(tag) => Some(Message::RequestConfirmation(
+                    ConfirmationAction::DeleteTag(tag.clone()),
+                )),
+                _ => None,
+            },
             ContextMenuAction::MoveFolderTo => Some(Message::OpenMoveSelectedFolderDialog),
             ContextMenuAction::MoveFolderToRoot => Some(Message::MoveSelectedFolderToRoot),
             ContextMenuAction::MoveFolderUp => Some(Message::MoveSelectedFolderUp),
@@ -228,6 +241,7 @@ fn context_menu_groups(
     match target {
         ContextMenuTarget::LibraryEntry(entry_id) => library_entry_context_groups(app, entry_id),
         ContextMenuTarget::Folder(folder_id) => folder_context_groups(app, folder_id.as_ref()),
+        ContextMenuTarget::Tag(tag) => tag_context_groups(app, tag),
         ContextMenuTarget::LibraryBackground => library_background_context_groups(app),
         ContextMenuTarget::ViewerCanvas => viewer_context_groups(app),
     }
@@ -464,6 +478,14 @@ fn library_background_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuIte
     ]
 }
 
+fn tag_context_groups(app: &PDFolioApp, tag: &str) -> Vec<Vec<ContextMenuItemSpec>> {
+    let exists = app.all_tags().iter().any(|candidate| candidate == tag);
+    vec![vec![
+        spec("Rename Tag", "", exists, ContextMenuAction::RenameTag),
+        destructive_spec("Delete Tag", "", exists, ContextMenuAction::DeleteTag),
+    ]]
+}
+
 fn viewer_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuItemSpec>> {
     let has_selection = app.viewer.viewer_text_selection.is_some();
     vec![
@@ -523,6 +545,22 @@ fn spec(
         label,
         detail,
         enabled,
+        destructive: false,
+        action,
+    }
+}
+
+fn destructive_spec(
+    label: &'static str,
+    detail: &'static str,
+    enabled: bool,
+    action: ContextMenuAction,
+) -> ContextMenuItemSpec {
+    ContextMenuItemSpec {
+        label,
+        detail,
+        enabled,
+        destructive: true,
         action,
     }
 }
@@ -539,7 +577,11 @@ fn context_menu_item<'a>(
     } else {
         ComponentState::Disabled
     };
-    let label_color = class_text_color(tokens, Class::ContextMenuItem, state, tokens.text_primary);
+    let label_color = if item.destructive && item.enabled {
+        tokens.error
+    } else {
+        class_text_color(tokens, Class::ContextMenuItem, state, tokens.text_primary)
+    };
     let detail_color =
         class_text_color(tokens, Class::ContextMenuItem, state, tokens.text_secondary);
     let label_size = item_text.size.unwrap_or(FontSize::MD);

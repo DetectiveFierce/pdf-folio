@@ -37,6 +37,7 @@ impl PDFolioApp {
             .search_results
             .as_ref()
             .unwrap_or_else(|| self.active_library_entries());
+        let filter_by_selected_folder = self.library.active_tag_filter.is_none();
         source
             .iter()
             .filter(|entry| {
@@ -46,7 +47,8 @@ impl PDFolioApp {
                     .is_none_or(|tag| entry.tags.iter().any(|entry_tag| entry_tag == tag))
             })
             .filter(|entry| {
-                entry_visible_in_folder_scope(entry, self.library.selected_folder.as_ref())
+                !filter_by_selected_folder
+                    || entry_visible_in_folder_scope(entry, self.library.selected_folder.as_ref())
             })
             .filter(|entry| {
                 self.library

@@ -137,12 +137,12 @@ use crate::library::tasks::{
     add_entries_to_folder_task, apply_watch_event, attribute_pending_metadata_task,
     bulk_delete_metadata_task, bulk_operation_task, bulk_permanently_delete_entries_task,
     bulk_refresh_metadata_task, bulk_reindex_task, bulk_reset_metadata_task,
-    bulk_restore_trash_items_task, create_folder_task, delete_folder_task, edit_metadata_task,
-    import_folder_with_index, import_pdf_with_index, move_entries_to_folder_task, move_folder_task,
-    paste_library_clipboard_task, permanently_delete_folder_from_trash_task,
-    persist_manual_entry_order_task, persist_manual_folder_order_task, relink_entry_task,
-    rename_folder_task, reset_metadata_task, restore_library_history_snapshot_task,
-    search_library_task,
+    bulk_restore_trash_items_task, create_folder_task, delete_folder_task, delete_tag_task,
+    edit_metadata_task, import_folder_with_index, import_pdf_with_index,
+    move_entries_to_folder_task, move_folder_task, paste_library_clipboard_task,
+    permanently_delete_folder_from_trash_task, persist_manual_entry_order_task,
+    persist_manual_folder_order_task, relink_entry_task, rename_folder_task, rename_tag_task,
+    reset_metadata_task, restore_library_history_snapshot_task, search_library_task,
 };
 #[cfg(test)]
 use crate::library::tasks::{clean_import_title, title_from_path};
@@ -216,6 +216,7 @@ const TRASH_CAN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width=
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
 const VIEWER_SCROLLABLE_ID: &str = "viewer-scrollable";
 const LIBRARY_SEARCH_INPUT_ID: &str = "library-search-input";
+const LIBRARY_TAG_RENAME_INPUT_ID: &str = "library-tag-rename-input";
 const LIBRARY_NAME_DIALOG_INPUT_ID: &str = "library-name-dialog-input";
 const LIBRARY_CREATE_FOLDER_INPUT_ID: &str = "library-create-folder-input";
 const VIEWER_FIND_INPUT_ID: &str = "viewer-find-input";
@@ -411,6 +412,8 @@ pub struct LibraryRuntime {
     pub previous_tag_pill_view: Option<LibraryViewSnapshot>,
     pub tag_entry_id: Option<EntryId>,
     pub tag_input: String,
+    pub renaming_tag: Option<String>,
+    pub tag_rename_input: String,
     pub selected_library_entries: HashSet<EntryId>,
     pub library_selection_anchor: Option<EntryId>,
     pub bulk_tag_input: String,
@@ -442,6 +445,7 @@ pub struct LibraryRuntime {
     pub folder_drop_flash: Option<(FolderId, Instant)>,
     pub last_library_click: Option<(EntryId, Instant)>,
     pub last_folder_click: Option<(Option<FolderId>, Instant)>,
+    pub last_tag_click: Option<(String, Instant)>,
     pub folder_drag_started_in_tree: bool,
     pub parent_directory_drop_scroll_adjusted: bool,
     pub library_card_hover_animations: HashMap<EntryId, Animation<bool>>,

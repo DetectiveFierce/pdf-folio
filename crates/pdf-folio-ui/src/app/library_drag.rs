@@ -240,7 +240,8 @@ impl PDFolioApp {
     }
 
     pub(super) fn parent_directory_drop_box_visible(&self) -> bool {
-        self.library.selected_folder.is_some()
+        self.library.active_tag_filter.is_none()
+            && self.library.selected_folder.is_some()
             && (self.library.library_drag.is_some() || self.library.folder_drag.is_some())
     }
 

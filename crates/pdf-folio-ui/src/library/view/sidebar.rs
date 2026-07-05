@@ -566,6 +566,16 @@ pub(crate) fn view_tag_tree_sidebar<'a>(
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     let all_tags = app.all_tags();
+    let fold_button_width = tokens.class_styles[Class::FileTreeFoldButton.index()]
+        .layout
+        .width
+        .unwrap_or(16.0);
+    let tag_label_left_offset = tokens
+        .primitives
+        .file_tree_indent_width
+        .min(tokens.primitives.file_tree_max_indent)
+        + fold_button_width
+        + Spacing::XS;
     let mut tags = column![
         file_tree_row(
             "All tags",
@@ -580,7 +590,15 @@ pub(crate) fn view_tag_tree_sidebar<'a>(
             tokens,
             false,
         ),
-        section_heading("Tags", tokens),
+        mouse_area(
+            container(section_heading("Tags", tokens)).padding(iced::Padding {
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+                left: tag_label_left_offset,
+            })
+        )
+        .on_press(Message::CancelTagRename),
     ]
     .spacing(Spacing::SM);
 
@@ -592,22 +610,73 @@ pub(crate) fn view_tag_tree_sidebar<'a>(
             .filter(|entry| entry.tags.iter().any(|entry_tag| entry_tag == &tag))
             .count();
         let active = app.library.active_tag_filter.as_ref() == Some(&tag);
-        tags = tags.push(file_tree_row(
-            tag.clone(),
-            Some(format_count(count, "PDF")),
-            1,
-            active,
-            false,
-            false,
-            Message::TagFilterChanged(Some(tag.clone())),
-            Message::TagFilterChanged(Some(tag)),
-            sidebar_width,
-            tokens,
-            false,
-        ));
+        if app.library.renaming_tag.as_ref() == Some(&tag) {
+            tags = tags.push(tag_rename_row(app, sidebar_width, tokens));
+        } else {
+            let row = file_tree_row(
+                tag.clone(),
+                Some(format_count(count, "PDF")),
+                1,
+                active,
+                false,
+                false,
+                Message::TagFilterChanged(Some(tag.clone())),
+                Message::TagTreeClicked(tag.clone()),
+                sidebar_width,
+                tokens,
+                false,
+            );
+            tags = tags.push(
+                mouse_area(row)
+                    .on_right_press(Message::ContextMenuOpened(ContextMenuTarget::Tag(tag))),
+            );
+        }
     }
 
     tags.into()
+}
+
+fn tag_rename_row<'a>(
+    app: &'a PDFolioApp,
+    sidebar_width: f32,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let fold_button_layout = tokens.class_styles[Class::FileTreeFoldButton.index()].layout;
+    let row_height = 34.0;
+    let row_padding_y = 2.0;
+    let indent = tokens
+        .primitives
+        .file_tree_indent_width
+        .min(tokens.primitives.file_tree_max_indent);
+    let input_width = (sidebar_width
+        - Spacing::SM * 2.0
+        - indent
+        - fold_button_layout.width.unwrap_or(16.0)
+        - Spacing::XS * 2.0)
+        .max(72.0);
+    let content = row![
+        container("").width(indent),
+        container("")
+            .width(fold_button_layout.width.unwrap_or(16.0))
+            .height(fold_button_layout.height.unwrap_or(20.0)),
+        text_input("Tag name", &app.library.tag_rename_input)
+            .on_input(Message::TagRenameInputChanged)
+            .on_submit(Message::SubmitTagRename)
+            .id(Id::new(LIBRARY_TAG_RENAME_INPUT_ID))
+            .padding([Spacing::XS, Spacing::MD])
+            .size(FontSize::SM)
+            .style(move |_, status| folder_sidebar_text_input_style(tokens, status))
+            .width(input_width),
+    ]
+    .spacing(Spacing::XS)
+    .align_y(iced::Alignment::Center);
+
+    container(content)
+        .height(row_height)
+        .width(Length::Fill)
+        .padding([row_padding_y, Spacing::SM])
+        .style(move |_| container_style(tokens, Class::FileTree))
+        .into()
 }
 
 pub(crate) fn view_selected_pdf_sidebar<'a>(
