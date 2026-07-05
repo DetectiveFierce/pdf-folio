@@ -61,14 +61,16 @@ pub fn toolbar_button<'a, Message: 'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
+    let layout = tokens.class_styles[Class::ToolbarButton.index()].layout;
+    let text_style = tokens.class_styles[Class::ToolbarButton.index()].text;
     button(weighted_text(
         label,
         tokens,
-        FontSize::MD,
+        text_style.size.unwrap_or(FontSize::MD),
         TextAlignment::Start,
-        FontWeight::MEDIUM,
+        text_style.weight.unwrap_or(FontWeight::MEDIUM),
     ))
-    .padding([Spacing::SM, Spacing::LG])
+    .padding([layout.padding_y(Spacing::SM), layout.padding_x(Spacing::LG)])
     .style(move |_, status| button_style(tokens, Class::ToolbarButton, status))
 }
 
@@ -77,14 +79,16 @@ pub fn icon_button<'a, Message: 'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
+    let layout = tokens.class_styles[Class::ToolbarButton.index()].layout;
+    let text_style = tokens.class_styles[Class::ToolbarButton.index()].text;
     button(weighted_text(
         label,
         tokens,
-        FontSize::MD,
+        text_style.size.unwrap_or(FontSize::MD),
         TextAlignment::Center,
-        FontWeight::MEDIUM,
+        text_style.weight.unwrap_or(FontWeight::MEDIUM),
     ))
-    .padding([Spacing::SM, Spacing::MD])
+    .padding([layout.padding_y(Spacing::SM), layout.padding_x(Spacing::MD)])
     .style(move |_, status| button_style(tokens, Class::ToolbarButton, status))
 }
 

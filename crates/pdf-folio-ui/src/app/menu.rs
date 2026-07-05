@@ -4,7 +4,6 @@ use super::*;
 use crate::viewer::state::{ViewerScrollMode, ViewerSpreadMode};
 use crate::viewer::zoom::ZoomPreset;
 use iced::widget::{column, row, stack};
-use pdf_folio_ui_components::library::view::with_alpha;
 
 #[path = "menu/selection.rs"]
 mod selection;
@@ -30,11 +29,17 @@ pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -
     Some(match action {
         AppMenuAction::OpenFile => Message::OpenFileDialog,
         AppMenuAction::ImportFolder => Message::ImportFolderDialog,
+        AppMenuAction::ImportPdf => Message::ImportPdfDialog,
         AppMenuAction::ImportRaindrop => Message::ImportRaindrop,
         AppMenuAction::BackToLibrary => Message::BackToLibrary,
         AppMenuAction::RefreshLibrary => Message::LibraryRefresh,
         AppMenuAction::SelectAllVisible => Message::SelectAllVisibleLibraryEntries,
         AppMenuAction::ClearSelection => Message::ClearLibrarySelection,
+        AppMenuAction::UndoLibraryAction => Message::UndoLibraryAction,
+        AppMenuAction::RedoLibraryAction => Message::RedoLibraryAction,
+        AppMenuAction::CutLibrarySelection => Message::CutLibrarySelection,
+        AppMenuAction::CopyLibrarySelection => Message::CopyLibrarySelection,
+        AppMenuAction::PasteLibraryClipboard => Message::PasteLibraryClipboard,
         AppMenuAction::SaveDetails => Message::SaveDetailsMetadata,
         AppMenuAction::ResetDetails => {
             let entry_id = app.library.details_entry_id.clone()?;
@@ -92,7 +97,7 @@ pub(crate) fn view_app_menu_bar(app: &PDFolioApp) -> Element<'_, Message> {
     }
 
     let content: Element<'_, Message> =
-        if app.mode == AppMode::Library && !app.library.selected_library_entries.is_empty() {
+        if app.mode == AppMode::Library && library_context_toolbar_visible(app) {
             column![menus, view_selection_context_row(app, tokens)]
                 .spacing(0)
                 .into()
@@ -107,11 +112,17 @@ pub(crate) fn view_app_menu_bar(app: &PDFolioApp) -> Element<'_, Message> {
 }
 
 pub(crate) fn app_menu_bar_height(app: &PDFolioApp) -> f32 {
-    if app.mode == AppMode::Library && !app.library.selected_library_entries.is_empty() {
-        app.layout().app_menu_bar_height + app.layout().selection_context_row_height
+    if app.mode == AppMode::Library && library_context_toolbar_visible(app) {
+        app.layout().app_menu_bar_height + library_context_toolbar_height(app)
     } else {
         app.layout().app_menu_bar_height
     }
+}
+
+pub(crate) fn library_context_toolbar_visible(app: &PDFolioApp) -> bool {
+    !app.library.selected_library_entries.is_empty()
+        || (app.library.trash_view_active && app.details_folder().is_some())
+        || (!app.library.trash_view_active && app.details_folder().is_some())
 }
 
 pub(crate) fn app_menu_button<'a>(
@@ -121,29 +132,34 @@ pub(crate) fn app_menu_button<'a>(
     labels: &'a crate::style::AppLabelTokens,
     layout: &crate::style::AppLayoutTokens,
 ) -> Element<'a, Message> {
-    let menu_text_color = tokens.class_styles[Class::LibraryControlBar.index()]
-        .resolve(ComponentState::Normal)
-        .text_color
-        .unwrap_or(tokens.text_secondary);
+    let menu_button_layout = tokens.class_styles[Class::MenuButton.index()].layout;
+    let menu_button_text = tokens.class_styles[Class::MenuButton.index()].text;
+    let menu_state = if active {
+        ComponentState::Active
+    } else {
+        ComponentState::Normal
+    };
+    let menu_text_color =
+        class_text_color(tokens, Class::MenuButton, menu_state, tokens.text_secondary);
     button(
         container(
             text(app_menu_label(labels, menu))
-                .size(FontSize::MD)
-                .font(ui_font(FontWeight::MEDIUM))
+                .size(menu_button_text.size.unwrap_or(FontSize::MD))
+                .font(ui_font(
+                    menu_button_text.weight.unwrap_or(FontWeight::MEDIUM),
+                ))
                 .color(menu_text_color)
                 .wrapping(Wrapping::None),
         )
         .height(Length::Shrink)
         .center_y(Length::Shrink),
     )
-    .padding([0.0, Spacing::MD])
+    .padding([
+        menu_button_layout.padding_y(0.0),
+        menu_button_layout.padding_x(Spacing::MD),
+    ])
     .width(app_menu_button_width(menu, layout))
-    .height(
-        tokens.class_styles[Class::MenuButton.index()]
-            .layout
-            .height
-            .unwrap_or(24.0),
-    )
+    .height(menu_button_layout.height.unwrap_or(24.0))
     .on_press(Message::AppMenuOpened(menu))
     .style(move |_, status| {
         if active {
@@ -152,9 +168,7 @@ pub(crate) fn app_menu_button<'a>(
             crate::style::button_style(tokens, Class::MenuButton, status)
                 .with_visual_override(active_style)
         } else {
-            let mut style = crate::style::button_style(tokens, Class::MenuButton, status);
-            style.border.width = 0.0;
-            style
+            crate::style::button_style(tokens, Class::MenuButton, status)
         }
     })
     .into()
@@ -246,7 +260,10 @@ pub(crate) fn app_menu_panel<'a>(
     let menu_panel_layout = tokens.class_styles[Class::MenuPanel.index()].layout;
     let mut panel = column![]
         .spacing(menu_panel_layout.spacing.unwrap_or(2.0))
-        .padding(menu_panel_layout.padding_x(Spacing::XS));
+        .padding([
+            menu_panel_layout.padding_y(Spacing::XS),
+            menu_panel_layout.padding_x(Spacing::XS),
+        ]);
     match menu {
         AppMenu::File => {
             panel = panel
@@ -297,6 +314,48 @@ pub(crate) fn app_menu_panel<'a>(
             let single_selection = app.library.selected_library_entries.len() == 1;
             let has_bulk_tag = has_selection && !app.library.bulk_tag_input.trim().is_empty();
             panel = panel
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "UndoLibraryAction", "Undo"),
+                    "Ctrl+Z",
+                    app.mode == AppMode::Library && app.library.history.can_undo(),
+                    AppMenuAction::UndoLibraryAction,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "RedoLibraryAction", "Redo"),
+                    "Ctrl+Y",
+                    app.mode == AppMode::Library && app.library.history.can_redo(),
+                    AppMenuAction::RedoLibraryAction,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_separator(tokens))
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "CutLibrarySelection", "Cut"),
+                    "Ctrl+X",
+                    app.can_cut_or_copy_library_selection(),
+                    AppMenuAction::CutLibrarySelection,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "CopyLibrarySelection", "Copy"),
+                    "Ctrl+C",
+                    app.can_cut_or_copy_library_selection(),
+                    AppMenuAction::CopyLibrarySelection,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "PasteLibraryClipboard", "Paste"),
+                    "Ctrl+V",
+                    app.can_paste_library_clipboard(),
+                    AppMenuAction::PasteLibraryClipboard,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_separator(tokens))
                 .push(app_menu_item(
                     app_menu_action_label(labels, "SelectAllVisible", "Select All Visible PDFs"),
                     "Ctrl+A",
@@ -356,7 +415,7 @@ pub(crate) fn app_menu_panel<'a>(
                     app.layout().app_menu_item_height,
                 ))
                 .push(app_menu_item(
-                    app_menu_action_label(labels, "DeleteFromLibrary", "Delete From Library..."),
+                    app_menu_action_label(labels, "DeleteFromLibrary", "Move to Trash..."),
                     "Delete",
                     has_selection,
                     AppMenuAction::DeleteFromLibrary,
@@ -531,10 +590,18 @@ pub(crate) fn app_menu_panel<'a>(
                 ))
                 .push(app_menu_separator(tokens))
                 .push(app_menu_item(
-                    app_menu_action_label(labels, "ImportFolder", "Import Folder..."),
+                    app_menu_action_label(labels, "UploadFolder", "Upload Folder..."),
                     "",
                     app.mode == AppMode::Library,
                     AppMenuAction::ImportFolder,
+                    tokens,
+                    app.layout().app_menu_item_height,
+                ))
+                .push(app_menu_item(
+                    app_menu_action_label(labels, "ImportPdf", "Upload PDF..."),
+                    "",
+                    app.mode == AppMode::Library,
+                    AppMenuAction::ImportPdf,
                     tokens,
                     app.layout().app_menu_item_height,
                 ))
@@ -682,8 +749,12 @@ fn view_menu_flyout_y_offset(app: &PDFolioApp, flyout: ViewMenuFlyout, tokens: T
         .spacing
         .unwrap_or(2.0);
     let separator_height = tokens.primitives.menu_separator_height;
-    let scrolling_y =
-        Spacing::XS + item_height * 4.0 + separator_height * 2.0 + panel_spacing * 6.0;
+    let scrolling_y = tokens.class_styles[Class::MenuPanel.index()]
+        .layout
+        .padding_top(Spacing::XS)
+        + item_height * 4.0
+        + separator_height * 2.0
+        + panel_spacing * 6.0;
     match flyout {
         ViewMenuFlyout::Scrolling => scrolling_y,
         ViewMenuFlyout::Spreads => scrolling_y + item_height + panel_spacing,
@@ -698,7 +769,10 @@ fn view_menu_flyout_panel<'a>(
     let menu_panel_layout = tokens.class_styles[Class::MenuPanel.index()].layout;
     let mut panel = column![]
         .spacing(menu_panel_layout.spacing.unwrap_or(2.0))
-        .padding(menu_panel_layout.padding_x(Spacing::XS));
+        .padding([
+            menu_panel_layout.padding_y(Spacing::XS),
+            menu_panel_layout.padding_x(Spacing::XS),
+        ]);
 
     match flyout {
         ViewMenuFlyout::Scrolling => {
@@ -749,45 +823,56 @@ pub(crate) fn app_menu_item<'a>(
     tokens: ThemeTokens,
     item_height: f32,
 ) -> Element<'a, Message> {
-    let label_color = if enabled {
-        tokens.text_primary
+    let item_layout = tokens.class_styles[Class::MenuItem.index()].layout;
+    let item_text = tokens.class_styles[Class::MenuItem.index()].text;
+    let state = if enabled {
+        ComponentState::Normal
     } else {
-        tokens.text_secondary
+        ComponentState::Disabled
     };
-    let shortcut_color = if enabled {
-        tokens.text_secondary
-    } else {
-        with_alpha(tokens.text_secondary, 0.58)
-    };
+    let label_color = class_text_color(tokens, Class::MenuItem, state, tokens.text_primary);
+    let shortcut_color = class_text_color(tokens, Class::MenuItem, state, tokens.text_secondary);
+    let label_size = item_text.size.unwrap_or(FontSize::MD);
+    let shortcut_size = tokens.class_styles[Class::MenuPanel.index()]
+        .text
+        .size
+        .unwrap_or(FontSize::SM);
+    let item_weight = item_text.weight.unwrap_or(FontWeight::REGULAR);
     let content = row![
         text(label)
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::REGULAR))
+            .size(label_size)
+            .font(ui_font(item_weight))
             .color(label_color)
             .wrapping(Wrapping::None)
             .width(Length::Fill),
         text(shortcut)
-            .size(FontSize::SM)
-            .font(ui_font(FontWeight::REGULAR))
+            .size(shortcut_size)
+            .font(ui_font(item_weight))
             .color(shortcut_color)
             .wrapping(Wrapping::None),
     ]
-    .spacing(Spacing::MD)
+    .spacing(item_layout.spacing.unwrap_or(Spacing::MD))
     .align_y(iced::Alignment::Center);
 
     if enabled {
         button(content)
-            .height(item_height)
+            .height(item_layout.height.unwrap_or(item_height))
             .width(Length::Fill)
-            .padding([Spacing::XS, Spacing::MD])
+            .padding([
+                item_layout.padding_y(Spacing::XS),
+                item_layout.padding_x(Spacing::MD),
+            ])
             .on_press(Message::AppMenuActionSelected(action))
             .style(move |_, status| crate::style::button_style(tokens, Class::MenuItem, status))
             .into()
     } else {
         container(content)
-            .height(item_height)
+            .height(item_layout.height.unwrap_or(item_height))
             .width(Length::Fill)
-            .padding([Spacing::XS, Spacing::MD])
+            .padding([
+                item_layout.padding_y(Spacing::XS),
+                item_layout.padding_x(Spacing::MD),
+            ])
             .style(move |_| {
                 let disabled_style =
                     tokens.class_styles[Class::MenuItem.index()].resolve(ComponentState::Disabled);
@@ -806,43 +891,51 @@ pub(crate) fn app_menu_submenu_item<'a>(
     tokens: ThemeTokens,
     item_height: f32,
 ) -> Element<'a, Message> {
-    let label_color = if enabled {
-        tokens.text_primary
+    let item_layout = tokens.class_styles[Class::MenuItem.index()].layout;
+    let item_text = tokens.class_styles[Class::MenuItem.index()].text;
+    let state = if enabled {
+        ComponentState::Normal
     } else {
-        tokens.text_secondary
+        ComponentState::Disabled
     };
-    let value_color = if enabled {
-        tokens.text_secondary
-    } else {
-        with_alpha(tokens.text_secondary, 0.58)
-    };
+    let label_color = class_text_color(tokens, Class::MenuItem, state, tokens.text_primary);
+    let value_color = class_text_color(tokens, Class::MenuItem, state, tokens.text_secondary);
+    let label_size = item_text.size.unwrap_or(FontSize::MD);
+    let value_size = tokens.class_styles[Class::MenuPanel.index()]
+        .text
+        .size
+        .unwrap_or(FontSize::SM);
+    let item_weight = item_text.weight.unwrap_or(FontWeight::REGULAR);
     let content = row![
         text(label)
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::REGULAR))
+            .size(label_size)
+            .font(ui_font(item_weight))
             .color(label_color)
             .wrapping(Wrapping::None)
             .width(Length::Fill),
         text(value)
-            .size(FontSize::SM)
-            .font(ui_font(FontWeight::REGULAR))
+            .size(value_size)
+            .font(ui_font(item_weight))
             .color(value_color)
             .wrapping(Wrapping::None),
         text(">")
-            .size(FontSize::SM)
+            .size(value_size)
             .font(ui_font(FontWeight::SEMIBOLD))
             .color(value_color)
             .wrapping(Wrapping::None),
     ]
-    .spacing(Spacing::SM)
+    .spacing(item_layout.spacing.unwrap_or(Spacing::SM))
     .align_y(iced::Alignment::Center);
 
     if enabled {
         mouse_area(
             button(content)
-                .height(item_height)
+                .height(item_layout.height.unwrap_or(item_height))
                 .width(Length::Fill)
-                .padding([Spacing::XS, Spacing::MD])
+                .padding([
+                    item_layout.padding_y(Spacing::XS),
+                    item_layout.padding_x(Spacing::MD),
+                ])
                 .on_press(Message::ViewMenuFlyoutOpened(flyout))
                 .style(move |_, status| {
                     let mut style = crate::style::button_style(tokens, Class::MenuItem, status);
@@ -858,9 +951,12 @@ pub(crate) fn app_menu_submenu_item<'a>(
         .into()
     } else {
         container(content)
-            .height(item_height)
+            .height(item_layout.height.unwrap_or(item_height))
             .width(Length::Fill)
-            .padding([Spacing::XS, Spacing::MD])
+            .padding([
+                item_layout.padding_y(Spacing::XS),
+                item_layout.padding_x(Spacing::MD),
+            ])
             .style(move |_| {
                 let disabled_style =
                     tokens.class_styles[Class::MenuItem.index()].resolve(ComponentState::Disabled);
@@ -876,25 +972,49 @@ pub(crate) fn app_menu_static_item<'a>(
     tokens: ThemeTokens,
     _item_height: f32,
 ) -> Element<'a, Message> {
+    let item_layout = tokens.class_styles[Class::MenuItem.index()].layout;
+    let item_text = tokens.class_styles[Class::MenuItem.index()].text;
+    let panel_text = tokens.class_styles[Class::MenuPanel.index()].text;
+    let selected_color = class_text_color(
+        tokens,
+        Class::MenuItem,
+        ComponentState::Selected,
+        tokens.text_primary,
+    );
     container(
         column![
             text(label)
-                .size(FontSize::MD)
-                .font(ui_font(FontWeight::SEMIBOLD))
-                .color(tokens.text_primary),
+                .size(item_text.size.unwrap_or(FontSize::MD))
+                .font(ui_font(item_text.weight.unwrap_or(FontWeight::SEMIBOLD)))
+                .color(selected_color),
             text(detail)
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::REGULAR))
-                .color(tokens.text_secondary),
+                .size(panel_text.size.unwrap_or(FontSize::SM))
+                .font(ui_font(panel_text.weight.unwrap_or(FontWeight::REGULAR)))
+                .color(selected_color),
         ]
-        .spacing(Spacing::XS),
+        .spacing(item_layout.spacing.unwrap_or(Spacing::XS)),
     )
     .width(Length::Fill)
-    .padding([Spacing::SM, Spacing::MD])
+    .padding([
+        item_layout.padding_y(Spacing::SM),
+        item_layout.padding_x(Spacing::MD),
+    ])
     .style(move |_| {
         let selected_style =
             tokens.class_styles[Class::MenuItem.index()].resolve(ComponentState::Selected);
         container_style(tokens, Class::MenuItem).with_visual_override(selected_style)
     })
     .into()
+}
+
+fn class_text_color(
+    tokens: ThemeTokens,
+    class: Class,
+    state: ComponentState,
+    fallback: iced::Color,
+) -> iced::Color {
+    tokens.class_styles[class.index()]
+        .resolve(state)
+        .text_color
+        .unwrap_or(fallback)
 }

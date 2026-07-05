@@ -29,6 +29,8 @@ pub use pdf_folio_style::theme;
 mod app_context_menu;
 #[path = "app/libraries.rs"]
 pub mod app_libraries;
+#[path = "app/library_clipboard.rs"]
+mod app_library_clipboard;
 #[path = "app/library_data.rs"]
 mod app_library_data;
 #[path = "app/library_drag.rs"]
@@ -94,7 +96,7 @@ use pdf_folio_core::{Annotation, OutlineNode, PageTextLayer, PdfDoc, TileCache, 
 use pdf_folio_db::NewLibraryEntry;
 use pdf_folio_db::{
     Db, EntryId, Folder, FolderId, ImportedEntry, LibraryEntry, LibraryLayoutMode,
-    LibraryPreferences, LibrarySortMode, LibraryWatchEvent,
+    LibraryOrganizationSnapshot, LibraryPreferences, LibrarySortMode, LibraryWatchEvent,
 };
 use pdf_folio_raindrop::{
     RaindropImportDestination, RaindropImportPhase, RaindropImportPreview, RaindropImportProgress,
@@ -132,11 +134,15 @@ use crate::library::selection::{
 };
 use crate::library::state::{LibraryMetadataDensity, LibraryReadingFilter};
 use crate::library::tasks::{
-    apply_watch_event, attribute_pending_metadata_task, bulk_delete_metadata_task,
-    bulk_operation_task, bulk_refresh_metadata_task, bulk_reindex_task, bulk_reset_metadata_task,
-    delete_folder_task, edit_metadata_task, import_folder_with_index, move_entries_to_folder_task,
-    move_folder_task, persist_manual_entry_order_task, persist_manual_folder_order_task,
-    relink_entry_task, rename_folder_task, reset_metadata_task, search_library_task,
+    add_entries_to_folder_task, apply_watch_event, attribute_pending_metadata_task,
+    bulk_delete_metadata_task, bulk_operation_task, bulk_permanently_delete_entries_task,
+    bulk_refresh_metadata_task, bulk_reindex_task, bulk_reset_metadata_task,
+    bulk_restore_trash_items_task, create_folder_task, delete_folder_task, edit_metadata_task,
+    import_folder_with_index, import_pdf_with_index, move_entries_to_folder_task, move_folder_task,
+    paste_library_clipboard_task, permanently_delete_folder_from_trash_task,
+    persist_manual_entry_order_task, persist_manual_folder_order_task, relink_entry_task,
+    rename_folder_task, reset_metadata_task, restore_library_history_snapshot_task,
+    search_library_task,
 };
 #[cfg(test)]
 use crate::library::tasks::{clean_import_title, title_from_path};
@@ -202,8 +208,11 @@ const CHEVRON_LEFT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" wid
 const CHEVRON_RIGHT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"##;
 const CHEVRON_UP_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>"##;
 const CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"##;
+const UNDO_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 1 1 0 11H11"/></svg>"##;
+const REDO_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 1 0 0 11H13"/></svg>"##;
 const GRID_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>"##;
 const LIST_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>"##;
+const TRASH_CAN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>"##;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
 const VIEWER_SCROLLABLE_ID: &str = "viewer-scrollable";
 const LIBRARY_SEARCH_INPUT_ID: &str = "library-search-input";
@@ -326,6 +335,7 @@ pub struct ViewerRuntime {
     pub viewer_viewport_width: f32,
     pub document_error: Option<String>,
     pub pending_document_open: bool,
+    pub document_open_started_at: Option<Instant>,
     pub dismissed_document_errors: HashSet<String>,
     pub cache: TileCache,
     pub page_scroll_page: u16,
@@ -367,7 +377,10 @@ pub struct LibraryRuntime {
     pub library_grid_zoom: f32,
     pub library_metadata_density: LibraryMetadataDensity,
     pub library_entries: Vec<LibraryEntry>,
+    pub library_trash_entries: Vec<LibraryEntry>,
     pub library_folders: Vec<Folder>,
+    pub library_trash_folders: Vec<Folder>,
+    pub trash_view_active: bool,
     pub library_sort_mode: LibrarySortMode,
     pub selected_folder: Option<FolderId>,
     pub details_folder_id: Option<FolderId>,
@@ -407,6 +420,7 @@ pub struct LibraryRuntime {
     pub library_status: Option<String>,
     pub library_error: Option<String>,
     pub library_startup_loading: bool,
+    pub library_history_restore_started_at: Option<Instant>,
     pub raindrop_connect_dialog_open: bool,
     pub raindrop_callback_copied: bool,
     pub raindrop_client_id_input: String,
@@ -435,6 +449,47 @@ pub struct LibraryRuntime {
     pub library_drag: Option<LibraryDragState>,
     pub folder_drag: Option<FolderDragState>,
     pub move_picker: Option<LibraryMovePicker>,
+    pub clipboard: Option<LibraryClipboard>,
+    pub history: LibraryHistory,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryClipboard {
+    pub mode: LibraryClipboardMode,
+    pub target: LibraryClipboardTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryClipboardMode {
+    Cut,
+    Copy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LibraryClipboardTarget {
+    Entries(Vec<EntryId>),
+    Folder(FolderId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryHistory {
+    pub nodes: Vec<LibraryHistoryNode>,
+    pub current: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryHistoryNode {
+    pub parent: Option<usize>,
+    pub children: Vec<usize>,
+    pub action: Option<LibraryHistoryAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryHistoryAction {
+    pub label: String,
+    pub before: LibraryOrganizationSnapshot,
+    pub after: LibraryOrganizationSnapshot,
+    pub refresh_search_on_restore: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -711,6 +766,19 @@ fn import_folder_dialog_task() -> Task<Message> {
                 .map(|folder| folder.path().to_path_buf())
         },
         |path| path.map_or(Message::FileDialogCanceled, Message::ImportFolderSelected),
+    )
+}
+
+fn import_pdf_dialog_task() -> Task<Message> {
+    Task::perform(
+        async {
+            rfd::AsyncFileDialog::new()
+                .add_filter("PDF documents", &["pdf"])
+                .pick_file()
+                .await
+                .map(|file| file.path().to_path_buf())
+        },
+        |path| path.map_or(Message::FileDialogCanceled, Message::ImportPdfSelected),
     )
 }
 

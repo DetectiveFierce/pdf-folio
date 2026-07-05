@@ -527,6 +527,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::FileDialogCanceled => {}
         Message::FileSelected(path) => {
             app.viewer.pending_document_open = true;
+            app.viewer.document_open_started_at = Some(Instant::now());
             return open_document_task(path);
         }
         Message::DocumentOpened { path, doc } => {
@@ -541,6 +542,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::BackToViewer => return with_session_save(app.return_to_viewer(), app),
         Message::DocumentError(error) => {
             app.viewer.pending_document_open = false;
+            app.viewer.document_open_started_at = None;
             if !app.viewer.dismissed_document_errors.contains(&error) {
                 app.viewer.document_error = Some(error);
             }
@@ -658,8 +660,13 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 save_app_session_task(app),
             ]);
         }
-        Message::LibraryLoaded(entries) => {
+        Message::LibraryLoaded {
+            entries,
+            trash_entries,
+        } => {
             app.library.library_entries = entries;
+            app.library.library_trash_entries = trash_entries;
+            app.library.library_history_restore_started_at = None;
             app.set_active_library_preview_from_entries();
             app.library.library_startup_loading = false;
             app.library.raindrop_rollback_recovery_active = false;
@@ -669,8 +676,13 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.prune_selection_to_visible_entries(&visible_entries);
             app.sync_details_editor_to_selection();
             app.library.library_status = Some(format!(
-                "{} PDFs in library",
-                app.library.library_entries.len()
+                "{} PDFs in {}",
+                app.active_library_entries().len(),
+                if app.library.trash_view_active {
+                    "trash"
+                } else {
+                    "library"
+                }
             ));
             let restore_task = app.apply_pending_session_to_loaded_library();
             if !app.library.search_query.trim().is_empty() {
@@ -838,31 +850,66 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::LibraryFoldersLoaded(folders) => {
             app.library.library_folders = folders;
-            if app
-                .library
-                .selected_folder
-                .as_ref()
-                .is_some_and(|selected| {
-                    !app.library
-                        .library_folders
-                        .iter()
-                        .any(|folder| &folder.id == selected)
-                })
+            if !app.library.trash_view_active
+                && app
+                    .library
+                    .selected_folder
+                    .as_ref()
+                    .is_some_and(|selected| {
+                        !app.library
+                            .library_folders
+                            .iter()
+                            .any(|folder| &folder.id == selected)
+                    })
             {
                 app.library.selected_folder = None;
                 app.sync_folder_rename_input();
                 return save_library_preferences_task(app);
             }
-            if app
-                .library
-                .details_folder_id
-                .as_ref()
-                .is_some_and(|selected| {
-                    !app.library
-                        .library_folders
-                        .iter()
-                        .any(|folder| &folder.id == selected)
-                })
+            if !app.library.trash_view_active
+                && app
+                    .library
+                    .details_folder_id
+                    .as_ref()
+                    .is_some_and(|selected| {
+                        !app.library
+                            .library_folders
+                            .iter()
+                            .any(|folder| &folder.id == selected)
+                    })
+            {
+                app.library.details_folder_id = None;
+            }
+            app.sync_folder_rename_input();
+        }
+        Message::LibraryTrashFoldersLoaded(folders) => {
+            app.library.library_trash_folders = folders;
+            if app.library.trash_view_active
+                && app
+                    .library
+                    .selected_folder
+                    .as_ref()
+                    .is_some_and(|selected| {
+                        !app.library
+                            .library_trash_folders
+                            .iter()
+                            .any(|folder| &folder.id == selected)
+                    })
+            {
+                app.library.selected_folder = None;
+                app.sync_folder_rename_input();
+            }
+            if app.library.trash_view_active
+                && app
+                    .library
+                    .details_folder_id
+                    .as_ref()
+                    .is_some_and(|selected| {
+                        !app.library
+                            .library_trash_folders
+                            .iter()
+                            .any(|folder| &folder.id == selected)
+                    })
             {
                 app.library.details_folder_id = None;
             }
@@ -916,6 +963,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::LibraryRefresh => return app.refresh_library(),
         Message::LibraryError(error) => {
             app.library.library_startup_loading = false;
+            app.library.library_history_restore_started_at = None;
             app.library.raindrop_rollback_recovery_active = false;
             app.library.raindrop_rollback_recovery_status = None;
             app.library.library_status = Some(String::from("Library operation failed."));
@@ -947,6 +995,32 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 async move {
                     tokio::task::spawn_blocking(move || import_folder_with_index(&db, &path))
                         .await?
+                },
+                |result| match result {
+                    Ok(summary) => Message::ImportFinished(summary),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            );
+        }
+        Message::ImportPdfDialog => return import_pdf_dialog_task(),
+        Message::ImportPdfSelected(path) => {
+            app.library.library_status = Some(format!("Importing {}...", path.display()));
+            let db = Arc::clone(&app.db);
+            let destination_folder = app.library.selected_folder.clone();
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        import_pdf_with_index(&db, path).and_then(|entry| {
+                            if let Some(folder_id) = destination_folder.as_ref() {
+                                db.add_entry_to_folder(&entry.id, folder_id)?;
+                            }
+                            Ok(pdf_folio_db::ImportSummary {
+                                entries: vec![entry],
+                                errors: Vec::new(),
+                            })
+                        })
+                    })
+                    .await?
                 },
                 |result| match result {
                     Ok(summary) => Message::ImportFinished(summary),
@@ -1346,18 +1420,18 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     format!(" ({} skipped)", summary.errors.len())
                 }
             ));
-            return app.refresh_library();
+            return Task::batch([app.refresh_folders(), app.refresh_library()]);
         }
         Message::AuthorAttributionFinished => return app.refresh_library(),
         Message::OpenLibraryEntry(entry_id) => {
             if let Some(entry) = app
-                .library
-                .library_entries
+                .active_library_entries()
                 .iter()
                 .find(|entry| entry.id == entry_id)
                 .cloned()
             {
                 app.viewer.pending_document_open = true;
+                app.viewer.document_open_started_at = Some(Instant::now());
                 return open_library_document_task(entry.id, entry.path);
             }
         }
@@ -1436,6 +1510,31 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 scroll_library_to_offset_task(0.0),
             ]);
         }
+        Message::OpenTrashCan => {
+            app.library.trash_view_active = true;
+            app.library.selected_folder = None;
+            app.library.details_folder_id = None;
+            app.library.folder_details_sidebar_open = false;
+            app.library.search_query.clear();
+            app.library.search_results = None;
+            app.library.search_hit_pages.clear();
+            app.library.active_tag_filter = None;
+            app.library.active_reading_filter = None;
+            app.library.missing_filter_active = false;
+            app.library.previous_tag_pill_view = None;
+            app.library.library_drag = None;
+            app.library.library_scroll_offset = 0.0;
+            app.clear_library_selection();
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(0.0),
+                save_app_session_task(app),
+            ]);
+        }
         Message::EntryCheckboxToggled(entry_id) => {
             app.toggle_library_entry_selection(entry_id);
         }
@@ -1471,6 +1570,152 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::SelectAllVisibleLibraryEntries => {
             app.select_all_visible_library_entries();
+        }
+        Message::CutLibrarySelection => {
+            if app.set_library_clipboard(LibraryClipboardMode::Cut) {
+                app.library.library_status = app
+                    .library
+                    .clipboard
+                    .as_ref()
+                    .map(|clipboard| format!("{} ready to paste.", clipboard.label()));
+            }
+        }
+        Message::CopyLibrarySelection => {
+            if app.set_library_clipboard(LibraryClipboardMode::Copy) {
+                app.library.library_status = app
+                    .library
+                    .clipboard
+                    .as_ref()
+                    .map(|clipboard| format!("{} ready to paste.", clipboard.label()));
+            }
+        }
+        Message::PasteLibraryClipboard => {
+            let Some(clipboard) = app.library.clipboard.clone() else {
+                app.library.library_status = Some(String::from("Nothing to paste."));
+                return Task::none();
+            };
+            if !app.can_paste_library_clipboard() {
+                app.library.library_status = Some(String::from(
+                    "Choose a valid destination before pasting library items.",
+                ));
+                return Task::none();
+            }
+            app.library.library_status = Some(format!("{}...", clipboard.paste_label()));
+            return paste_library_clipboard_task(
+                Arc::clone(&app.db),
+                clipboard,
+                app.library.selected_folder.clone(),
+            );
+        }
+        Message::LibraryClipboardPasteFinished {
+            action,
+            clipboard,
+            updated,
+            errors,
+        } => {
+            if action.before != action.after {
+                app.library.history.push(action);
+            }
+            if clipboard.mode == LibraryClipboardMode::Cut && errors.is_empty() {
+                app.library.clipboard = None;
+            }
+            app.library.library_status = Some(if errors.is_empty() {
+                app.library.library_error = None;
+                format!(
+                    "{} {} item{}.",
+                    clipboard.paste_label(),
+                    updated,
+                    if updated == 1 { "" } else { "s" }
+                )
+            } else {
+                app.library.library_error = Some(errors.join("\n"));
+                format!(
+                    "{} {} item{}; {} failed.",
+                    clipboard.paste_label(),
+                    updated,
+                    if updated == 1 { "" } else { "s" },
+                    errors.len()
+                )
+            });
+            app.clear_library_selection();
+            app.library.pending_thumbnails.clear();
+            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+        }
+        Message::LibraryHistoryActionFinished {
+            action,
+            label,
+            updated,
+            errors,
+        } => {
+            app.library.bulk_operation_progress = None;
+            if action.before != action.after {
+                app.library.history.push(action);
+            }
+            app.library.library_status = Some(if errors.is_empty() {
+                app.library.library_error = None;
+                format!(
+                    "{label} {updated} item{}.",
+                    if updated == 1 { "" } else { "s" }
+                )
+            } else {
+                app.library.library_error = Some(errors.join("\n"));
+                format!(
+                    "{label} {updated} item{}; {} failed.",
+                    if updated == 1 { "" } else { "s" },
+                    errors.len()
+                )
+            });
+            app.clear_library_selection();
+            app.library.pending_thumbnails.clear();
+            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+        }
+        Message::UndoLibraryAction => {
+            if app.library.library_history_restore_started_at.is_some() {
+                return Task::none();
+            }
+            let Some((target_index, action)) = app.library.history.undo_target() else {
+                app.library.library_status = Some(String::from("Nothing to undo."));
+                return Task::none();
+            };
+            let search_changed_entry_ids = action.after.search_changed_entry_ids(&action.before);
+            app.library.library_history_restore_started_at = Some(Instant::now());
+            app.library.library_status = Some(format!("Undoing {}...", action.label));
+            return restore_library_history_snapshot_task(
+                Arc::clone(&app.db),
+                action.before,
+                target_index,
+                format!("Undid {}.", action.label),
+                search_changed_entry_ids,
+            );
+        }
+        Message::RedoLibraryAction => {
+            if app.library.library_history_restore_started_at.is_some() {
+                return Task::none();
+            }
+            let Some((target_index, action)) = app.library.history.redo_target() else {
+                app.library.library_status = Some(String::from("Nothing to redo."));
+                return Task::none();
+            };
+            let search_changed_entry_ids = action.before.search_changed_entry_ids(&action.after);
+            app.library.library_history_restore_started_at = Some(Instant::now());
+            app.library.library_status = Some(format!("Redoing {}...", action.label));
+            return restore_library_history_snapshot_task(
+                Arc::clone(&app.db),
+                action.after,
+                target_index,
+                format!("Redid {}.", action.label),
+                search_changed_entry_ids,
+            );
+        }
+        Message::LibraryHistoryRestoreFinished {
+            target_index,
+            status,
+        } => {
+            app.library.history.set_current(target_index);
+            app.library.library_status = Some(status);
+            app.clear_library_selection();
+            app.library.pending_thumbnails.clear();
+            return Task::batch([app.refresh_folders(), app.refresh_library()]);
         }
         Message::LibraryEntryDragMoved(position) => {
             app.update_library_drag_target(position);
@@ -1516,12 +1761,14 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if query == app.library.search_query {
                 let db = Arc::clone(&app.db);
                 let sort_mode = app.library.library_sort_mode;
-                return Task::perform(search_library_task(db, query, sort_mode), |result| {
-                    match result {
+                let trash_view_active = app.library.trash_view_active;
+                return Task::perform(
+                    search_library_task(db, query, sort_mode, trash_view_active),
+                    |result| match result {
                         Ok((entries, hit_pages)) => Message::SearchResults { entries, hit_pages },
                         Err(error) => Message::LibraryError(error.to_string()),
-                    }
-                });
+                    },
+                );
             }
         }
         Message::SearchResults { entries, hit_pages } => {
@@ -1762,16 +2009,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_status = Some(format!("Creating folder {name}..."));
             app.library.new_folder_name.clear();
             app.library.create_folder_dialog_open = false;
-            return Task::perform(
-                async move {
-                    tokio::task::spawn_blocking(move || db.create_folder(&name, parent_id.as_ref()))
-                        .await?
-                },
-                |result| match result {
-                    Ok(folder_id) => Message::FolderCreated(folder_id),
-                    Err(error) => Message::LibraryError(error.to_string()),
-                },
-            );
+            return create_folder_task(db, name, parent_id);
         }
         Message::RenameSelectedFolder => {
             let Some(folder_id) = app.library.details_folder_id.clone() else {
@@ -1921,14 +2159,17 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             }
         }
         Message::DeleteFolder(folder_id) => {
-            app.library.library_status = Some(String::from("Deleting folder..."));
+            app.library.library_status = Some(String::from("Moving folder to trash..."));
             return delete_folder_task(Arc::clone(&app.db), folder_id);
         }
         Message::FolderUpdated => {
             app.library.library_status = Some(String::from("Folder updated."));
             return Task::batch([app.refresh_folders(), app.refresh_library()]);
         }
-        Message::FolderCreated(folder_id) => {
+        Message::FolderCreated { folder_id, action } => {
+            if action.before != action.after {
+                app.library.history.push(action);
+            }
             app.library.library_status = Some(String::from("Folder created."));
             app.library.selected_folder = Some(folder_id);
             app.library.details_folder_id = app.library.selected_folder.clone();
@@ -2005,6 +2246,12 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return Task::done(match action {
                 ConfirmationAction::BulkResetDisplayMetadata => Message::BulkResetDisplayMetadata,
                 ConfirmationAction::BulkDeleteFromLibrary => Message::BulkDeleteFromLibrary,
+                ConfirmationAction::PermanentlyDeleteFromTrash => {
+                    Message::PermanentlyDeleteSelectedFromTrash
+                }
+                ConfirmationAction::PermanentlyDeleteFolderFromTrash(folder_id) => {
+                    Message::PermanentlyDeleteSelectedFolderFromTrash(folder_id)
+                }
                 ConfirmationAction::ResetDetailsMetadata(entry_id) => {
                     Message::ResetDetailsMetadata(entry_id)
                 }
@@ -2057,8 +2304,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 return Task::none();
             };
             let Some(mut entry) = app
-                .library
-                .library_entries
+                .active_library_entries()
                 .iter()
                 .find(|entry| entry.id == entry_id)
                 .cloned()
@@ -2079,8 +2325,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ResetDetailsMetadata(entry_id) => {
             let Some(mut entry) = app
-                .library
-                .library_entries
+                .active_library_entries()
                 .iter()
                 .find(|entry| entry.id == entry_id)
                 .cloned()
@@ -2096,8 +2341,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::RevealEntryInFileManager(entry_id) => {
             let Some(entry) = app
-                .library
-                .library_entries
+                .active_library_entries()
                 .iter()
                 .find(|entry| entry.id == entry_id)
                 .cloned()
@@ -2109,8 +2353,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::OpenEntryContainingFolder(entry_id) => {
             let Some(entry) = app
-                .library
-                .library_entries
+                .active_library_entries()
                 .iter()
                 .find(|entry| entry.id == entry_id)
                 .cloned()
@@ -2126,8 +2369,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::RelinkFileSelected { entry_id, path } => {
             let Some(entry) = app
-                .library
-                .library_entries
+                .active_library_entries()
                 .iter()
                 .find(|entry| entry.id == entry_id)
                 .cloned()
@@ -2145,9 +2387,13 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::MetadataEditFinished {
             entry_id: _,
+            action,
             label,
             errors,
         } => {
+            if action.before != action.after {
+                app.library.history.push(action);
+            }
             app.library.library_status = Some(if errors.is_empty() {
                 label
             } else {
@@ -2179,6 +2425,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 Arc::clone(&app.db),
                 entry_ids,
                 String::from("Tagged"),
+                String::from("Add Tag"),
                 move |db, entry_id| db.add_tag(entry_id, &tag),
             );
         }
@@ -2198,6 +2445,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 Arc::clone(&app.db),
                 entry_ids,
                 String::from("Untagged"),
+                String::from("Remove Tag"),
                 move |db, entry_id| db.remove_tag(entry_id, &tag),
             );
         }
@@ -2221,6 +2469,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 Arc::clone(&app.db),
                 entry_ids,
                 String::from("Added to folder"),
+                String::from("Add PDFs to Folder"),
                 move |db, entry_id| db.add_entry_to_folder(entry_id, &folder_id),
             );
         }
@@ -2244,6 +2493,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 Arc::clone(&app.db),
                 entry_ids,
                 String::from("Removed from folder"),
+                String::from("Remove PDFs from Folder"),
                 move |db, entry_id| db.remove_entry_from_folder(entry_id, &folder_id),
             );
         }
@@ -2270,6 +2520,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 Arc::clone(&app.db),
                 entry_ids,
                 String::from("Cleaned title sort for"),
+                String::from("Clean Title Sort"),
                 |db, entry_id| db.apply_title_sort_cleanup(entry_id),
             );
         }
@@ -2315,8 +2566,65 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if entry_ids.is_empty() {
                 return Task::none();
             }
-            app.start_bulk_operation_progress("Deleting from library metadata", entry_ids.len());
+            app.start_bulk_operation_progress("Moving to trash", entry_ids.len());
             return bulk_delete_metadata_task(Arc::clone(&app.db), entry_ids);
+        }
+        Message::RestoreSelectedFromTrash => {
+            let entries = app.selected_entries();
+            let folder_id = app
+                .library
+                .trash_view_active
+                .then(|| app.library.details_folder_id.clone())
+                .flatten();
+            if entries.is_empty() && folder_id.is_none() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress(
+                "Restoring",
+                entries.len() + usize::from(folder_id.is_some()),
+            );
+            return bulk_restore_trash_items_task(Arc::clone(&app.db), entries, folder_id);
+        }
+        Message::PermanentlyDeleteSelectedFromTrash => {
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            if entry_ids.is_empty() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress("Permanently deleting", entry_ids.len());
+            return bulk_permanently_delete_entries_task(Arc::clone(&app.db), entry_ids);
+        }
+        Message::PermanentlyDeleteSelectedFolderFromTrash(folder_id) => {
+            app.start_bulk_operation_progress("Permanently deleting", 1);
+            return permanently_delete_folder_from_trash_task(Arc::clone(&app.db), folder_id);
+        }
+        Message::TrashFolderPermanentlyDeleted { updated, errors } => {
+            app.library.bulk_operation_progress = None;
+            app.library.library_status = Some(if errors.is_empty() {
+                app.library.library_error = None;
+                format!(
+                    "Permanently deleted {updated} item{}.",
+                    if updated == 1 { "" } else { "s" }
+                )
+            } else {
+                app.library.library_error = Some(errors.join("\n"));
+                format!(
+                    "Permanently deleted {updated} item{}; {} failed.",
+                    if updated == 1 { "" } else { "s" },
+                    errors.len()
+                )
+            });
+            app.clear_library_selection();
+            app.library.pending_thumbnails.clear();
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                app.request_visible_thumbnails(),
+            ]);
         }
         Message::BulkOperationFinished {
             label,
@@ -2333,7 +2641,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             });
             app.clear_library_selection();
             app.library.pending_thumbnails.clear();
-            return Task::batch([app.refresh_library(), app.request_visible_thumbnails()]);
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                app.request_visible_thumbnails(),
+            ]);
         }
         Message::FolderAssignmentFinished {
             folder_id,

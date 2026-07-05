@@ -110,6 +110,7 @@ component "AppMenuActions" {
     labels {
         label "OpenFile" "Open PDF..."
         label "ImportFolder" "Import Folder..."
+        label "UploadFolder" "Upload Folder..."
         label "BackToLibrary" "Back to Library"
         label "RefreshLibrary" "Refresh Library"
         label "SelectAllVisible" "Select All Visible PDFs"
@@ -120,7 +121,7 @@ component "AppMenuActions" {
         label "RemoveTag" "Remove Typed Tag"
         label "AddToFolder" "Add Selection to Current Folder"
         label "RemoveFromFolder" "Remove Selection from Current Folder"
-        label "DeleteFromLibrary" "Delete From Library..."
+        label "DeleteFromLibrary" "Move to Trash..."
         label "ToggleLayoutGrid" "Switch to Grid"
         label "ToggleLayoutList" "Switch to List"
         label "ToggleThemeDark" "Switch to Dark Theme"

@@ -2,6 +2,9 @@ use super::*;
 
 impl PDFolioApp {
     pub(super) fn can_drag_reorder_library(&self) -> bool {
+        if self.library.trash_view_active {
+            return false;
+        }
         can_drag_reorder_library_for_state(
             self.library.library_sort_mode,
             &self.library.search_query,
@@ -562,6 +565,7 @@ impl PDFolioApp {
                     Arc::clone(&self.db),
                     entry_ids,
                     String::from("Moved to parent directory"),
+                    String::from("Move PDFs to Parent"),
                     move |db, entry_id| db.remove_entry_from_folder(entry_id, &current_folder_id),
                 ),
                 scroll_library_to_offset_task(self.library.library_scroll_offset),
@@ -582,7 +586,7 @@ impl PDFolioApp {
                 format_count(entry_ids.len(), "PDF")
             ));
             return Task::batch([
-                move_entries_to_folder_task(Arc::clone(&self.db), entry_ids, Some(folder_id)),
+                add_entries_to_folder_task(Arc::clone(&self.db), entry_ids, folder_id),
                 scroll_library_to_offset_task(self.library.library_scroll_offset),
             ]);
         }

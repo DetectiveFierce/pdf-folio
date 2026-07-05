@@ -282,7 +282,7 @@ component "FolderDropTarget" {
 }
 
 component "SelectionToolbar" {
-    layout bulk_tag_input_width=150 bulk_tag_input_min_width=90 title_input_width=260 title_input_min_width=120 author_input_width=190 author_input_min_width=96 context_row_height=46
+    layout bulk_tag_input_width=150 bulk_tag_input_min_width=90 title_input_width=260 title_input_min_width=120 author_input_width=190 author_input_min_width=96 context_row_height=46 row_spacing=6 row_padding_x=9 row_padding_y=6 folder_row_padding_y=4 dropdown_base_x=137 single_dropdown_extra_x=88 folders_dropdown_offset_x=92 metadata_dropdown_offset_x=202 maintenance_dropdown_offset_x=330 icon_size=16 icon_slot_size=20 tooltip_delay_ms=400
 
     labels {
         label "AddTag" "Add tag"
@@ -296,6 +296,6 @@ component "SelectionToolbar" {
         label "ResetMetadata" "Reset metadata"
         label "RebuildThumbnails" "Rebuild thumbnails"
         label "Reindex" "Reindex"
-        label "DeleteMetadata" "Delete metadata"
+        label "DeleteMetadata" "Move to Trash"
     }
 }

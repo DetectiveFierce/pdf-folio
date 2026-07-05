@@ -2,8 +2,9 @@
 
 use crate::*;
 use iced::widget::canvas;
-use iced::{mouse, Point, Rectangle, Renderer, Size, Theme};
+use iced::{mouse, Color, Point, Radians, Rectangle, Renderer, Size, Theme};
 use pdf_folio_core::{PageTextChar, PageTextLayer, TileKey};
+use std::time::Instant;
 
 const EMPTY_CANVAS_CLICK_DRAG_THRESHOLD: f32 = 4.0;
 
@@ -20,6 +21,13 @@ pub(crate) struct ViewerCanvasState {
 #[derive(Debug)]
 pub(crate) struct ViewerSelectionOverlay<'a> {
     pub(crate) app: &'a PDFolioApp,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HistoryRestoreSpinner {
+    pub(crate) started_at: Instant,
+    pub(crate) now: Instant,
+    pub(crate) color: Color,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,6 +327,44 @@ fn char_in_page_at_position(
         nearest
     } else {
         None
+    }
+}
+
+impl canvas::Program<Message> for HistoryRestoreSpinner {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let elapsed = self
+            .now
+            .saturating_duration_since(self.started_at)
+            .as_secs_f32();
+        let rotation = elapsed * std::f32::consts::TAU * 0.85;
+        let center = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+        let radius = 18.0;
+        let arc = canvas::Path::new(|path| {
+            path.arc(canvas::path::Arc {
+                center,
+                radius,
+                start_angle: Radians(rotation),
+                end_angle: Radians(rotation + std::f32::consts::TAU * 0.76),
+            });
+        });
+        frame.stroke(
+            &arc,
+            canvas::Stroke::default()
+                .with_width(4.0)
+                .with_color(self.color)
+                .with_line_cap(canvas::LineCap::Round),
+        );
+        vec![frame.into_geometry()]
     }
 }
 

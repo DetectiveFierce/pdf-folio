@@ -100,11 +100,14 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
     let animations = if app.mode == AppMode::Library
         && (app.library_card_hover_animation_active()
             || app.library.bulk_operation_progress.is_some()
+            || app.library.library_history_restore_started_at.is_some()
             || app.library.folder_drop_flash.is_some())
     {
         time::every(Duration::from_millis(LIBRARY_CARD_HOVER_TICK_MS)).map(Message::AnimationFrame)
     } else if app.mode == AppMode::Viewer
-        && (app.viewer.zoom_preview_width_px.is_some() || app.viewer_page_fade_active())
+        && (app.viewer.pending_document_open
+            || app.viewer.zoom_preview_width_px.is_some()
+            || app.viewer_page_fade_active())
     {
         time::every(Duration::from_millis(VIEWER_ANIMATION_TICK_MS)).map(Message::AnimationFrame)
     } else {

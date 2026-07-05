@@ -1,10 +1,17 @@
 use super::*;
 
 impl PDFolioApp {
+    pub(super) fn active_library_folders(&self) -> &Vec<Folder> {
+        if self.library.trash_view_active {
+            &self.library.library_trash_folders
+        } else {
+            &self.library.library_folders
+        }
+    }
+
     pub(super) fn child_folders(&self) -> Vec<Folder> {
         let mut folders = self
-            .library
-            .library_folders
+            .active_library_folders()
             .iter()
             .filter(|folder| folder.parent_id == self.library.selected_folder)
             .cloned()
@@ -14,8 +21,28 @@ impl PDFolioApp {
     }
 
     pub(super) fn folder_smart_counts(&self, folder_id: Option<&FolderId>) -> FolderSmartCounts {
-        let folder_ids = folder_id.map(|id| self.folder_subtree_ids(id));
-        let entries = self.library.library_entries.iter().filter(|entry| {
+        self.folder_smart_counts_for(folder_id, self.library.trash_view_active)
+    }
+
+    pub(super) fn normal_folder_smart_counts(
+        &self,
+        folder_id: Option<&FolderId>,
+    ) -> FolderSmartCounts {
+        self.folder_smart_counts_for(folder_id, false)
+    }
+
+    pub(super) fn folder_smart_counts_for(
+        &self,
+        folder_id: Option<&FolderId>,
+        trash: bool,
+    ) -> FolderSmartCounts {
+        let folder_ids = folder_id.map(|id| self.folder_subtree_ids_for(id, trash));
+        let entries = if trash {
+            &self.library.library_trash_entries
+        } else {
+            &self.library.library_entries
+        };
+        let entries = entries.iter().filter(|entry| {
             folder_ids.as_ref().map_or(true, |folder_ids| {
                 entry
                     .folders
@@ -39,8 +66,16 @@ impl PDFolioApp {
     }
 
     pub(super) fn folder_subtree_ids(&self, folder_id: &FolderId) -> HashSet<FolderId> {
+        self.folder_subtree_ids_for(folder_id, self.library.trash_view_active)
+    }
+
+    pub(super) fn folder_subtree_ids_for(
+        &self,
+        folder_id: &FolderId,
+        trash: bool,
+    ) -> HashSet<FolderId> {
         let mut folder_ids = HashSet::new();
-        self.collect_folder_subtree_ids(folder_id, &mut folder_ids);
+        self.collect_folder_subtree_ids_for(folder_id, trash, &mut folder_ids);
         folder_ids
     }
 
@@ -58,21 +93,25 @@ impl PDFolioApp {
             .collect()
     }
 
-    pub(super) fn collect_folder_subtree_ids(
+    pub(super) fn collect_folder_subtree_ids_for(
         &self,
         folder_id: &FolderId,
+        trash: bool,
         folder_ids: &mut HashSet<FolderId>,
     ) {
         if !folder_ids.insert(folder_id.clone()) {
             return;
         }
-        for child in self
-            .library
-            .library_folders
+        let folders = if trash {
+            &self.library.library_trash_folders
+        } else {
+            &self.library.library_folders
+        };
+        for child in folders
             .iter()
             .filter(|folder| folder.parent_id.as_ref() == Some(folder_id))
         {
-            self.collect_folder_subtree_ids(&child.id, folder_ids);
+            self.collect_folder_subtree_ids_for(&child.id, trash, folder_ids);
         }
     }
 
@@ -82,8 +121,7 @@ impl PDFolioApp {
 
     pub(super) fn selected_folder(&self) -> Option<&Folder> {
         self.library.selected_folder.as_ref().and_then(|selected| {
-            self.library
-                .library_folders
+            self.active_library_folders()
                 .iter()
                 .find(|folder| &folder.id == selected)
         })
@@ -94,8 +132,7 @@ impl PDFolioApp {
             .details_folder_id
             .as_ref()
             .and_then(|selected| {
-                self.library
-                    .library_folders
+                self.active_library_folders()
                     .iter()
                     .find(|folder| &folder.id == selected)
             })
@@ -107,8 +144,7 @@ impl PDFolioApp {
         let folder = self.details_folder()?;
         let parent_id = folder.parent_id.clone();
         let mut siblings = self
-            .library
-            .library_folders
+            .active_library_folders()
             .iter()
             .filter(|candidate| candidate.parent_id == parent_id)
             .collect::<Vec<_>>();
@@ -142,13 +178,11 @@ impl PDFolioApp {
         target_id: &FolderId,
     ) -> Option<(Option<FolderId>, Vec<FolderId>)> {
         let folder = self
-            .library
-            .library_folders
+            .active_library_folders()
             .iter()
             .find(|folder| &folder.id == folder_id)?;
         let target = self
-            .library
-            .library_folders
+            .active_library_folders()
             .iter()
             .find(|folder| &folder.id == target_id)?;
         if folder.parent_id != target.parent_id || folder.id == target.id {
@@ -156,8 +190,7 @@ impl PDFolioApp {
         }
 
         let mut siblings = self
-            .library
-            .library_folders
+            .active_library_folders()
             .iter()
             .filter(|candidate| candidate.parent_id == folder.parent_id)
             .collect::<Vec<_>>();
@@ -177,7 +210,14 @@ impl PDFolioApp {
     }
 
     pub(super) fn folder_breadcrumbs(&self) -> Vec<(String, Option<FolderId>)> {
-        let mut breadcrumbs = vec![(String::from("Library"), None)];
+        let mut breadcrumbs = vec![(
+            if self.library.trash_view_active {
+                String::from("Trash Can")
+            } else {
+                String::from("Library")
+            },
+            None,
+        )];
         let mut current = self.library.selected_folder.clone();
         let mut path = Vec::new();
         let mut seen = HashSet::new();
@@ -188,8 +228,7 @@ impl PDFolioApp {
             }
 
             let Some(folder) = self
-                .library
-                .library_folders
+                .active_library_folders()
                 .iter()
                 .find(|folder| folder.id == folder_id)
             else {

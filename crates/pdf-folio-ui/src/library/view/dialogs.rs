@@ -57,12 +57,12 @@ pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
     let nested_folder_count = folder_delete_nested_folder_count(app, folder_id);
     let warning_panel = container(
         column![
-            text("This cannot be undone from PDF-Folio.")
+            text("This moves the folder tree to the Trash Can.")
                 .size(FontSize::MD)
                 .font(ui_font(FontWeight::SEMIBOLD))
                 .color(tokens.text_primary),
             text(format!(
-                "{} and {} in this folder tree will be deleted from the library. Files on disk will not be deleted.",
+                "{} and {} in this folder tree can be restored from the Trash Can. Files on disk will not be deleted.",
                 format_count(pdf_count, "PDF"),
                 format_count(nested_folder_count, "nested folder")
             ))
@@ -84,7 +84,7 @@ pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
 
     let dialog = column![
         column![
-            text("Delete Folder")
+            text("Move Folder to Trash")
                 .size(FontSize::HEADING)
                 .font(display_font(FontWeight::MEDIUM))
                 .color(tokens.text_primary),
@@ -104,7 +104,7 @@ pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
             .text_size(FontSize::MD),
         row![
             toolbar_button("Cancel", tokens).on_press(Message::CancelConfirmation),
-            toolbar_button("Delete folder", tokens).on_press(Message::ConfirmPendingAction),
+            toolbar_button("Move to Trash", tokens).on_press(Message::ConfirmPendingAction),
         ]
         .spacing(Spacing::SM)
         .align_y(iced::Alignment::Center),
@@ -324,7 +324,7 @@ fn view_move_picker_tree<'a>(
     tree_width: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let library_counts = app.folder_smart_counts(None);
+    let library_counts = app.normal_folder_smart_counts(None);
     let root_row = file_tree_row(
         "Library",
         Some(folder_sidebar_count_label(library_counts)),
@@ -378,7 +378,7 @@ fn view_move_picker_folder_rows<'a>(
                     || !folder_can_move_into(&app.library.library_folders, folder_id, &folder.id)
             }
         };
-        let counts = app.folder_smart_counts(Some(&folder.id));
+        let counts = app.normal_folder_smart_counts(Some(&folder.id));
         let row = file_tree_row(
             &folder.name,
             Some(if invalid {
@@ -1126,10 +1126,31 @@ pub(crate) fn confirmation_copy<'a>(
             "Reset",
         ),
         ConfirmationAction::BulkDeleteFromLibrary => (
-            "Delete from library?",
+            "Move to trash?",
             format!(
-                "This removes library metadata for {} selected PDFs. The PDF files remain on disk.",
+                "This moves {} selected PDFs to the Trash Can. PDF files on disk remain where they are.",
                 app.library.selected_library_entries.len()
+            ),
+            "Move to Trash",
+        ),
+        ConfirmationAction::PermanentlyDeleteFromTrash => (
+            "Permanently delete?",
+            format!(
+                "This permanently removes metadata for {} selected PDFs from the Trash Can. PDF files on disk remain where they are.",
+                app.library.selected_library_entries.len()
+            ),
+            "Delete",
+        ),
+        ConfirmationAction::PermanentlyDeleteFolderFromTrash(folder_id) => (
+            "Permanently delete folder?",
+            format!(
+                "This permanently removes the folder \"{}\", any nested folders, and {} in this folder tree from the Trash Can. Files on disk remain where they are.",
+                app.library
+                    .library_trash_folders
+                    .iter()
+                    .find(|folder| &folder.id == folder_id)
+                    .map_or("Selected folder", |folder| folder.name.as_str()),
+                format_count(folder_delete_entry_count(app, folder_id), "PDF")
             ),
             "Delete",
         ),
@@ -1139,16 +1160,16 @@ pub(crate) fn confirmation_copy<'a>(
             "Reset",
         ),
         ConfirmationAction::DeleteFolder(folder_id) => (
-            "Delete folder?",
+            "Move folder to trash?",
             format!(
-                "This removes the folder \"{}\" and any nested folders. {} in this folder tree will also be deleted from the library. Files on disk will not be deleted.",
+                "This moves the folder \"{}\", any nested folders, and {} in this folder tree to the Trash Can. Files on disk will not be deleted.",
                 app.library.library_folders
                     .iter()
                     .find(|folder| &folder.id == folder_id)
                     .map_or("Selected folder", |folder| folder.name.as_str()),
                 format_count(folder_delete_entry_count(app, folder_id), "PDF")
             ),
-            "Delete",
+            "Move to Trash",
         ),
         ConfirmationAction::DeleteLibrary(library_id) => (
             "Delete library?",

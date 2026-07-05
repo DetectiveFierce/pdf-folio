@@ -198,6 +198,211 @@ fn folder_assignment_is_additive_across_folders() {
 }
 
 #[test]
+fn entries_move_restore_and_expire_from_trash() {
+    let db = test_db();
+    let id = EntryId::new("paper");
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+    let before_trash = db.library_organization_snapshot().unwrap();
+
+    db.trash_entries([&id]).unwrap();
+    assert!(db.get_all_entries().unwrap().is_empty());
+    assert_eq!(db.get_trashed_entries().unwrap()[0].id, id);
+
+    db.restore_library_organization_snapshot(&before_trash)
+        .unwrap();
+    assert_eq!(db.get_all_entries().unwrap()[0].id, id);
+    assert!(db.get_trashed_entries().unwrap().is_empty());
+
+    db.trash_entries([&id]).unwrap();
+    db.restore_entries([&id]).unwrap();
+    assert_eq!(db.get_all_entries().unwrap()[0].id, id);
+    assert!(db.get_trashed_entries().unwrap().is_empty());
+
+    db.trash_entries([&id]).unwrap();
+    let expired = Utc::now().timestamp() - 31 * 24 * 60 * 60;
+    let connection = rusqlite::Connection::open(db.path()).unwrap();
+    connection
+        .execute(
+            "UPDATE entries SET trashed_at = ?1 WHERE id = ?2",
+            rusqlite::params![expired, id.as_str()],
+        )
+        .unwrap();
+
+    assert_eq!(db.purge_expired_trash(30).unwrap(), 1);
+    assert!(db.get_trashed_entries().unwrap().is_empty());
+    assert!(db
+        .entry_by_path(Path::new("/tmp/paper.pdf"))
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn folder_tree_moves_to_trash_with_entries() {
+    let db = test_db();
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+    let entry_id = EntryId::new("paper");
+    let parent = db.create_folder("Projects", None).unwrap();
+    let child = db.create_folder("Drafts", Some(&parent)).unwrap();
+    db.add_entry_to_folder(&entry_id, &child).unwrap();
+
+    db.trash_folder_tree(&parent).unwrap();
+
+    assert!(db.get_folders().unwrap().is_empty());
+    assert_eq!(db.get_trashed_folders().unwrap().len(), 2);
+    assert!(db.get_all_entries().unwrap().is_empty());
+    assert_eq!(db.get_trashed_entries().unwrap()[0].id, entry_id);
+}
+
+#[test]
+fn folder_tree_restores_from_trash_with_entries() {
+    let db = test_db();
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+    let entry_id = EntryId::new("paper");
+    let parent = db.create_folder("Projects", None).unwrap();
+    let child = db.create_folder("Drafts", Some(&parent)).unwrap();
+    db.add_entry_to_folder(&entry_id, &child).unwrap();
+
+    db.trash_folder_tree(&parent).unwrap();
+    let restored = db.restore_folder_tree(&parent).unwrap();
+
+    assert_eq!(restored, 3);
+    assert_eq!(db.get_folders().unwrap().len(), 2);
+    assert!(db.get_trashed_folders().unwrap().is_empty());
+    let entry = db.get_all_entries().unwrap().pop().unwrap();
+    assert_eq!(entry.id, entry_id);
+    assert_eq!(entry.folders[0].id, child);
+}
+
+#[test]
+fn trashed_child_folder_restores_to_root_when_parent_stays_trashed() {
+    let db = test_db();
+    let parent = db.create_folder("Projects", None).unwrap();
+    let child = db.create_folder("Drafts", Some(&parent)).unwrap();
+
+    db.trash_folder_tree(&parent).unwrap();
+    db.restore_folder_tree(&child).unwrap();
+
+    let folders = db.get_folders().unwrap();
+    let restored_child = folders.iter().find(|folder| folder.id == child).unwrap();
+    assert!(restored_child.parent_id.is_none());
+    assert_eq!(db.get_trashed_folders().unwrap()[0].id, parent);
+}
+
+#[test]
+fn trashed_folder_tree_permanently_deletes_folder_and_entries() {
+    let db = test_db();
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+    let entry_id = EntryId::new("paper");
+    let parent = db.create_folder("Projects", None).unwrap();
+    let child = db.create_folder("Drafts", Some(&parent)).unwrap();
+    db.add_entry_to_folder(&entry_id, &child).unwrap();
+
+    db.trash_folder_tree(&parent).unwrap();
+    let (deleted, entry_ids) = db.permanently_delete_trashed_folder_tree(&parent).unwrap();
+
+    assert_eq!(deleted, 3);
+    assert_eq!(entry_ids, vec![entry_id]);
+    assert!(db.get_trashed_folders().unwrap().is_empty());
+    assert!(db.get_trashed_entries().unwrap().is_empty());
+    assert!(db.get_all_entries().unwrap().is_empty());
+}
+
+#[test]
+fn organization_snapshot_restores_copied_folder_subtree() {
+    let db = test_db();
+    let entry_id = EntryId::new("paper");
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+
+    let parent = db.create_folder("Projects", None).unwrap();
+    let child = db.create_folder("Drafts", Some(&parent)).unwrap();
+    db.add_entry_to_folder(&entry_id, &parent).unwrap();
+    db.add_entry_to_folder(&entry_id, &child).unwrap();
+    let before = db.library_organization_snapshot().unwrap();
+
+    let pasted_parent = db.create_folder("Archive", None).unwrap();
+    let copied = db
+        .copy_folder_subtree(&parent, Some(&pasted_parent))
+        .unwrap();
+    let after_copy = db.library_organization_snapshot().unwrap();
+    assert!(after_copy.folders.iter().any(|folder| folder.id == copied));
+    assert!(after_copy.folders.len() > before.folders.len());
+    assert!(after_copy.entry_folders.len() > before.entry_folders.len());
+
+    db.restore_library_organization_snapshot(&before).unwrap();
+    assert_eq!(db.library_organization_snapshot().unwrap(), before);
+}
+
+#[test]
+fn organization_snapshot_restores_entry_metadata_tags_and_root_order() {
+    let db = test_db();
+    let alpha = EntryId::new("alpha");
+    let beta = EntryId::new("beta");
+    db.insert_entry(&entry("alpha", "Alpha")).unwrap();
+    db.insert_entry(&entry("beta", "Beta")).unwrap();
+    let folder = db.create_folder("Reading", None).unwrap();
+    db.add_entry_to_folder(&alpha, &folder).unwrap();
+    db.add_tag(&alpha, "important").unwrap();
+    db.update_display_metadata(&alpha, Some("Original Alpha"), Some("Original Author"))
+        .unwrap();
+    let before = db.library_organization_snapshot().unwrap();
+
+    db.rename_folder(&folder, "Archive").unwrap();
+    db.remove_tag(&alpha, "important").unwrap();
+    db.add_tag(&alpha, "later").unwrap();
+    db.update_display_metadata(&alpha, Some("Changed Alpha"), Some("Changed Author"))
+        .unwrap();
+    db.set_manual_entry_order(&[beta.clone(), alpha.clone()])
+        .unwrap();
+
+    db.restore_library_organization_snapshot(&before).unwrap();
+
+    let folders = db.get_folders().unwrap();
+    assert_eq!(folders[0].name, "Reading");
+    let entries = db.get_entries_sorted(LibrarySortMode::Manual).unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "beta"]
+    );
+    let restored = db
+        .entry_by_path(Path::new("/tmp/alpha.pdf"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(restored.display_title.as_deref(), Some("Original Alpha"));
+    assert_eq!(restored.display_author.as_deref(), Some("Original Author"));
+    assert_eq!(restored.tags, vec![String::from("important")]);
+}
+
+#[test]
+fn organization_snapshot_search_changes_ignore_non_indexed_library_edits() {
+    let db = test_db();
+    let entry_id = EntryId::new("paper");
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+    let folder = db.create_folder("Reading", None).unwrap();
+    db.add_entry_to_folder(&entry_id, &folder).unwrap();
+    let before = db.library_organization_snapshot().unwrap();
+
+    db.rename_folder(&folder, "Archive").unwrap();
+    db.add_tag(&entry_id, "later").unwrap();
+    let folder_and_tag = db.library_organization_snapshot().unwrap();
+    assert!(before.search_changed_entry_ids(&folder_and_tag).is_empty());
+
+    db.update_display_metadata(&entry_id, Some("Changed Paper"), None)
+        .unwrap();
+    let metadata = db.library_organization_snapshot().unwrap();
+    assert_eq!(
+        folder_and_tag.search_changed_entry_ids(&metadata),
+        vec![entry_id.clone()]
+    );
+
+    db.trash_entries([&entry_id]).unwrap();
+    let trashed = db.library_organization_snapshot().unwrap();
+    assert_eq!(metadata.search_changed_entry_ids(&trashed), vec![entry_id]);
+}
+
+#[test]
 fn raindrop_mappings_preserve_remote_identity_and_local_folders() {
     let db = test_db();
     let source = db

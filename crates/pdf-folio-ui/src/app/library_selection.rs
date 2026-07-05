@@ -100,6 +100,10 @@ impl PDFolioApp {
         self.library.selected_library_entries.clear();
         self.library.library_selection_anchor = None;
         self.chrome.open_selection_menu = None;
+        if self.library.trash_view_active {
+            self.library.details_folder_id = None;
+            self.library.folder_details_sidebar_open = false;
+        }
         self.sync_details_editor_to_selection();
     }
 
@@ -122,6 +126,7 @@ impl PDFolioApp {
     }
 
     pub(super) fn select_folder_in_tree(&mut self, folder_id: Option<FolderId>) {
+        self.library.trash_view_active = false;
         self.library.selected_library_entries.clear();
         self.library.library_selection_anchor = None;
         self.library.details_entry_id = None;
@@ -133,6 +138,7 @@ impl PDFolioApp {
     }
 
     pub(super) fn open_folder_from_tree(&mut self, folder_id: Option<FolderId>) {
+        self.library.trash_view_active = false;
         self.library.selected_folder = folder_id.clone();
         self.library.previous_tag_pill_view = None;
         self.select_folder_in_tree(folder_id);
@@ -161,8 +167,7 @@ impl PDFolioApp {
     }
 
     pub(super) fn selected_entries(&self) -> Vec<LibraryEntry> {
-        self.library
-            .library_entries
+        self.active_library_entries()
             .iter()
             .filter(|entry| self.library.selected_library_entries.contains(&entry.id))
             .cloned()
@@ -175,8 +180,7 @@ impl PDFolioApp {
         }
 
         let entry_id = self.library.selected_library_entries.iter().next()?;
-        self.library
-            .library_entries
+        self.active_library_entries()
             .iter()
             .find(|entry| &entry.id == entry_id)
             .cloned()

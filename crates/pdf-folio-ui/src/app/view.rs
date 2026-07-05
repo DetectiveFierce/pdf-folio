@@ -11,7 +11,7 @@ use crate::menu::{
     app_menu_bar_height, app_menu_capture_layer, selection_menu_capture_layer, view_app_menu_bar,
     view_app_menu_dropdown, view_selection_menu_dropdown,
 };
-use crate::viewer::canvas::{ViewerCanvas, ViewerSelectionOverlay};
+use crate::viewer::canvas::{HistoryRestoreSpinner, ViewerCanvas, ViewerSelectionOverlay};
 use crate::viewer::outline::{view_jump_dialog, view_sidebar};
 use crate::viewer::zoom::{zoom_control, zoom_menu};
 use crate::*;
@@ -207,13 +207,22 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         .style(move |_| container_style(tokens, Class::AppShell))
         .into();
 
-    if app.library.library_startup_loading {
+    let shell = if app.library.library_startup_loading {
         stack![shell, startup_library_loading_layer(app, tokens)]
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     } else if app.viewer.pending_document_open {
-        stack![shell, loading_cursor_layer()]
+        stack![shell, document_loading_layer(app, tokens)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else {
+        shell
+    };
+
+    if app.library.library_history_restore_started_at.is_some() {
+        stack![shell, history_restore_spinner_layer(app, tokens)]
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -728,17 +737,26 @@ fn library_card_overflow_menu<'a>(
 
     container(menu)
         .width(app.layout().metric("LibrarySwitcherMenu", "width", 118.0))
-        .padding(
+        .padding([
+            tokens.class_styles[Class::MenuPanel.index()]
+                .layout
+                .padding_y(Spacing::XS),
             tokens.class_styles[Class::MenuPanel.index()]
                 .layout
                 .padding_x(Spacing::XS),
-        )
+        ])
         .style(move |_| container_style(tokens, Class::MenuPanel))
         .into()
 }
 
 fn library_card_overflow_menu_height(app: &PDFolioApp) -> f32 {
-    app.layout().app_menu_item_height * 2.0 + Spacing::XS * 2.0
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let item_height = tokens.class_styles[Class::MenuItem.index()]
+        .layout
+        .height
+        .unwrap_or(app.layout().app_menu_item_height);
+    let panel_layout = tokens.class_styles[Class::MenuPanel.index()].layout;
+    item_height * 2.0 + panel_layout.padding_y(Spacing::XS) * 2.0
 }
 
 fn library_card_menu_row<'a>(
@@ -748,14 +766,17 @@ fn library_card_menu_row<'a>(
     tokens: ThemeTokens,
     item_height: f32,
 ) -> Element<'a, Message> {
-    let label_color = if enabled {
-        tokens.text_primary
+    let item_layout = tokens.class_styles[Class::MenuItem.index()].layout;
+    let item_text = tokens.class_styles[Class::MenuItem.index()].text;
+    let state = if enabled {
+        ComponentState::Normal
     } else {
-        tokens.text_secondary
+        ComponentState::Disabled
     };
+    let label_color = class_text_color(tokens, Class::MenuItem, state, tokens.text_primary);
     let content = row![text(label)
-        .size(FontSize::MD)
-        .font(ui_font(FontWeight::REGULAR))
+        .size(item_text.size.unwrap_or(FontSize::MD))
+        .font(ui_font(item_text.weight.unwrap_or(FontWeight::REGULAR)))
         .color(label_color)
         .wrapping(Wrapping::None)
         .width(Length::Fill),]
@@ -764,16 +785,22 @@ fn library_card_menu_row<'a>(
     if enabled {
         button(content)
             .width(Length::Fill)
-            .height(item_height)
-            .padding([Spacing::XS, Spacing::MD])
+            .height(item_layout.height.unwrap_or(item_height))
+            .padding([
+                item_layout.padding_y(Spacing::XS),
+                item_layout.padding_x(Spacing::MD),
+            ])
             .style(move |_, status| button_style(tokens, Class::MenuItem, status))
             .on_press(message)
             .into()
     } else {
         container(content)
             .width(Length::Fill)
-            .height(item_height)
-            .padding([Spacing::XS, Spacing::MD])
+            .height(item_layout.height.unwrap_or(item_height))
+            .padding([
+                item_layout.padding_y(Spacing::XS),
+                item_layout.padding_x(Spacing::MD),
+            ])
             .style(move |_| {
                 let disabled_style =
                     tokens.class_styles[Class::MenuItem.index()].resolve(ComponentState::Disabled);
@@ -944,10 +971,58 @@ fn viewer_find_icon_button<'a>(
     .style(move |_, status| crate::style::button_style(tokens, Class::ViewerFindButton, status))
 }
 
-fn loading_cursor_layer() -> Element<'static, Message> {
-    mouse_area(container("").width(Length::Fill).height(Length::Fill))
-        .interaction(mouse::Interaction::Progress)
-        .into()
+fn history_restore_spinner_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let Some(started_at) = app.library.library_history_restore_started_at else {
+        return container("").into();
+    };
+    let spinner_size = app.layout().metric("HistoryRestoreSpinner", "size", 48.0);
+    let spinner = canvas(HistoryRestoreSpinner {
+        started_at,
+        now: app.library.animation_now,
+        color: tokens.text_primary,
+    })
+    .width(Length::Fixed(spinner_size))
+    .height(Length::Fixed(spinner_size));
+    let mut background = tokens.background;
+    background.a = 0.54;
+
+    mouse_area(
+        container(spinner)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill)
+            .style(move |_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(background)),
+                ..iced::widget::container::Style::default()
+            }),
+    )
+    .interaction(mouse::Interaction::Progress)
+    .into()
+}
+
+fn document_loading_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let started_at = app
+        .viewer
+        .document_open_started_at
+        .unwrap_or(app.library.animation_now);
+    let spinner_size = app.layout().metric("DocumentLoadingSpinner", "size", 48.0);
+    let spinner = canvas(HistoryRestoreSpinner {
+        started_at,
+        now: app.library.animation_now,
+        color: tokens.text_primary,
+    })
+    .width(Length::Fixed(spinner_size))
+    .height(Length::Fixed(spinner_size));
+
+    mouse_area(
+        container(spinner)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill)
+            .style(move |_| container_style(tokens, Class::PresentationOverlay)),
+    )
+    .interaction(mouse::Interaction::Progress)
+    .into()
 }
 
 fn startup_library_loading_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
@@ -1013,6 +1088,7 @@ pub(crate) fn dismissible_error_banner<'a>(
 
 fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
     let page_count = app.viewer.doc.as_ref().map_or(0, |doc| doc.page_count());
     let current_page = if page_count == 0 {
         0
@@ -1062,9 +1138,12 @@ fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
 
     let toolbar = toolbar
         .push(toolbar_button(theme_label, tokens).on_press(Message::ThemeToggled))
-        .spacing(Spacing::SM)
-        .padding([Spacing::SM, Spacing::MD])
-        .height(app.layout().toolbar_height)
+        .spacing(toolbar_layout.spacing.unwrap_or(Spacing::SM))
+        .padding([
+            toolbar_layout.padding_y(Spacing::SM),
+            toolbar_layout.padding_x(Spacing::MD),
+        ])
+        .height(toolbar_layout.height.unwrap_or(app.layout().toolbar_height))
         .align_y(iced::Alignment::Center);
 
     container(toolbar)
@@ -1077,23 +1156,35 @@ fn viewer_library_back_button<'a>(
     layout: &crate::style::AppLayoutTokens,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
+    let button_layout = tokens.class_styles[Class::ViewerToolbarButton.index()].layout;
+    let button_text = tokens.class_styles[Class::ViewerToolbarButton.index()].text;
+    let text_color = class_text_color(
+        tokens,
+        Class::ViewerToolbarButton,
+        ComponentState::Normal,
+        tokens.text_secondary,
+    );
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(CHEVRON_LEFT_SVG))
         .width(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
         .height(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
         .style(move |_, _| iced::widget::svg::Style {
-            color: Some(tokens.text_secondary),
+            color: Some(text_color),
         });
     let label = text("Library")
-        .size(FontSize::MD)
-        .font(ui_font(FontWeight::MEDIUM))
+        .size(button_text.size.unwrap_or(FontSize::MD))
+        .font(ui_font(button_text.weight.unwrap_or(FontWeight::MEDIUM)))
+        .color(text_color)
         .wrapping(Wrapping::None);
 
     button(
         row![icon, label]
-            .spacing(Spacing::XS)
+            .spacing(button_layout.spacing.unwrap_or(Spacing::XS))
             .align_y(iced::Alignment::Center),
     )
-    .padding([Spacing::SM, Spacing::LG])
+    .padding([
+        button_layout.padding_y(Spacing::SM),
+        button_layout.padding_x(Spacing::LG),
+    ])
     .style(move |_, status| crate::style::button_style(tokens, Class::ViewerToolbarButton, status))
 }
 
@@ -1103,14 +1194,25 @@ fn viewer_page_control<'a>(
     page_count: u16,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
+    let control_layout = tokens.class_styles[Class::ViewerPageControl.index()].layout;
+    let control_text = tokens.class_styles[Class::ViewerPageControl.index()].text;
+    let control_color = class_text_color(
+        tokens,
+        Class::ViewerPageControl,
+        ComponentState::Normal,
+        tokens.text_secondary,
+    );
     let numerator: Element<'a, Message> = if app.viewer.page_input_editing {
         text_input("", &app.viewer.jump_input)
             .id(iced::widget::Id::new(PAGE_INPUT_ID))
             .on_input(Message::JumpInputChanged)
             .on_submit(Message::SubmitJump)
-            .padding([Spacing::XS, Spacing::SM])
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::MEDIUM))
+            .padding([
+                control_layout.padding_y(Spacing::XS),
+                control_layout.padding_x(Spacing::SM),
+            ])
+            .size(control_text.size.unwrap_or(FontSize::MD))
+            .font(ui_font(control_text.weight.unwrap_or(FontWeight::MEDIUM)))
             .width(Length::Fixed(app.layout().viewer_page_number_width))
             .style(move |_, status| text_input_style(tokens, Class::ViewerFindInput, status))
             .into()
@@ -1118,9 +1220,9 @@ fn viewer_page_control<'a>(
         mouse_area(
             container(
                 text(current_page.to_string())
-                    .size(FontSize::MD)
-                    .font(ui_font(FontWeight::MEDIUM))
-                    .color(tokens.text_secondary)
+                    .size(control_text.size.unwrap_or(FontSize::MD))
+                    .font(ui_font(control_text.weight.unwrap_or(FontWeight::MEDIUM)))
+                    .color(control_color)
                     .wrapping(Wrapping::None),
             )
             .width(Length::Fixed(app.layout().viewer_page_number_width))
@@ -1138,16 +1240,16 @@ fn viewer_page_control<'a>(
             .height(Length::Fixed(app.layout().viewer_page_chevron_size)),
         numerator,
         text(format!("/ {page_count}"))
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::MEDIUM))
-            .color(tokens.text_secondary)
+            .size(control_text.size.unwrap_or(FontSize::MD))
+            .font(ui_font(control_text.weight.unwrap_or(FontWeight::MEDIUM)))
+            .color(control_color)
             .wrapping(Wrapping::None),
         viewer_page_chevron_button(app.layout(), CHEVRON_RIGHT_SVG, tokens)
             .on_press(Message::NextPage)
             .width(Length::Fixed(app.layout().viewer_page_chevron_size))
             .height(Length::Fixed(app.layout().viewer_page_chevron_size)),
     ]
-    .spacing(Spacing::XS)
+    .spacing(control_layout.spacing.unwrap_or(Spacing::XS))
     .align_y(iced::Alignment::Center)
     .into()
 }
@@ -1157,15 +1259,26 @@ fn viewer_page_chevron_button<'a>(
     icon: &'static [u8],
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
+    let button_layout = tokens.class_styles[Class::ViewerToolbarButton.index()].layout;
+    let icon_color = class_text_color(
+        tokens,
+        Class::ViewerToolbarButton,
+        ComponentState::Normal,
+        tokens.text_secondary,
+    );
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
         .width(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
         .height(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
         .style(move |_, _| iced::widget::svg::Style {
-            color: Some(tokens.text_secondary),
+            color: Some(icon_color),
         });
 
     button(container(icon).center(Length::Fill))
-        .padding(0)
+        .padding(
+            button_layout
+                .padding_x(0.0)
+                .min(button_layout.padding_y(0.0)),
+        )
         .style(move |_, status| {
             crate::style::button_style(tokens, Class::ViewerToolbarButton, status)
         })
@@ -1196,12 +1309,20 @@ fn viewer_toolbar_title<'a>(
     width: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let visible = truncate_for_width_with_font(title, width, 0.0, FontSize::MD);
+    let title_text = tokens.class_styles[Class::ViewerToolbarTitle.index()].text;
+    let title_size = title_text.size.unwrap_or(FontSize::MD);
+    let title_color = class_text_color(
+        tokens,
+        Class::ViewerToolbarTitle,
+        ComponentState::Normal,
+        tokens.text_primary,
+    );
+    let visible = truncate_for_width_with_font(title, width, 0.0, title_size);
     let is_truncated = visible != title;
     let label = text(visible)
-        .size(FontSize::MD)
-        .font(ui_font(FontWeight::MEDIUM))
-        .color(tokens.text_primary)
+        .size(title_size)
+        .font(ui_font(title_text.weight.unwrap_or(FontWeight::MEDIUM)))
+        .color(title_color)
         .wrapping(Wrapping::None)
         .width(Length::Fill);
 
@@ -1218,11 +1339,16 @@ fn viewer_toolbar_title<'a>(
         content,
         container(
             text(title)
-                .size(FontSize::SM)
-                .color(tokens.text_primary)
+                .size(title_size)
+                .font(ui_font(title_text.weight.unwrap_or(FontWeight::MEDIUM)))
+                .color(title_color)
                 .wrapping(Wrapping::None),
         )
-        .padding(Spacing::SM)
+        .padding(
+            tokens.class_styles[Class::Tooltip.index()]
+                .layout
+                .padding_x(Spacing::SM),
+        )
         .style(move |_| container_style(tokens, Class::Tooltip)),
         tooltip::Position::Bottom,
     )
@@ -1235,28 +1361,39 @@ fn viewer_toolbar_status_label<'a>(
     width: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
+    let status_text = tokens.class_styles[Class::ViewerToolbarTitle.index()].text;
+    let status_size = status_text.size.unwrap_or(FontSize::SM);
+    let status_color = class_text_color(
+        tokens,
+        Class::ViewerToolbarTitle,
+        ComponentState::Normal,
+        tokens.text_secondary,
+    );
     text(truncate_for_width_with_font(
         &label,
         width,
         0.0,
-        FontSize::SM,
+        status_size,
     ))
-    .size(FontSize::SM)
-    .font(ui_font(FontWeight::MEDIUM))
-    .color(tokens.text_secondary)
+    .size(status_size)
+    .font(ui_font(status_text.weight.unwrap_or(FontWeight::MEDIUM)))
+    .color(status_color)
     .wrapping(Wrapping::None)
     .width(Length::Fill)
     .into()
 }
 
 fn viewer_toolbar_title_width(app: &PDFolioApp) -> f32 {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
+    let toolbar_spacing = toolbar_layout.spacing.unwrap_or(Spacing::SM);
     let selection_reserve = if app.viewer.viewer_text_selection.is_some() {
         app.layout().viewer_toolbar_selection_width
             + 2.0
                 * (app
                     .layout()
                     .metric("ViewerToolbarChrome", "selection_button_width", 76.0)
-                    + Spacing::SM)
+                    + toolbar_spacing)
     } else {
         0.0
     };
@@ -1271,26 +1408,42 @@ fn viewer_toolbar_title_width(app: &PDFolioApp) -> f32 {
 }
 
 fn viewer_zoom_menu_x(app: &PDFolioApp) -> f32 {
-    let zoom_control_right = Spacing::MD
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
+    let toolbar_spacing = toolbar_layout.spacing.unwrap_or(Spacing::SM);
+    let zoom_control_right = toolbar_layout.padding_left(Spacing::MD)
         + app
             .layout()
             .metric("ViewerToolbarChrome", "library_button_width", 70.0)
-        + Spacing::SM
+        + toolbar_spacing
         + app
             .layout()
             .metric("ViewerToolbarChrome", "open_button_width", 87.0)
-        + Spacing::SM
+        + toolbar_spacing
         + viewer_toolbar_title_width(app)
-        + Spacing::SM
+        + toolbar_spacing
         + app.layout().viewer_page_control_width
-        + Spacing::SM
+        + toolbar_spacing
         + app
             .layout()
             .metric("ViewerToolbarChrome", "zoom_step_button_width", 30.0)
-        + Spacing::SM
+        + toolbar_spacing
         + app.layout().viewer_zoom_control_width;
 
-    (zoom_control_right - app.layout().viewer_zoom_menu_width).max(Spacing::MD)
+    (zoom_control_right - app.layout().viewer_zoom_menu_width)
+        .max(toolbar_layout.padding_left(Spacing::MD))
+}
+
+fn class_text_color(
+    tokens: ThemeTokens,
+    class: Class,
+    state: ComponentState,
+    fallback: iced::Color,
+) -> iced::Color {
+    tokens.class_styles[class.index()]
+        .resolve(state)
+        .text_color
+        .unwrap_or(fallback)
 }
 
 fn viewer_floating_sidebar_toggle<'a>(tokens: ThemeTokens) -> Element<'a, Message> {

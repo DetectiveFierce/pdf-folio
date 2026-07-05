@@ -36,7 +36,7 @@ impl PDFolioApp {
             .library
             .search_results
             .as_ref()
-            .unwrap_or(&self.library.library_entries);
+            .unwrap_or_else(|| self.active_library_entries());
         source
             .iter()
             .filter(|entry| {
@@ -56,6 +56,14 @@ impl PDFolioApp {
             .filter(|entry| !self.library.missing_filter_active || entry.missing)
             .cloned()
             .collect()
+    }
+
+    pub(super) fn active_library_entries(&self) -> &Vec<LibraryEntry> {
+        if self.library.trash_view_active {
+            &self.library.library_trash_entries
+        } else {
+            &self.library.library_entries
+        }
     }
 
     pub(super) fn library_grid_zoom(&self) -> f32 {

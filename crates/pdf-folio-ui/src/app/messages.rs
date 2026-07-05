@@ -62,6 +62,8 @@ pub enum AppMenuAction {
     OpenFile,
     /// Import PDFs from a folder.
     ImportFolder,
+    /// Import a single PDF into the library.
+    ImportPdf,
     /// Import PDFs from Raindrop.io.
     ImportRaindrop,
     /// Return from the viewer to the library.
@@ -72,6 +74,16 @@ pub enum AppMenuAction {
     SelectAllVisible,
     /// Clear selected PDFs.
     ClearSelection,
+    /// Undo the latest library organization edit.
+    UndoLibraryAction,
+    /// Redo the next library organization edit.
+    RedoLibraryAction,
+    /// Cut selected library PDFs or folder.
+    CutLibrarySelection,
+    /// Copy selected library PDFs or folder.
+    CopyLibrarySelection,
+    /// Paste the internal library clipboard.
+    PasteLibraryClipboard,
     /// Save the current single-PDF metadata edit.
     SaveDetails,
     /// Reset the current single-PDF metadata edit.
@@ -86,7 +98,7 @@ pub enum AppMenuAction {
     RemoveFromFolder,
     /// Move the selected PDFs to a chosen library folder or root.
     MoveTo,
-    /// Delete selected PDFs from library metadata.
+    /// Move selected PDFs to the Trash Can.
     DeleteFromLibrary,
     /// Toggle grid/list library layout.
     ToggleLayout,
@@ -208,13 +220,17 @@ pub enum ContextMenuAction {
     BackToLibrary,
 }
 
-/// Confirmation-only actions that overwrite or delete user-visible library data.
+/// Confirmation-only actions that overwrite, trash, or delete user-visible library data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfirmationAction {
     /// Clear display metadata overrides for the selected PDFs.
     BulkResetDisplayMetadata,
-    /// Delete the selected PDFs from library metadata.
+    /// Move the selected PDFs to the Trash Can.
     BulkDeleteFromLibrary,
+    /// Permanently delete selected PDFs from the trash.
+    PermanentlyDeleteFromTrash,
+    /// Permanently delete one selected folder subtree from the trash.
+    PermanentlyDeleteFolderFromTrash(FolderId),
     /// Clear display metadata overrides for one PDF in the details panel.
     ResetDetailsMetadata(EntryId),
     /// Delete one folder without deleting PDFs on disk.
@@ -248,7 +264,7 @@ pub enum SelectionToolbarAction {
     RebuildThumbnails,
     /// Reindex full text.
     Reindex,
-    /// Delete selected PDFs from library metadata.
+    /// Move selected PDFs to the Trash Can.
     DeleteMetadata,
 }
 
@@ -267,7 +283,7 @@ impl SelectionToolbarAction {
             Self::ResetMetadata => "Reset metadata",
             Self::RebuildThumbnails => "Rebuild thumbnails",
             Self::Reindex => "Reindex",
-            Self::DeleteMetadata => "Delete metadata",
+            Self::DeleteMetadata => "Move to Trash",
         }
     }
 }
@@ -479,7 +495,10 @@ pub enum Message {
     /// Export annotations into a PDF.
     ExportAnnotations,
     /// Library entries loaded.
-    LibraryLoaded(Vec<LibraryEntry>),
+    LibraryLoaded {
+        entries: Vec<LibraryEntry>,
+        trash_entries: Vec<LibraryEntry>,
+    },
     /// Open the library switcher screen.
     OpenLibrarySwitcher,
     /// Return from the library switcher to the active library.
@@ -514,6 +533,8 @@ pub enum Message {
     DeleteLibrary(String),
     /// Library folders loaded.
     LibraryFoldersLoaded(Vec<Folder>),
+    /// Trashed library folders loaded.
+    LibraryTrashFoldersLoaded(Vec<Folder>),
     /// Reload library entries from storage.
     LibraryRefresh,
     /// A library operation failed.
@@ -526,6 +547,10 @@ pub enum Message {
     ImportFolderDialog,
     /// The native folder picker selected an import directory.
     ImportFolderSelected(PathBuf),
+    /// Open the native file picker for single-PDF import.
+    ImportPdfDialog,
+    /// The native file picker selected a PDF to import.
+    ImportPdfSelected(PathBuf),
     /// Bulk import finished.
     ImportFinished(ImportSummary),
     /// Start importing PDFs from Raindrop.io.
@@ -592,6 +617,8 @@ pub enum Message {
     FolderTreeClicked(Option<FolderId>),
     /// Open a library folder from the sidebar file tree.
     FolderTreeFolderOpened(Option<FolderId>),
+    /// Open the virtual trash can scope.
+    OpenTrashCan,
     /// A library entry selection checkbox was toggled.
     EntryCheckboxToggled(EntryId),
     /// The master visible-entry selection checkbox was clicked.
@@ -606,6 +633,32 @@ pub enum Message {
     ClearLibrarySidebarDetails,
     /// Select all currently visible library PDFs.
     SelectAllVisibleLibraryEntries,
+    /// Cut selected library PDFs or selected folder into the internal library clipboard.
+    CutLibrarySelection,
+    /// Copy selected library PDFs or selected folder into the internal library clipboard.
+    CopyLibrarySelection,
+    /// Paste the internal library clipboard into the active folder.
+    PasteLibraryClipboard,
+    /// A paste operation finished and can be pushed onto undo history.
+    LibraryClipboardPasteFinished {
+        action: crate::LibraryHistoryAction,
+        clipboard: crate::LibraryClipboard,
+        updated: usize,
+        errors: Vec<String>,
+    },
+    /// A reversible library history operation finished.
+    LibraryHistoryActionFinished {
+        action: crate::LibraryHistoryAction,
+        label: String,
+        updated: usize,
+        errors: Vec<String>,
+    },
+    /// Restore the previous library organization history snapshot.
+    UndoLibraryAction,
+    /// Restore the next library organization history snapshot.
+    RedoLibraryAction,
+    /// An undo or redo snapshot restore finished.
+    LibraryHistoryRestoreFinished { target_index: usize, status: String },
     /// Begin dragging a library entry for manual reordering.
     BeginLibraryEntryDrag(EntryId),
     /// Cursor moved while dragging a library entry.
@@ -690,7 +743,10 @@ pub enum Message {
     /// Create a folder in the selected folder.
     CreateFolder,
     /// A folder was created.
-    FolderCreated(FolderId),
+    FolderCreated {
+        folder_id: FolderId,
+        action: crate::LibraryHistoryAction,
+    },
     /// Selected-folder rename input changed.
     FolderRenameInputChanged(String),
     /// Rename the selected folder.
@@ -753,8 +809,16 @@ pub enum Message {
     BulkRebuildThumbnails,
     /// Reindex full text for selected PDFs.
     BulkReindex,
-    /// Delete selected PDFs from library metadata only.
+    /// Move selected PDFs to the Trash Can.
     BulkDeleteFromLibrary,
+    /// Restore selected PDFs from the trash.
+    RestoreSelectedFromTrash,
+    /// Permanently delete selected PDFs from the trash.
+    PermanentlyDeleteSelectedFromTrash,
+    /// Permanently delete the selected folder subtree from the trash.
+    PermanentlyDeleteSelectedFolderFromTrash(FolderId),
+    /// A trashed folder subtree was permanently deleted.
+    TrashFolderPermanentlyDeleted { updated: usize, errors: Vec<String> },
     /// A compact selection-toolbar menu action was chosen.
     SelectionToolbarActionSelected(SelectionToolbarAction),
     /// Request confirmation before a destructive or overwriting library action.
@@ -786,6 +850,7 @@ pub enum Message {
     /// Metadata edit finished.
     MetadataEditFinished {
         entry_id: EntryId,
+        action: crate::LibraryHistoryAction,
         label: String,
         errors: Vec<String>,
     },
@@ -859,12 +924,20 @@ pub enum Shortcut {
     FocusSearch,
     /// Focus the selected PDF title or selected folder name for rename.
     RenameSelected,
-    /// Delete selected library entries from metadata.
+    /// Move selected library entries to the Trash Can.
     DeleteSelected,
+    /// Cut selected library entries or folders.
+    Cut,
     /// Open the jump-to-page overlay.
     Jump,
     /// Copy selected text.
     Copy,
+    /// Paste selected library entries or folders.
+    Paste,
+    /// Undo the latest library organization edit.
+    Undo,
+    /// Redo the latest undone library organization edit.
+    Redo,
     /// Close overlays or panels.
     Escape,
 }

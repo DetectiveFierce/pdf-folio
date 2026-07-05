@@ -25,7 +25,8 @@ component "MenuBar" {
 }
 
 component "MenuButton" {
-    layout height=24
+    layout height=24 padding_x=9 padding_y=0
+    text size=14 weight="medium"
 
     normal background="#0E0904" text="#8B6E52" border="#00000000" border_width=0 radius=0 theme="espresso"
     hovered background="#160F07" text="#C8B89A" border="#00000000" border_width=0 theme="espresso"
@@ -40,6 +41,7 @@ component "MenuButton" {
 
 component "MenuPanel" {
     layout spacing=2 padding=4 separator_height=1
+    text size=12 weight="regular"
 
     normal background="#23180C" text="#DDD0BA" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
     selected background="#C8B89A2E" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
@@ -54,6 +56,9 @@ component "MenuPanel" {
 }
 
 component "MenuItem" {
+    layout height=30 spacing=12 padding_x=9 padding_y=4
+    text size=14 weight="regular"
+
     normal background="#23180C" text="#DDD0BA" border="#00000000" border_width=0 radius=4 theme="espresso"
     hovered background="#2B1D0E" text="#D4A853" border="#D4A85340" border_width=1 theme="espresso"
     selected background="#23180C" text="#DDD0BA" border="#00000000" border_width=0 radius=4 theme="espresso"
@@ -67,6 +72,7 @@ component "MenuItem" {
 
 component "ContextMenuPanel" {
     layout width=250 item_height=30 spacing=2 padding=4 separator_height=1
+    text size=12 weight="regular"
 
     normal background="#23180C" text="#DDD0BA" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
     selected background="#C8B89A2E" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
@@ -81,6 +87,9 @@ component "ContextMenuPanel" {
 }
 
 component "ContextMenuItem" {
+    layout height=30 spacing=12 padding_x=9 padding_y=4
+    text size=14 weight="regular"
+
     normal background="#23180C" text="#DDD0BA" border="#00000000" border_width=0 radius=4 theme="espresso"
     hovered background="#2B1D0E" text="#D4A853" border="#D4A85340" border_width=1 theme="espresso"
     selected background="#23180C" text="#DDD0BA" border="#00000000" border_width=0 radius=4 theme="espresso"
@@ -93,6 +102,9 @@ component "ContextMenuItem" {
 }
 
 component "ToolbarButton" {
+    layout padding_x=14 padding_y=6
+    text size=14 weight="medium"
+
     normal background="#1E1409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
     hovered background="#2B1D0E" text="#DDD0BA" border="#D4A85359" theme="espresso"
     pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
@@ -100,6 +112,44 @@ component "ToolbarButton" {
     normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
     hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
     pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+}
+
+component "SelectionRestoreButton" {
+    layout height=26 padding_x=9 padding_y=4
+    text size=13 weight="medium"
+
+    normal background="$accent" text="$surface" border="$accent" border_width=1 radius=6 theme="espresso"
+    hovered background="#E3B963" text="$surface" border="#E3B963" border_width=1 theme="espresso"
+    pressed background="#B98824" text="$surface" border="#B98824" border_width=1 theme="espresso"
+
+    normal background="$accent" text="$surface" border="$accent" border_width=1 radius=6 theme="light"
+    hovered background="#B98937" text="$surface" border="#B98937" border_width=1 theme="light"
+    pressed background="#815A1D" text="$surface" border="#815A1D" border_width=1 theme="light"
+}
+
+component "SelectionDangerButton" {
+    layout height=26 padding_x=9 padding_y=4
+    text size=13 weight="medium"
+
+    normal background="#C71F1F0F" text="#C71F1F" border="#C71F1F" border_width=1 radius=6 theme="espresso"
+    hovered background="#EB2E2E1F" text="#EB2E2E" border="#EB2E2E" border_width=1 theme="espresso"
+    pressed background="#EB2E2E2E" text="#EB2E2E" border="#EB2E2E" border_width=1 theme="espresso"
+
+    normal background="#94201A0F" text="#94201A" border="#94201A" border_width=1 radius=6 theme="light"
+    hovered background="#B329221F" text="#B32922" border="#B32922" border_width=1 theme="light"
+    pressed background="#B329222E" text="#B32922" border="#B32922" border_width=1 theme="light"
+}
+
+component "SelectionDangerIconButton" {
+    layout width=30 height=30 padding=6
+
+    normal background="#941F1A" text="#FFFFFF" border="#941F1A" border_width=1 radius=6 theme="espresso"
+    hovered background="#B32922" text="#FFFFFF" border="#B32922" border_width=1 theme="espresso"
+    pressed background="#C9322A" text="#FFFFFF" border="#C9322A" border_width=1 theme="espresso"
+
+    normal background="#941F1A" text="#FFFFFF" border="#941F1A" border_width=1 radius=6 theme="light"
+    hovered background="#B32922" text="#FFFFFF" border="#B32922" border_width=1 theme="light"
+    pressed background="#C9322A" text="#FFFFFF" border="#C9322A" border_width=1 theme="light"
 }
 
 component "SearchInput" {

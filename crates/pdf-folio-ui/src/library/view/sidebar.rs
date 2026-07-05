@@ -4,6 +4,7 @@ use iced::widget::column;
 const FILE_TREE_CHEVRON_RIGHT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M6.25 4.25 10 8l-3.75 3.75"/></svg>"##;
 const FILE_TREE_CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4.25 6.25 8 10l3.75-3.75"/></svg>"##;
 const LIBRARIES_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="9" width="5" height="6" rx="1"/><rect x="9.5" y="9" width="5" height="6" rx="1"/><rect x="17.5" y="9" width="5" height="6" rx="1"/></svg>"##;
+const ACTIVE_TRASH_CAN_CONTENT_OFFSET: f32 = 4.0;
 
 pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
@@ -273,12 +274,14 @@ pub(crate) fn view_file_tree_sidebar<'a>(
     sidebar_width: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let library_counts = app.folder_smart_counts(None);
+    let library_counts = app.normal_folder_smart_counts(None);
     let root_row = file_tree_row(
         "Library",
         Some(folder_sidebar_count_label(library_counts)),
         0,
-        app.library.selected_folder.is_none() && app.library.details_folder_id.is_none(),
+        !app.library.trash_view_active
+            && app.library.selected_folder.is_none()
+            && app.library.details_folder_id.is_none(),
         true,
         app.library.library_tree_root_expanded,
         Message::ToggleLibraryTreeRoot,
@@ -295,7 +298,111 @@ pub(crate) fn view_file_tree_sidebar<'a>(
         tree = tree.push(folder_sidebar_rows(app, None, 1, sidebar_width, tokens));
     }
 
+    tree = tree.push(container("").height(Spacing::LG));
+    tree = tree.push(trash_can_sidebar_row(app, sidebar_width, tokens));
+
     tree.into()
+}
+
+pub(crate) fn trash_can_sidebar_row<'a>(
+    app: &'a PDFolioApp,
+    sidebar_width: f32,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let count = app.library.library_trash_entries.len() + app.library.library_trash_folders.len();
+    let file_tree_style = tokens.class_styles[Class::FileTree.index()];
+    let normal_style = file_tree_style.resolve(ComponentState::Normal);
+    let active_style = file_tree_style.resolve(ComponentState::Active);
+    let content_background = normal_style.background.unwrap_or(tokens.surface);
+    let active = app.library.trash_view_active;
+    let text_color = if active {
+        active_style.text_color.unwrap_or(tokens.text_primary)
+    } else {
+        normal_style.text_color.unwrap_or(tokens.text_secondary)
+    };
+    let label_size = file_tree_style.text.size.unwrap_or(FontSize::MD);
+    let row_height = file_tree_style.layout.height.unwrap_or(26.0);
+    let meta = format_count(count, "item");
+    let meta_width = (meta.len() as f32 * tokens.primitives.file_tree_meta_char_width).clamp(
+        tokens.primitives.file_tree_meta_min_width,
+        tokens.primitives.file_tree_meta_max_width,
+    );
+    let icon_slot = 16.0;
+    let active_content_offset = if active {
+        ACTIVE_TRASH_CAN_CONTENT_OFFSET
+    } else {
+        0.0
+    };
+    let label_width = (sidebar_width
+        - Spacing::SM * 2.0
+        - icon_slot
+        - meta_width
+        - active_content_offset
+        - Spacing::XS * 3.0)
+        .max(42.0);
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(TRASH_CAN_SVG))
+        .width(Length::Fixed(icon_slot))
+        .height(Length::Fixed(icon_slot))
+        .style(move |_, _| iced::widget::svg::Style {
+            color: Some(text_color),
+        });
+    let content = row![
+        container("").width(active_content_offset),
+        icon,
+        text(file_tree_label("Trash Can", label_width, label_size))
+            .size(label_size)
+            .line_height(1.12)
+            .font(file_tree_font(if active {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::MEDIUM
+            }))
+            .color(text_color)
+            .wrapping(Wrapping::None)
+            .width(Length::Fixed(label_width)),
+        text(meta)
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::REGULAR))
+            .color(tokens.text_secondary)
+            .wrapping(Wrapping::None)
+            .width(Length::Fixed(meta_width))
+            .align_x(iced::alignment::Horizontal::Right),
+    ]
+    .spacing(Spacing::XS)
+    .align_y(iced::Alignment::Center);
+
+    let row_button = button(content)
+        .height(row_height)
+        .width(Length::Fill)
+        .padding([tokens.primitives.file_tree_row_padding_y, Spacing::SM])
+        .style(move |_, status| {
+            let hovered = matches!(
+                status,
+                iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
+            );
+            let state = if active {
+                ComponentState::Active
+            } else if hovered {
+                ComponentState::Hovered
+            } else {
+                ComponentState::Normal
+            };
+            let mut style = crate::style::button_style(tokens, Class::FileTree, status);
+            apply_file_tree_state_style(&mut style, tokens, state, content_background);
+            style
+        })
+        .on_press(Message::OpenTrashCan);
+
+    if active {
+        if let Some(border) = side_border_for_class(tokens, Class::FileTree, ComponentState::Active)
+        {
+            side_border(row_button, border)
+        } else {
+            row_button.into()
+        }
+    } else {
+        row_button.into()
+    }
 }
 
 pub(crate) fn selected_folder_actions_panel<'a>(
@@ -303,6 +410,9 @@ pub(crate) fn selected_folder_actions_panel<'a>(
     sidebar_width: f32,
     tokens: ThemeTokens,
 ) -> Option<Element<'a, Message>> {
+    if app.library.trash_view_active {
+        return None;
+    }
     let folder = app.selected_folder()?;
     let parent_id = folder.parent_id.clone();
     let has_parent = parent_id.is_some();
@@ -334,7 +444,7 @@ pub(crate) fn selected_folder_actions_panel<'a>(
             .width(input_width),
         row![
             sidebar_folder_action_button("Rename", tokens).on_press(Message::RenameSelectedFolder),
-            sidebar_folder_action_button("Delete", tokens)
+            sidebar_folder_action_button("Trash", tokens)
                 .on_press(Message::RequestDeleteSelectedFolder),
         ]
         .spacing(Spacing::XS)
@@ -529,7 +639,9 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
         entry.tags.join(", ")
     };
     let progress_label = selected_pdf_progress_label(&entry);
-    let status_label = if entry.missing {
+    let status_label = if app.library.trash_view_active {
+        "In Trash"
+    } else if entry.missing {
         "Missing file"
     } else {
         "Available"
@@ -583,7 +695,7 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
         sidebar_action_button("Open containing folder", tokens)
             .on_press(Message::OpenEntryContainingFolder(entry.id.clone())),
     ];
-    if entry.missing {
+    if entry.missing && !app.library.trash_view_active {
         content = content.push(
             sidebar_action_button("Relink missing file", tokens)
                 .on_press(Message::RelinkMissingEntry(entry.id.clone())),
@@ -795,10 +907,11 @@ pub(crate) fn folder_sidebar_rows<'a>(
             .library
             .collapsed_library_tree_folders
             .contains(&folder.id);
-        let active = app.library.details_folder_id.as_ref() == Some(&folder.id);
+        let active = !app.library.trash_view_active
+            && app.library.details_folder_id.as_ref() == Some(&folder.id);
         let drop_active = app.active_folder_drop_target() == Some(&folder.id);
         let flash_active = app.folder_drop_flash_active(&folder.id);
-        let counts = app.folder_smart_counts(Some(&folder.id));
+        let counts = app.normal_folder_smart_counts(Some(&folder.id));
         let row = file_tree_row(
             &folder.name,
             Some(folder_sidebar_count_label(counts)),

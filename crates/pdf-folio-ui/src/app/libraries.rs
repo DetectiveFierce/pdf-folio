@@ -166,6 +166,7 @@ impl PDFolioApp {
         self.viewer.page_fade_started.clear();
         self.viewer.document_error = None;
         self.viewer.pending_document_open = false;
+        self.viewer.document_open_started_at = None;
 
         self.library.compact_view_mode = matches!(preferences.layout_mode, LibraryLayoutMode::List);
         self.library.library_grid_zoom = preferences
@@ -187,7 +188,10 @@ impl PDFolioApp {
         self.library.collapsed_library_tree_folders =
             preferences.collapsed_folder_ids.into_iter().collect();
         self.library.library_entries.clear();
+        self.library.library_trash_entries.clear();
         self.library.library_folders.clear();
+        self.library.library_trash_folders.clear();
+        self.library.trash_view_active = false;
         self.library.thumbnails.clear();
         self.library.pending_thumbnails.clear();
         self.library.active_tag_filter = None;

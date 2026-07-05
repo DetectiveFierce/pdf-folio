@@ -333,6 +333,41 @@ fn root_library_scope_shows_only_unfiled_entries() {
 }
 
 #[test]
+fn library_history_keeps_redo_branches_after_undo() {
+    fn snapshot(label: &str) -> LibraryOrganizationSnapshot {
+        let db = test_db(label);
+        db.create_folder(label, None).unwrap();
+        db.library_organization_snapshot().unwrap()
+    }
+
+    let mut history = LibraryHistory::default();
+    history.push(LibraryHistoryAction {
+        label: String::from("First"),
+        refresh_search_on_restore: false,
+        before: snapshot("root"),
+        after: snapshot("first"),
+    });
+    let first_index = history.current;
+    let (undo_index, _) = history.undo_target().unwrap();
+    history.set_current(undo_index);
+    history.push(LibraryHistoryAction {
+        label: String::from("Second"),
+        refresh_search_on_restore: false,
+        before: snapshot("root"),
+        after: snapshot("second"),
+    });
+
+    assert_eq!(
+        history.nodes[0].children,
+        vec![first_index, history.current]
+    );
+    history.set_current(0);
+    let (redo_index, redo_action) = history.redo_target().unwrap();
+    assert_eq!(redo_index, history.nodes[0].children[1]);
+    assert_eq!(redo_action.label, "Second");
+}
+
+#[test]
 fn double_clicking_folder_in_file_tree_keeps_navigation_sidebar_open() {
     let db = test_db("file-tree-double-click");
     let folder_id = db.create_folder("Reading", None).unwrap();

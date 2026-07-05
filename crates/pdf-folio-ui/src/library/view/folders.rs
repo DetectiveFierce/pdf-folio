@@ -220,10 +220,15 @@ pub(crate) fn folder_grid_card<'a>(
         .on_enter(Message::FolderDropTargetChanged(Some(folder_id)))
         .on_exit(Message::FolderDropTargetChanged(None));
     if mode == FolderCardRenderMode::Normal {
-        area.on_press(Message::BeginFolderDrag(folder.id.clone()))
-            .on_release(Message::EndFolderDrag)
-            .interaction(mouse::Interaction::Grab)
-            .into()
+        if app.library.trash_view_active {
+            area.on_press(Message::FolderClicked(Some(folder.id.clone())))
+                .into()
+        } else {
+            area.on_press(Message::BeginFolderDrag(folder.id.clone()))
+                .on_release(Message::EndFolderDrag)
+                .interaction(mouse::Interaction::Grab)
+                .into()
+        }
     } else {
         area.into()
     }

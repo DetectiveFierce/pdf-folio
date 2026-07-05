@@ -67,9 +67,21 @@ impl PDFolioApp {
         let db = Arc::clone(&self.db);
         let sort_mode = self.library.library_sort_mode;
         Task::perform(
-            async move { tokio::task::spawn_blocking(move || db.get_entries_sorted(sort_mode)).await? },
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    db.purge_expired_trash(30)?;
+                    Ok::<_, anyhow::Error>((
+                        db.get_entries_sorted(sort_mode)?,
+                        db.get_trashed_entries()?,
+                    ))
+                })
+                .await?
+            },
             |result| match result {
-                Ok(entries) => Message::LibraryLoaded(entries),
+                Ok((entries, trash_entries)) => Message::LibraryLoaded {
+                    entries,
+                    trash_entries,
+                },
                 Err(error) => Message::LibraryError(error.to_string()),
             },
         )
@@ -77,12 +89,24 @@ impl PDFolioApp {
 
     pub(super) fn refresh_folders(&self) -> Task<Message> {
         let db = Arc::clone(&self.db);
-        Task::perform(
-            async move { tokio::task::spawn_blocking(move || db.get_folders()).await? },
-            |result| match result {
-                Ok(folders) => Message::LibraryFoldersLoaded(folders),
-                Err(error) => Message::LibraryError(error.to_string()),
-            },
-        )
+        let trash_db = Arc::clone(&self.db);
+        Task::batch([
+            Task::perform(
+                async move { tokio::task::spawn_blocking(move || db.get_folders()).await? },
+                |result| match result {
+                    Ok(folders) => Message::LibraryFoldersLoaded(folders),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            ),
+            Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || trash_db.get_trashed_folders()).await?
+                },
+                |result| match result {
+                    Ok(folders) => Message::LibraryTrashFoldersLoaded(folders),
+                    Err(error) => Message::LibraryError(error.to_string()),
+                },
+            ),
+        ])
     }
 }

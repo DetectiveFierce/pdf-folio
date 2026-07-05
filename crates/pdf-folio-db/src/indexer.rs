@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use tantivy::collector::TopDocs;
+use tantivy::indexer::NoMergePolicy;
 use tantivy::query::QueryParser;
 use tantivy::schema::{Field, Schema, TantivyDocument, Value, STORED, STRING, TEXT};
 use tantivy::{doc, Index, IndexWriter, ReloadPolicy, Term};
@@ -149,7 +150,7 @@ impl SearchIndex {
             return Ok(());
         }
 
-        let mut writer: IndexWriter<TantivyDocument> = self.index.writer(50_000_000)?;
+        let mut writer = self.interactive_writer()?;
         let mut deleted_entry_ids = HashSet::new();
         for document in &documents {
             if deleted_entry_ids.insert(document.id.clone()) {
@@ -236,12 +237,18 @@ impl SearchIndex {
             return Ok(());
         }
 
-        let mut writer: IndexWriter<TantivyDocument> = self.index.writer(50_000_000)?;
+        let mut writer = self.interactive_writer()?;
         for entry_id in entry_ids {
             writer.delete_term(Term::from_field_text(self.fields.id, entry_id));
         }
         writer.commit()?;
         Ok(())
+    }
+
+    fn interactive_writer(&self) -> Result<IndexWriter<TantivyDocument>> {
+        let writer = self.index.writer(50_000_000)?;
+        writer.set_merge_policy(Box::new(NoMergePolicy));
+        Ok(writer)
     }
 }
 

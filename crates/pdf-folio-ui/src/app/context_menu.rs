@@ -165,12 +165,28 @@ pub(crate) fn view_context_menu_dropdown(
         - width
         - Spacing::SM;
     let x = menu.position.x.clamp(Spacing::SM, max_x.max(Spacing::SM));
-    let y = menu.position.y.max(Spacing::SM);
+    let height = context_menu_height(app, &menu.target, tokens);
+    let max_y = app.viewer.viewport_height.max(app.layout().window_height) - height - Spacing::SM;
+    let y = menu.position.y.clamp(Spacing::SM, max_y.max(Spacing::SM));
 
     stack![pin(context_menu_panel(app, &menu.target, tokens)).x(x).y(y)]
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+fn context_menu_height(app: &PDFolioApp, target: &ContextMenuTarget, tokens: ThemeTokens) -> f32 {
+    let groups = context_menu_groups(app, target);
+    let item_count = groups.iter().map(Vec::len).sum::<usize>();
+    let separator_count = groups.len().saturating_sub(1);
+    let child_count = item_count + separator_count;
+    let gap_count = child_count.saturating_sub(1);
+    let panel_layout = tokens.class_styles[Class::ContextMenuPanel.index()].layout;
+
+    item_count as f32 * app.layout().context_menu_item_height
+        + separator_count as f32 * tokens.primitives.context_menu_separator_height
+        + gap_count as f32 * panel_layout.spacing.unwrap_or(2.0)
+        + panel_layout.padding_y(Spacing::XS) * 2.0
 }
 
 fn context_menu_panel<'a>(
@@ -181,7 +197,10 @@ fn context_menu_panel<'a>(
     let panel_layout = tokens.class_styles[Class::ContextMenuPanel.index()].layout;
     let mut panel = column![]
         .spacing(panel_layout.spacing.unwrap_or(2.0))
-        .padding(panel_layout.padding_x(Spacing::XS));
+        .padding([
+            panel_layout.padding_y(Spacing::XS),
+            panel_layout.padding_x(Spacing::XS),
+        ]);
     let groups = context_menu_groups(app, target);
     for (group_index, group) in groups.iter().enumerate() {
         if group_index > 0 {
@@ -219,8 +238,7 @@ fn library_entry_context_groups(
     entry_id: &EntryId,
 ) -> Vec<Vec<ContextMenuItemSpec>> {
     let entry = app
-        .library
-        .library_entries
+        .active_library_entries()
         .iter()
         .find(|entry| &entry.id == entry_id);
     let has_selection = !app.library.selected_library_entries.is_empty();
@@ -305,7 +323,7 @@ fn library_entry_context_groups(
             ),
             spec("Reindex Full Text", "", true, ContextMenuAction::Reindex),
             spec(
-                "Delete From Library...",
+                "Move to Trash...",
                 "Del",
                 true,
                 ContextMenuAction::DeleteFromLibrary,
@@ -397,7 +415,7 @@ fn folder_context_groups(
                 ContextMenuAction::MoveFolderLater,
             ),
             spec(
-                "Delete Folder...",
+                "Move Folder to Trash...",
                 "",
                 has_folder,
                 ContextMenuAction::DeleteFolder,
@@ -514,37 +532,46 @@ fn context_menu_item<'a>(
     tokens: ThemeTokens,
     item_height: f32,
 ) -> Element<'a, Message> {
-    let label_color = if item.enabled {
-        tokens.text_primary
+    let item_layout = tokens.class_styles[Class::ContextMenuItem.index()].layout;
+    let item_text = tokens.class_styles[Class::ContextMenuItem.index()].text;
+    let state = if item.enabled {
+        ComponentState::Normal
     } else {
-        tokens.text_secondary
+        ComponentState::Disabled
     };
-    let detail_color = if item.enabled {
-        tokens.text_secondary
-    } else {
-        with_alpha(tokens.text_secondary, 0.58)
-    };
+    let label_color = class_text_color(tokens, Class::ContextMenuItem, state, tokens.text_primary);
+    let detail_color =
+        class_text_color(tokens, Class::ContextMenuItem, state, tokens.text_secondary);
+    let label_size = item_text.size.unwrap_or(FontSize::MD);
+    let detail_size = tokens.class_styles[Class::ContextMenuPanel.index()]
+        .text
+        .size
+        .unwrap_or(FontSize::SM);
+    let item_weight = item_text.weight.unwrap_or(FontWeight::REGULAR);
     let content = row![
         text(item.label)
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::REGULAR))
+            .size(label_size)
+            .font(ui_font(item_weight))
             .color(label_color)
             .wrapping(Wrapping::None)
             .width(Length::Fill),
         text(item.detail)
-            .size(FontSize::SM)
-            .font(ui_font(FontWeight::REGULAR))
+            .size(detail_size)
+            .font(ui_font(item_weight))
             .color(detail_color)
             .wrapping(Wrapping::None),
     ]
-    .spacing(Spacing::MD)
+    .spacing(item_layout.spacing.unwrap_or(Spacing::MD))
     .align_y(iced::Alignment::Center);
 
     if item.enabled {
         button(content)
-            .height(item_height)
+            .height(item_layout.height.unwrap_or(item_height))
             .width(Length::Fill)
-            .padding([Spacing::XS, Spacing::MD])
+            .padding([
+                item_layout.padding_y(Spacing::XS),
+                item_layout.padding_x(Spacing::MD),
+            ])
             .on_press(Message::ContextMenuActionSelected(item.action))
             .style(move |_, status| {
                 crate::style::button_style(tokens, Class::ContextMenuItem, status)
@@ -552,9 +579,12 @@ fn context_menu_item<'a>(
             .into()
     } else {
         container(content)
-            .height(item_height)
+            .height(item_layout.height.unwrap_or(item_height))
             .width(Length::Fill)
-            .padding([Spacing::XS, Spacing::MD])
+            .padding([
+                item_layout.padding_y(Spacing::XS),
+                item_layout.padding_x(Spacing::MD),
+            ])
             .style(move |_| {
                 let disabled_style = tokens.class_styles[Class::ContextMenuItem.index()]
                     .resolve(ComponentState::Disabled);
@@ -574,4 +604,16 @@ fn context_menu_separator(tokens: ThemeTokens) -> Element<'static, Message> {
             container_style(tokens, Class::ContextMenuPanel).with_visual_override(selected_style)
         })
         .into()
+}
+
+fn class_text_color(
+    tokens: ThemeTokens,
+    class: Class,
+    state: ComponentState,
+    fallback: iced::Color,
+) -> iced::Color {
+    tokens.class_styles[class.index()]
+        .resolve(state)
+        .text_color
+        .unwrap_or(fallback)
 }

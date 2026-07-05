@@ -144,6 +144,12 @@ pub enum Class {
     ContextMenuPanel,
     /// Right-click contextual menu row.
     ContextMenuItem,
+    /// Selection toolbar restore action.
+    SelectionRestoreButton,
+    /// Selection toolbar destructive text action.
+    SelectionDangerButton,
+    /// Selection toolbar destructive icon action.
+    SelectionDangerIconButton,
 }
 
 /// Visual state shared by components that do not expose an iced status directly.
@@ -188,7 +194,7 @@ impl ComponentState {
 
 impl Class {
     /// Number of semantic classes represented in style files.
-    pub const COUNT: usize = 68;
+    pub const COUNT: usize = 71;
 
     /// Stable index for style arrays.
     pub const fn index(self) -> usize {
@@ -261,6 +267,9 @@ impl Class {
             Self::FolderDropTarget => 65,
             Self::ContextMenuPanel => 66,
             Self::ContextMenuItem => 67,
+            Self::SelectionRestoreButton => 68,
+            Self::SelectionDangerButton => 69,
+            Self::SelectionDangerIconButton => 70,
         }
     }
 }
@@ -553,6 +562,9 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
         | Class::MenuButton
         | Class::MenuItem
         | Class::ContextMenuItem
+        | Class::SelectionRestoreButton
+        | Class::SelectionDangerButton
+        | Class::SelectionDangerIconButton
         | Class::SidebarRow
         | Class::ViewerSidebarTab
         | Class::ViewerOutlineEntry

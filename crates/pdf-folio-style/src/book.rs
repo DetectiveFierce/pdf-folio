@@ -697,6 +697,23 @@ impl RawStyleBook {
                         self.layout.selection_context_row_height =
                             value_as_f32(name, entry.value())?
                     }
+                    "row_spacing"
+                    | "row_padding_x"
+                    | "row_padding_y"
+                    | "folder_row_padding_y"
+                    | "dropdown_base_x"
+                    | "single_dropdown_extra_x"
+                    | "folders_dropdown_offset_x"
+                    | "metadata_dropdown_offset_x"
+                    | "maintenance_dropdown_offset_x"
+                    | "icon_size"
+                    | "icon_slot_size"
+                    | "tooltip_delay_ms" => self.apply_generic_app_layout_property(
+                        name,
+                        "SelectionToolbar",
+                        property,
+                        entry.value(),
+                    )?,
                     other => {
                         return Err(format!("{name}: unknown SelectionToolbar layout `{other}`"))
                     }
@@ -1398,6 +1415,9 @@ fn parse_class(value: &str) -> Option<Class> {
         "MenuItem" => Class::MenuItem,
         "ContextMenuPanel" => Class::ContextMenuPanel,
         "ContextMenuItem" => Class::ContextMenuItem,
+        "SelectionRestoreButton" => Class::SelectionRestoreButton,
+        "SelectionDangerButton" => Class::SelectionDangerButton,
+        "SelectionDangerIconButton" => Class::SelectionDangerIconButton,
         "ToolbarGroup" => Class::ToolbarGroup,
         "ToolbarButton" => Class::ToolbarButton,
         "Sidebar" => Class::Sidebar,

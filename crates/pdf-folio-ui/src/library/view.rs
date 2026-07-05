@@ -63,6 +63,20 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         .width(Length::Fill);
 
     let mut controls_row = row![]
+        .push(library_history_icon_button(
+            UNDO_SVG,
+            "Undo",
+            app.library.history.can_undo(),
+            Message::UndoLibraryAction,
+            tokens,
+        ))
+        .push(library_history_icon_button(
+            REDO_SVG,
+            "Redo",
+            app.library.history.can_redo(),
+            Message::RedoLibraryAction,
+            tokens,
+        ))
         .push(component_library_sort_picker(
             app.library.library_sort_mode,
             &LIBRARY_SORT_OPTIONS,
@@ -88,11 +102,13 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         controls_row =
             controls_row.push(toolbar_button("Viewer", tokens).on_press(Message::BackToViewer));
     }
-    controls_row = controls_row
-        .push(
+    if !app.library.trash_view_active {
+        controls_row = controls_row.push(
             library_new_folder_button(tokens, narrow_toolbar)
                 .on_press(Message::OpenCreateFolderDialog),
-        )
+        );
+    }
+    controls_row = controls_row
         .spacing(Spacing::MD)
         .align_y(iced::Alignment::Center)
         .width(if compact_toolbar {
@@ -144,7 +160,9 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
 
     if entries.is_empty() && child_folders.is_empty() {
         content = content.push(empty_state(
-            if app.library.selected_folder.is_some() {
+            if app.library.trash_view_active {
+                "Trash Can is empty."
+            } else if app.library.selected_folder.is_some() {
                 "This folder is empty."
             } else {
                 "Import a folder of PDFs to build your library."
@@ -402,10 +420,57 @@ pub(crate) fn library_new_folder_button<'a>(
     .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
 }
 
+pub(crate) fn library_history_icon_button<'a>(
+    icon: &'static [u8],
+    label: &'static str,
+    enabled: bool,
+    message: Message,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let color = if enabled {
+        tokens.text_secondary
+    } else {
+        with_alpha(tokens.text_secondary, 0.45)
+    };
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
+        .width(Length::Fixed(16.0))
+        .height(Length::Fixed(16.0))
+        .style(move |_, _| iced::widget::svg::Style { color: Some(color) });
+    let button = button(container(icon).center(Length::Fixed(20.0)))
+        .padding(Spacing::SM)
+        .width(Length::Fixed(32.0))
+        .height(Length::Fixed(32.0))
+        .style(move |_, status| button_style(tokens, Class::ToolbarButton, status));
+    let button = if enabled {
+        button.on_press(message)
+    } else {
+        button
+    };
+
+    tooltip(
+        button,
+        container(
+            text(label)
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary)
+                .wrapping(Wrapping::None),
+        )
+        .padding(Spacing::SM)
+        .style(move |_| container_style(tokens, Class::Tooltip)),
+        tooltip::Position::Bottom,
+    )
+    .delay(Duration::from_millis(400))
+    .into()
+}
+
 pub(crate) fn library_quick_filter_chips<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
+    if app.library.trash_view_active {
+        return container("").width(Length::Shrink).into();
+    }
     let mut chips = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
 
     let missing_active = app.library.missing_filter_active;

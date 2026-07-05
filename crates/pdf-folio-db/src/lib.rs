@@ -20,7 +20,8 @@ pub mod indexer;
 pub mod watcher;
 
 pub use db::{
-    Db, EntryId, Folder, FolderId, ImportSource, LibraryEntry, LibraryLayoutMode,
+    Db, EntryFolderMembership, EntryId, EntryTrashState, Folder, FolderId, ImportSource,
+    LibraryEntry, LibraryFolderSnapshot, LibraryLayoutMode, LibraryOrganizationSnapshot,
     LibraryPreferences, LibrarySortMode, NewLibraryEntry, RaindropCollectionMapping,
     RaindropEntryMapping,
 };

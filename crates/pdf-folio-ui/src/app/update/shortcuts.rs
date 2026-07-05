@@ -90,6 +90,13 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
             }
             Task::none()
         }
+        Shortcut::Cut => {
+            if app.mode == AppMode::Library {
+                Task::done(Message::CutLibrarySelection)
+            } else {
+                Task::none()
+            }
+        }
         Shortcut::Jump => {
             app.viewer.page_input_editing = false;
             app.viewer.jump_dialog_open = true;
@@ -99,6 +106,29 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
         Shortcut::Copy => {
             if app.mode == AppMode::Viewer {
                 app.copy_selected_viewer_text()
+            } else if app.mode == AppMode::Library {
+                Task::done(Message::CopyLibrarySelection)
+            } else {
+                Task::none()
+            }
+        }
+        Shortcut::Paste => {
+            if app.mode == AppMode::Library {
+                Task::done(Message::PasteLibraryClipboard)
+            } else {
+                Task::none()
+            }
+        }
+        Shortcut::Undo => {
+            if app.mode == AppMode::Library {
+                Task::done(Message::UndoLibraryAction)
+            } else {
+                Task::none()
+            }
+        }
+        Shortcut::Redo => {
+            if app.mode == AppMode::Library {
+                Task::done(Message::RedoLibraryAction)
             } else {
                 Task::none()
             }

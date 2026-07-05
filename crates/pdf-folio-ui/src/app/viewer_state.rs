@@ -81,6 +81,7 @@ impl PDFolioApp {
                 viewer_viewport_width: 732.0,
                 document_error: None,
                 pending_document_open: false,
+                document_open_started_at: None,
                 dismissed_document_errors: HashSet::new(),
                 cache: TileCache::with_default_capacity(),
                 page_scroll_page: 0,
@@ -124,7 +125,10 @@ impl PDFolioApp {
                     &preferences.visible_metadata_fields,
                 ),
                 library_entries: Vec::new(),
+                library_trash_entries: Vec::new(),
                 library_folders: Vec::new(),
+                library_trash_folders: Vec::new(),
+                trash_view_active: false,
                 library_sort_mode: preferences.sort_mode,
                 selected_folder: preferences.selected_folder,
                 details_folder_id: None,
@@ -170,6 +174,7 @@ impl PDFolioApp {
                 library_status: None,
                 library_error: None,
                 library_startup_loading: true,
+                library_history_restore_started_at: None,
                 raindrop_connect_dialog_open: false,
                 raindrop_callback_copied: false,
                 raindrop_client_id_input: String::new(),
@@ -199,6 +204,8 @@ impl PDFolioApp {
                 library_drag: None,
                 folder_drag: None,
                 move_picker: None,
+                clipboard: None,
+                history: LibraryHistory::default(),
             },
             libraries,
             chrome: ChromeRuntime {
@@ -252,6 +259,7 @@ impl PDFolioApp {
         app.pending_session_restore = None;
         app.viewer.document_error = Some(format!("Opening {}...", path.display()));
         app.viewer.pending_document_open = true;
+        app.viewer.document_open_started_at = Some(Instant::now());
 
         Ok(app)
     }
@@ -300,6 +308,7 @@ impl PDFolioApp {
         self.viewer.viewer_copy_pending = false;
         self.viewer.viewer_find = ViewerFindState::default();
         self.viewer.pending_document_open = false;
+        self.viewer.document_open_started_at = None;
         self.viewer.document_error = None;
         self.viewer.jump_dialog_open = false;
         self.viewer.page_input_editing = false;

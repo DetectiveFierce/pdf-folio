@@ -17,11 +17,10 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
             modifiers,
             ..
         }) => {
-            if status == event::Status::Captured
-                && !is_ctrl_character(&key, text.as_deref(), modifiers, "f")
-                && !is_ctrl_character(&key, text.as_deref(), modifiers, "c")
-                && !is_escape(&key)
-            {
+            let captured_global_shortcut = is_ctrl_character(&key, text.as_deref(), modifiers, "f")
+                || is_ctrl_character(&key, text.as_deref(), modifiers, "c")
+                || is_escape(&key);
+            if status == event::Status::Captured && !captured_global_shortcut {
                 return None;
             }
 
@@ -37,6 +36,38 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
                 }
                 (key, text) if is_ctrl_character(key, text, modifiers, "c") => {
                     Some(Message::ShortcutPressed(Shortcut::Copy))
+                }
+                (key, text)
+                    if status != event::Status::Captured
+                        && is_ctrl_character(key, text, modifiers, "x") =>
+                {
+                    Some(Message::ShortcutPressed(Shortcut::Cut))
+                }
+                (key, text)
+                    if status != event::Status::Captured
+                        && is_ctrl_character(key, text, modifiers, "v") =>
+                {
+                    Some(Message::ShortcutPressed(Shortcut::Paste))
+                }
+                (key, text)
+                    if status != event::Status::Captured
+                        && modifiers.control()
+                        && modifiers.shift()
+                        && is_ctrl_character(key, text, modifiers, "z") =>
+                {
+                    Some(Message::ShortcutPressed(Shortcut::Redo))
+                }
+                (key, text)
+                    if status != event::Status::Captured
+                        && is_ctrl_character(key, text, modifiers, "z") =>
+                {
+                    Some(Message::ShortcutPressed(Shortcut::Undo))
+                }
+                (key, text)
+                    if status != event::Status::Captured
+                        && is_ctrl_character(key, text, modifiers, "y") =>
+                {
+                    Some(Message::ShortcutPressed(Shortcut::Redo))
                 }
                 (key, text) if is_ctrl_character(key, text, modifiers, "f") => {
                     Some(Message::ShortcutPressed(Shortcut::FocusSearch))
