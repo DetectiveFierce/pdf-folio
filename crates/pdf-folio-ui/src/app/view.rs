@@ -84,6 +84,7 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
             main = main.push(dismissible_error_banner(
                 error,
                 tokens,
+                app.layout(),
                 Message::DismissDocumentError,
             ));
         }
@@ -104,6 +105,7 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
             library_shell = library_shell.push(dismissible_error_banner(
                 error,
                 tokens,
+                app.layout(),
                 Message::DismissDocumentError,
             ));
         }
@@ -220,49 +222,24 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     }
 }
 
-const LIBRARY_SWITCHER_CARD_WIDTH: f32 = 230.0;
-const LIBRARY_SWITCHER_CARD_HEIGHT: f32 = 362.0;
-const LIBRARY_CARD_OVERLAY_GUTTER: f32 = 72.0;
-const LIBRARY_CARD_TOP_SPACER: f32 = 12.0;
-const LIBRARY_CARD_MENU_X: f32 = 7.0;
-const LIBRARY_CARD_MENU_Y: f32 = 2.0;
-const LIBRARY_CARD_MENU_OFFSET: f32 = 6.0;
-const LIBRARY_CARD_MENU_DOWN_SHIFT: f32 = 4.0;
-const LIBRARY_CARD_TITLE_HEIGHT: f32 = 38.0;
-const LIBRARY_PREVIEW_COLUMNS: usize = 4;
-const LIBRARY_PREVIEW_ROWS: usize = 3;
-const LIBRARY_PREVIEW_HEIGHT: f32 = 280.0;
-const LIBRARY_PREVIEW_TILE_WIDTH: f32 = 48.0;
-const LIBRARY_PREVIEW_TILE_HEIGHT: f32 = 77.0;
-const LIBRARY_PREVIEW_ROW_HEIGHT: f32 = LIBRARY_PREVIEW_TILE_HEIGHT;
-const LIBRARY_PREVIEW_ROW_OFFSET: f32 = 5.0;
-const LIBRARY_PREVIEW_ELLIPSIS_ROW_HEIGHT: f32 = 25.0;
-const LIBRARY_PREVIEW_COLUMN_GAP: f32 = 5.0;
-const LIBRARY_PREVIEW_GRID_WIDTH: f32 = LIBRARY_PREVIEW_TILE_WIDTH * 4.0
-    + LIBRARY_PREVIEW_COLUMN_GAP * (LIBRARY_PREVIEW_COLUMNS as f32 - 1.0);
-const LIBRARY_PREVIEW_PANEL_PADDING: f32 = 4.0;
-const LIBRARY_PREVIEW_IMAGE_WIDTH: f32 = 38.0;
-const LIBRARY_PREVIEW_IMAGE_SLOT_HEIGHT: f32 = 49.0;
-const LIBRARY_PREVIEW_IMAGE_MIN_HEIGHT: f32 = 28.0;
-const LIBRARY_PREVIEW_TITLE_FONT_SIZE: u32 = 8;
-const LIBRARY_PREVIEW_TITLE_HEIGHT: f32 = 22.0;
-const LIBRARY_PREVIEW_TITLE_LINES: usize = 3;
-
 fn view_library_switcher(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let card_width = app.layout().metric("LibrarySwitcher", "card_width", 230.0);
+    let card_height = app.layout().metric("LibrarySwitcher", "card_height", 362.0);
     let mut cards = Vec::new();
     for profile in &app.libraries.profiles {
         cards.push(library_profile_card(
             app,
             profile,
             tokens,
-            LIBRARY_SWITCHER_CARD_WIDTH,
-            LIBRARY_SWITCHER_CARD_HEIGHT,
+            card_width,
+            card_height,
         ));
     }
     cards.push(new_library_card(
+        app.layout(),
         tokens,
-        LIBRARY_SWITCHER_CARD_WIDTH,
-        LIBRARY_SWITCHER_CARD_HEIGHT,
+        card_width,
+        card_height,
     ));
 
     let mut grid = column![]
@@ -282,7 +259,7 @@ fn view_library_switcher(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, M
 
     let content = column![
         text("Choose a Library")
-            .size(34)
+            .size(app.layout().metric("LibrarySwitcher", "heading_size", 34.0) as u32)
             .font(display_font(FontWeight::MEDIUM))
             .color(tokens.text_primary),
         text("Keep separate PDF collections, reading state, folders, and imports.")
@@ -320,11 +297,16 @@ fn library_profile_card<'a>(
     let preview = app.libraries.previews.get(&profile.id);
     let total_entries = preview.map_or(0, |preview| preview.total_entries);
     let content_width = width - Spacing::MD * 2.0;
-    let title_size = 18;
+    let title_size = app
+        .layout()
+        .metric("LibrarySwitcher", "card_title_size", 18.0) as u32;
 
     let body = column![
-        container("").height(LIBRARY_CARD_TOP_SPACER),
-        library_preview_panel(preview, tokens),
+        container("").height(
+            app.layout()
+                .metric("LibrarySwitcher", "card_top_spacer", 12.0)
+        ),
+        library_preview_panel(app.layout(), preview, tokens),
         container("").height(Spacing::XS),
         container(
             column![
@@ -349,11 +331,17 @@ fn library_profile_card<'a>(
                     })
                     .width(Length::Fill),
             ]
-            .spacing(2.0)
+            .spacing(
+                app.layout()
+                    .metric("LibrarySwitcher", "card_title_spacing", 2.0)
+            )
             .width(Length::Fill),
         )
         .width(Length::Fill)
-        .height(LIBRARY_CARD_TITLE_HEIGHT)
+        .height(
+            app.layout()
+                .metric("LibrarySwitcher", "card_title_height", 38.0),
+        )
         .align_y(iced::alignment::Vertical::Center),
     ]
     .spacing(0)
@@ -367,42 +355,55 @@ fn library_profile_card<'a>(
             .style(move |_| {
                 let mut style = container_style(tokens, Class::LibraryCard);
                 if active {
-                    style.border.color = tokens.accent;
-                    style.border.width = 1.5;
+                    let selected_style = tokens.class_styles[Class::LibraryCard.index()]
+                        .resolve(ComponentState::Selected);
+                    style = style.with_visual_override(selected_style);
                 }
                 style
             }),
     )
     .on_press(open_message);
 
-    let mut layered = stack![pin(card).y(LIBRARY_CARD_OVERLAY_GUTTER)]
+    let overlay_gutter = app
+        .layout()
+        .metric("LibrarySwitcher", "card_overlay_gutter", 72.0);
+    let menu_x = app.layout().metric("LibrarySwitcherMenu", "x", 7.0);
+    let menu_y = app.layout().metric("LibrarySwitcherMenu", "y", 2.0);
+    let menu_offset = app.layout().metric("LibrarySwitcherMenu", "offset", 6.0);
+    let menu_down_shift = app
+        .layout()
+        .metric("LibrarySwitcherMenu", "down_shift", 4.0);
+
+    let mut layered = stack![pin(card).y(overlay_gutter)]
         .width(width)
-        .height(height + LIBRARY_CARD_OVERLAY_GUTTER);
+        .height(height + overlay_gutter);
 
     layered = layered.push(
-        pin(library_card_menu_button(profile, tokens))
-            .x(LIBRARY_CARD_MENU_X)
-            .y(LIBRARY_CARD_OVERLAY_GUTTER + LIBRARY_CARD_MENU_Y),
+        pin(library_card_menu_button(app.layout(), profile, tokens))
+            .x(menu_x)
+            .y(overlay_gutter + menu_y),
     );
     if app.libraries.open_menu_library_id.as_ref() == Some(&profile.id) {
         let menu_height = library_card_overflow_menu_height(app);
         layered = layered.push(
             pin(library_card_overflow_menu(app, profile, tokens))
-                .x(LIBRARY_CARD_MENU_X - LIBRARY_CARD_MENU_OFFSET)
-                .y(LIBRARY_CARD_OVERLAY_GUTTER + LIBRARY_CARD_MENU_Y
-                    - menu_height
-                    - LIBRARY_CARD_MENU_OFFSET
-                    + LIBRARY_CARD_MENU_DOWN_SHIFT),
+                .x(menu_x - menu_offset)
+                .y(overlay_gutter + menu_y - menu_height - menu_offset + menu_down_shift),
         );
     }
 
     layered.into()
 }
 
-fn new_library_card(tokens: ThemeTokens, width: f32, height: f32) -> Element<'static, Message> {
+fn new_library_card(
+    layout: &crate::style::AppLayoutTokens,
+    tokens: ThemeTokens,
+    width: f32,
+    height: f32,
+) -> Element<'static, Message> {
     let create_action = column![
         text("+")
-            .size(48)
+            .size(layout.metric("LibrarySwitcher", "create_icon_size", 48.0) as u32)
             .font(ui_font(FontWeight::REGULAR))
             .wrapping(Wrapping::None),
         text("Create New Library")
@@ -414,7 +415,10 @@ fn new_library_card(tokens: ThemeTokens, width: f32, height: f32) -> Element<'st
     .align_x(iced::Alignment::Center);
 
     let body = column![
-        container("").height(LIBRARY_CARD_TOP_SPACER + 12.0),
+        container("").height(
+            layout.metric("LibrarySwitcher", "card_top_spacer", 12.0)
+                + layout.metric("LibrarySwitcher", "create_top_extra", 12.0),
+        ),
         container(create_action)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -433,29 +437,19 @@ fn new_library_card(tokens: ThemeTokens, width: f32, height: f32) -> Element<'st
             let mut style = button_style(tokens, Class::LibraryCard, status);
             match status {
                 button::Status::Active => {
-                    style.background = Some(iced::Background::Color(with_alpha(
-                        tokens.surface_raised,
-                        0.42,
-                    )));
-                    style.text_color = with_alpha(tokens.text_primary, 0.58);
-                    style.border.color = with_alpha(tokens.text_secondary, 0.34);
-                    style.border.width = 1.0;
+                    let inactive_style = tokens.class_styles[Class::LibraryCard.index()]
+                        .resolve(ComponentState::Disabled);
+                    style = style.with_visual_override(inactive_style);
                 }
                 button::Status::Hovered => {
-                    style.background = Some(iced::Background::Color(tokens.surface_raised));
-                    style.text_color = tokens.text_primary;
-                    style.border.color = tokens.accent;
-                    style.border.width = 1.5;
+                    let hovered_style = tokens.class_styles[Class::LibraryCard.index()]
+                        .resolve(ComponentState::Hovered);
+                    style = style.with_visual_override(hovered_style);
                 }
                 button::Status::Pressed => {
-                    style.background = Some(iced::Background::Color(mix_color(
-                        tokens.surface_raised,
-                        tokens.accent,
-                        0.16,
-                    )));
-                    style.text_color = tokens.text_primary;
-                    style.border.color = tokens.accent;
-                    style.border.width = 1.5;
+                    let pressed_style = tokens.class_styles[Class::LibraryCard.index()]
+                        .resolve(ComponentState::Pressed);
+                    style = style.with_visual_override(pressed_style);
                 }
                 button::Status::Disabled => {}
             }
@@ -463,74 +457,69 @@ fn new_library_card(tokens: ThemeTokens, width: f32, height: f32) -> Element<'st
         })
         .on_press(Message::OpenCreateLibraryDialog);
 
-    stack![pin(card).y(LIBRARY_CARD_OVERLAY_GUTTER)]
+    let overlay_gutter = layout.metric("LibrarySwitcher", "card_overlay_gutter", 72.0);
+    stack![pin(card).y(overlay_gutter)]
         .width(width)
-        .height(height + LIBRARY_CARD_OVERLAY_GUTTER)
+        .height(height + overlay_gutter)
         .into()
 }
 
 fn library_preview_panel<'a>(
+    layout: &crate::style::AppLayoutTokens,
     preview: Option<&'a crate::app_libraries::LibraryPreview>,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     let Some(preview) = preview else {
-        return library_empty_preview_panel(tokens);
+        return library_empty_preview_panel(layout, tokens);
     };
     if preview.thumbnails.is_empty() {
-        return library_empty_preview_panel(tokens);
+        return library_empty_preview_panel(layout, tokens);
     }
+
+    let columns = layout.count("LibrarySwitcherPreview", "columns", 4);
+    let rows = layout.count("LibrarySwitcherPreview", "rows", 3);
+    let tile_width = layout.metric("LibrarySwitcherPreview", "tile_width", 48.0);
+    let tile_height = layout.metric("LibrarySwitcherPreview", "tile_height", 77.0);
+    let row_height = layout.metric("LibrarySwitcherPreview", "row_height", tile_height);
+    let row_offset = layout.metric("LibrarySwitcherPreview", "row_offset", 5.0);
+    let column_gap = layout.metric("LibrarySwitcherPreview", "column_gap", 5.0);
+    let grid_width = tile_width * columns as f32 + column_gap * (columns as f32 - 1.0);
+    let ellipsis_row_height = layout.metric("LibrarySwitcherPreview", "ellipsis_row_height", 25.0);
 
     let mut grid = column![].spacing(0).align_x(iced::Alignment::Center);
     let mut rendered_rows = 0;
-    for (row_index, chunk) in preview
-        .thumbnails
-        .chunks(LIBRARY_PREVIEW_COLUMNS)
-        .take(LIBRARY_PREVIEW_ROWS)
-        .enumerate()
-    {
+    for (row_index, chunk) in preview.thumbnails.chunks(columns).take(rows).enumerate() {
         if row_index > 0 {
-            grid = grid.push(container("").height(LIBRARY_PREVIEW_ROW_OFFSET));
+            grid = grid.push(container("").height(row_offset));
         }
-        let mut row = row![]
-            .spacing(LIBRARY_PREVIEW_COLUMN_GAP)
-            .align_y(iced::Alignment::Center);
+        let mut row = row![].spacing(column_gap).align_y(iced::Alignment::Center);
         for thumbnail in chunk {
-            row = row.push(library_preview_pdf_tile(thumbnail, tokens));
+            row = row.push(library_preview_pdf_tile(layout, thumbnail, tokens));
         }
-        for _ in chunk.len()..LIBRARY_PREVIEW_COLUMNS {
-            row = row.push(
-                container("")
-                    .width(LIBRARY_PREVIEW_TILE_WIDTH)
-                    .height(LIBRARY_PREVIEW_TILE_HEIGHT),
-            );
+        for _ in chunk.len()..columns {
+            row = row.push(container("").width(tile_width).height(tile_height));
         }
         grid = grid.push(
-            container(row.width(Length::Fixed(LIBRARY_PREVIEW_GRID_WIDTH)))
+            container(row.width(Length::Fixed(grid_width)))
                 .width(Length::Fill)
-                .height(LIBRARY_PREVIEW_ROW_HEIGHT)
+                .height(row_height)
                 .center_x(Length::Fill)
                 .center_y(Length::Fill),
         );
         rendered_rows += 1;
     }
-    for _ in rendered_rows..LIBRARY_PREVIEW_ROWS {
-        grid = grid.push(
-            container("")
-                .width(Length::Fill)
-                .height(LIBRARY_PREVIEW_ROW_HEIGHT),
-        );
+    for _ in rendered_rows..rows {
+        grid = grid.push(container("").width(Length::Fill).height(row_height));
     }
     if preview.total_entries > preview.thumbnails.len() {
-        let mut row = row![]
-            .spacing(LIBRARY_PREVIEW_COLUMN_GAP)
-            .align_y(iced::Alignment::Center);
-        for _ in 0..LIBRARY_PREVIEW_COLUMNS {
-            row = row.push(library_preview_column_ellipsis(tokens));
+        let mut row = row![].spacing(column_gap).align_y(iced::Alignment::Center);
+        for _ in 0..columns {
+            row = row.push(library_preview_column_ellipsis(layout, tokens));
         }
         grid = grid.push(
-            container(row.width(Length::Fixed(LIBRARY_PREVIEW_GRID_WIDTH)))
+            container(row.width(Length::Fixed(grid_width)))
                 .width(Length::Fill)
-                .height(LIBRARY_PREVIEW_ELLIPSIS_ROW_HEIGHT)
+                .height(ellipsis_row_height)
                 .center_x(Length::Fill)
                 .align_y(iced::alignment::Vertical::Top),
         );
@@ -538,15 +527,18 @@ fn library_preview_panel<'a>(
 
     container(grid)
         .width(Length::Fill)
-        .height(LIBRARY_PREVIEW_HEIGHT)
-        .padding(LIBRARY_PREVIEW_PANEL_PADDING)
+        .height(layout.metric("LibrarySwitcherPreview", "height", 280.0))
+        .padding(layout.metric("LibrarySwitcherPreview", "panel_padding", 4.0))
         .center_x(Length::Fill)
         .align_y(iced::alignment::Vertical::Top)
         .style(move |_| container_style(tokens, Class::SidebarDetailRow))
         .into()
 }
 
-fn library_empty_preview_panel(tokens: ThemeTokens) -> Element<'static, Message> {
+fn library_empty_preview_panel(
+    layout: &crate::style::AppLayoutTokens,
+    tokens: ThemeTokens,
+) -> Element<'static, Message> {
     container(
         text("No PDFs")
             .size(FontSize::SM)
@@ -554,7 +546,7 @@ fn library_empty_preview_panel(tokens: ThemeTokens) -> Element<'static, Message>
             .color(tokens.text_secondary),
     )
     .width(Length::Fill)
-    .height(LIBRARY_PREVIEW_HEIGHT)
+    .height(layout.metric("LibrarySwitcherPreview", "height", 280.0))
     .center_x(Length::Fill)
     .center_y(Length::Fill)
     .style(move |_| container_style(tokens, Class::SidebarDetailRow))
@@ -562,15 +554,22 @@ fn library_empty_preview_panel(tokens: ThemeTokens) -> Element<'static, Message>
 }
 
 fn library_preview_pdf_tile<'a>(
+    layout: &crate::style::AppLayoutTokens,
     thumbnail: &'a crate::app_libraries::LibraryPreviewThumbnail,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let image_width = LIBRARY_PREVIEW_IMAGE_WIDTH;
-    let image_height =
-        (image_width * f32::from(thumbnail.height) / f32::from(thumbnail.width.max(1))).clamp(
-            LIBRARY_PREVIEW_IMAGE_MIN_HEIGHT,
-            LIBRARY_PREVIEW_IMAGE_SLOT_HEIGHT,
-        );
+    let tile_width = layout.metric("LibrarySwitcherPreview", "tile_width", 48.0);
+    let tile_height = layout.metric("LibrarySwitcherPreview", "tile_height", 77.0);
+    let image_width = layout.metric("LibrarySwitcherPreview", "image_width", 38.0);
+    let image_slot_height = layout.metric("LibrarySwitcherPreview", "image_slot_height", 49.0);
+    let image_min_height = layout.metric("LibrarySwitcherPreview", "image_min_height", 28.0);
+    let title_font_size = layout.metric("LibrarySwitcherPreview", "title_font_size", 8.0) as u32;
+    let title_height = layout.metric("LibrarySwitcherPreview", "title_height", 22.0);
+    let title_lines = layout.count("LibrarySwitcherPreview", "title_lines", 3);
+    let title_width = tile_width - layout.metric("LibrarySwitcherPreview", "title_inset", 4.0);
+    let image_height = (image_width * f32::from(thumbnail.height)
+        / f32::from(thumbnail.width.max(1)))
+    .clamp(image_min_height, image_slot_height);
     container(
         column![
             container(
@@ -579,30 +578,30 @@ fn library_preview_pdf_tile<'a>(
                     .height(image_height)
                     .content_fit(ContentFit::Contain),
             )
-            .width(LIBRARY_PREVIEW_TILE_WIDTH)
-            .height(LIBRARY_PREVIEW_IMAGE_SLOT_HEIGHT)
+            .width(tile_width)
+            .height(image_slot_height)
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .clip(true),
             text(wrap_preview_title(
                 &thumbnail.title,
-                LIBRARY_PREVIEW_TILE_WIDTH - 4.0,
-                LIBRARY_PREVIEW_TITLE_FONT_SIZE,
-                LIBRARY_PREVIEW_TITLE_LINES,
+                title_width,
+                title_font_size,
+                title_lines,
             ))
-            .size(LIBRARY_PREVIEW_TITLE_FONT_SIZE)
+            .size(title_font_size)
             .line_height(1.04)
             .font(ui_font(FontWeight::MEDIUM))
             .color(tokens.text_secondary)
             .wrapping(Wrapping::WordOrGlyph)
-            .width(LIBRARY_PREVIEW_TILE_WIDTH - 4.0)
-            .height(LIBRARY_PREVIEW_TITLE_HEIGHT),
+            .width(title_width)
+            .height(title_height),
         ]
-        .spacing(2.0),
+        .spacing(layout.metric("LibrarySwitcherPreview", "tile_spacing", 2.0)),
     )
-    .width(LIBRARY_PREVIEW_TILE_WIDTH)
-    .height(LIBRARY_PREVIEW_TILE_HEIGHT)
-    .padding(2.0)
+    .width(tile_width)
+    .height(tile_height)
+    .padding(layout.metric("LibrarySwitcherPreview", "tile_padding", 2.0))
     .into()
 }
 
@@ -652,33 +651,38 @@ fn wrap_preview_title(label: &str, width: f32, font_size: u32, max_lines: usize)
     lines.join("\n")
 }
 
-fn library_preview_column_ellipsis(tokens: ThemeTokens) -> Element<'static, Message> {
+fn library_preview_column_ellipsis(
+    layout: &crate::style::AppLayoutTokens,
+    tokens: ThemeTokens,
+) -> Element<'static, Message> {
+    let tile_width = layout.metric("LibrarySwitcherPreview", "tile_width", 48.0);
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(
         OVERFLOW_VERTICAL_SVG,
     ))
-    .width(6.0)
-    .height(34.0)
+    .width(layout.metric("LibrarySwitcherPreview", "ellipsis_icon_width", 6.0))
+    .height(layout.metric("LibrarySwitcherPreview", "ellipsis_icon_height", 34.0))
     .style(move |_, _| iced::widget::svg::Style {
         color: Some(with_alpha(tokens.text_secondary, 0.92)),
     });
 
     container(icon)
-        .width(LIBRARY_PREVIEW_TILE_WIDTH)
-        .height(LIBRARY_PREVIEW_ELLIPSIS_ROW_HEIGHT)
+        .width(tile_width)
+        .height(layout.metric("LibrarySwitcherPreview", "ellipsis_row_height", 25.0))
         .center_x(Length::Fill)
         .align_y(iced::alignment::Vertical::Top)
         .into()
 }
 
 fn library_card_menu_button<'a>(
+    layout: &crate::style::AppLayoutTokens,
     profile: &'a LibraryProfile,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(
         OVERFLOW_HORIZONTAL_SVG,
     ))
-    .width(18.0)
-    .height(6.0)
+    .width(layout.metric("LibrarySwitcherMenu", "icon_width", 18.0))
+    .height(layout.metric("LibrarySwitcherMenu", "icon_height", 6.0))
     .style(move |_, _| iced::widget::svg::Style {
         color: Some(tokens.text_secondary),
     });
@@ -689,24 +693,10 @@ fn library_card_menu_button<'a>(
             .height(Length::Fill)
             .center(Length::Fill),
     )
-    .width(28.0)
-    .height(22.0)
-    .padding(0)
-    .style(move |_, status| {
-        let mut style = button_style(tokens, Class::SidebarToggleButton, status);
-        if matches!(status, button::Status::Active) {
-            style.background = None;
-            style.border.width = 0.0;
-        } else {
-            style.border.width = 0.0;
-            style.background = Some(iced::Background::Color(with_alpha(
-                tokens.surface_raised,
-                0.72,
-            )));
-        }
-        style.shadow = iced::Shadow::default();
-        style
-    })
+    .width(layout.metric("LibrarySwitcherMenu", "button_width", 28.0))
+    .height(layout.metric("LibrarySwitcherMenu", "button_height", 22.0))
+    .padding(layout.metric("LibrarySwitcherMenu", "button_padding", 0.0))
+    .style(move |_, status| button_style(tokens, Class::SidebarToggleButton, status))
     .on_press(Message::ToggleLibraryCardMenu(profile.id.clone()))
     .into()
 }
@@ -737,8 +727,12 @@ fn library_card_overflow_menu<'a>(
     .spacing(0);
 
     container(menu)
-        .width(118.0)
-        .padding(Spacing::XS)
+        .width(app.layout().metric("LibrarySwitcherMenu", "width", 118.0))
+        .padding(
+            tokens.class_styles[Class::MenuPanel.index()]
+                .layout
+                .padding_x(Spacing::XS),
+        )
         .style(move |_| container_style(tokens, Class::MenuPanel))
         .into()
 }
@@ -821,7 +815,7 @@ fn view_library_name_dialog(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_
 
     container(
         container(dialog)
-            .width(360.0)
+            .width(app.layout().metric("LibraryNameDialog", "width", 360.0))
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)
@@ -855,36 +849,52 @@ fn view_viewer_find_bar(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> El
         )
         .id(Id::new(VIEWER_FIND_INPUT_ID))
         .on_submit(Message::ViewerFindNext)
-        .width(Length::Fixed(140.0)),
+        .width(Length::Fixed(app.layout().metric(
+            "ViewerFindBar",
+            "input_width",
+            140.0
+        ),)),
         text(fraction)
             .size(FontSize::SM)
             .font(ui_font(FontWeight::MEDIUM))
             .color(tokens.text_secondary)
             .wrapping(Wrapping::None)
-            .width(Length::Fixed(44.0)),
-        viewer_find_icon_button(CHEVRON_UP_SVG, "Previous match", tokens)
+            .width(Length::Fixed(app.layout().metric(
+                "ViewerFindBar",
+                "counter_width",
+                44.0
+            ),)),
+        viewer_find_icon_button(app.layout(), CHEVRON_UP_SVG, "Previous match", tokens)
             .on_press(Message::ViewerFindPrevious),
-        viewer_find_icon_button(CHEVRON_DOWN_SVG, "Next match", tokens)
+        viewer_find_icon_button(app.layout(), CHEVRON_DOWN_SVG, "Next match", tokens)
             .on_press(Message::ViewerFindNext),
         checkbox(app.viewer.viewer_find.highlight_all)
             .label("Highlight All")
             .on_toggle(Message::ViewerFindHighlightAllToggled)
-            .size(16.0)
+            .size(app.layout().metric("ViewerFindBar", "checkbox_size", 16.0))
             .text_size(FontSize::SM),
         checkbox(app.viewer.viewer_find.match_case)
             .label("Match Case")
             .on_toggle(Message::ViewerFindMatchCaseToggled)
-            .size(16.0)
+            .size(app.layout().metric("ViewerFindBar", "checkbox_size", 16.0))
             .text_size(FontSize::SM),
         checkbox(app.viewer.viewer_find.match_diacritics)
             .label("Match Diacritics")
             .on_toggle(Message::ViewerFindMatchDiacriticsToggled)
-            .size(16.0)
+            .size(app.layout().metric("ViewerFindBar", "checkbox_size", 16.0))
             .text_size(FontSize::SM),
         icon_button("x", tokens)
             .on_press(Message::CloseViewerFind)
-            .width(Length::Fixed(30.0))
-            .height(Length::Fixed(30.0)),
+            .width(Length::Fixed(app.layout().metric(
+                "ViewerFindBar",
+                "button_size",
+                30.0
+            ),))
+            .height(Length::Fixed(app.layout().metric(
+                "ViewerFindBar",
+                "button_size",
+                30.0
+            ),)),
     ]
     .spacing(Spacing::XS)
     .padding([Spacing::XS, Spacing::SM])
@@ -894,26 +904,12 @@ fn view_viewer_find_bar(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> El
     container(content)
         .width(Length::Fixed(width))
         .height(Length::Fixed(app.layout().viewer_find_bar_height))
-        .style(move |_| {
-            let mut style = container_style(tokens, Class::ViewerFindBar);
-            let top_left = style.border.radius.top_left;
-            style.border.radius = iced::border::Radius {
-                top_left,
-                top_right: 0.0,
-                bottom_right: 0.0,
-                bottom_left: 0.0,
-            };
-            style.shadow = iced::Shadow {
-                color: tokens.shadow,
-                offset: iced::Vector::new(0.0, 8.0),
-                blur_radius: 18.0,
-            };
-            style
-        })
+        .style(move |_| container_style(tokens, Class::ViewerFindBar))
         .into()
 }
 
 fn viewer_find_icon_button<'a>(
+    layout: &crate::style::AppLayoutTokens,
     icon: &'static [u8],
     label: &'static str,
     tokens: ThemeTokens,
@@ -922,8 +918,8 @@ fn viewer_find_icon_button<'a>(
         tooltip(
             container(
                 Svg::new(iced::widget::svg::Handle::from_memory(icon))
-                    .width(16.0)
-                    .height(16.0)
+                    .width(layout.metric("ViewerFindBar", "icon_size", 16.0))
+                    .height(layout.metric("ViewerFindBar", "icon_size", 16.0))
                     .style(move |_, _| iced::widget::svg::Style {
                         color: Some(tokens.text_primary),
                     }),
@@ -934,9 +930,17 @@ fn viewer_find_icon_button<'a>(
         )
         .style(move |_| container_style(tokens, Class::Tooltip)),
     )
-    .width(Length::Fixed(30.0))
-    .height(Length::Fixed(30.0))
-    .padding(0)
+    .width(Length::Fixed(layout.metric(
+        "ViewerFindBar",
+        "button_size",
+        30.0,
+    )))
+    .height(Length::Fixed(layout.metric(
+        "ViewerFindBar",
+        "button_size",
+        30.0,
+    )))
+    .padding(layout.metric("ViewerFindBar", "button_padding", 0.0))
     .style(move |_, status| crate::style::button_style(tokens, Class::ViewerFindButton, status))
 }
 
@@ -966,7 +970,7 @@ fn startup_library_loading_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Eleme
                 .spacing(Spacing::MD)
                 .padding(Spacing::LG),
             )
-            .width(460.0)
+            .width(app.layout().metric("StartupLoadingDialog", "width", 460.0))
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
         )
         .width(Length::Fill)
@@ -981,6 +985,7 @@ fn startup_library_loading_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Eleme
 pub(crate) fn dismissible_error_banner<'a>(
     message: &'a str,
     tokens: ThemeTokens,
+    layout: &crate::style::AppLayoutTokens,
     dismiss_message: Message,
 ) -> Element<'a, Message> {
     container(
@@ -991,7 +996,11 @@ pub(crate) fn dismissible_error_banner<'a>(
                 .width(Length::Fill),
             icon_button("x", tokens)
                 .on_press(dismiss_message)
-                .width(Length::Fixed(32.0)),
+                .width(Length::Fixed(layout.metric(
+                    "ErrorBannerAction",
+                    "action_width",
+                    32.0
+                ))),
         ]
         .spacing(Spacing::MD)
         .align_y(iced::Alignment::Center),
@@ -1024,7 +1033,7 @@ fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
     let title_width = viewer_toolbar_title_width(app);
 
     let mut toolbar = row![
-        viewer_library_back_button().on_press(Message::BackToLibrary),
+        viewer_library_back_button(app.layout(), tokens).on_press(Message::BackToLibrary),
         toolbar_button("Open PDF", tokens).on_press(Message::OpenFileDialog),
         viewer_toolbar_title(document_title, title_width, tokens),
         viewer_page_control(app, current_page, page_count, tokens),
@@ -1064,17 +1073,15 @@ fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
         .into()
 }
 
-fn viewer_library_back_button<'a>() -> iced::widget::Button<'a, Message> {
-    let brown = Color::from_rgb8(185, 156, 120);
-    let bright_brown = Color::from_rgb8(212, 168, 83);
+fn viewer_library_back_button<'a>(
+    layout: &crate::style::AppLayoutTokens,
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(CHEVRON_LEFT_SVG))
-        .width(16.0)
-        .height(16.0)
-        .style(move |_, status| iced::widget::svg::Style {
-            color: Some(match status {
-                iced::widget::svg::Status::Hovered => bright_brown,
-                _ => brown,
-            }),
+        .width(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
+        .height(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
+        .style(move |_, _| iced::widget::svg::Style {
+            color: Some(tokens.text_secondary),
         });
     let label = text("Library")
         .size(FontSize::MD)
@@ -1087,31 +1094,7 @@ fn viewer_library_back_button<'a>() -> iced::widget::Button<'a, Message> {
             .align_y(iced::Alignment::Center),
     )
     .padding([Spacing::SM, Spacing::LG])
-    .style(move |_, status| transparent_brown_toolbar_button_style(brown, bright_brown, status))
-}
-
-fn transparent_brown_toolbar_button_style(
-    brown: Color,
-    bright_brown: Color,
-    status: iced::widget::button::Status,
-) -> iced::widget::button::Style {
-    let text_color = match status {
-        iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed => {
-            bright_brown
-        }
-        _ => brown,
-    };
-
-    iced::widget::button::Style {
-        background: None,
-        text_color,
-        border: iced::Border {
-            width: 0.0,
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
-            radius: iced::border::Radius::from(4.0),
-        },
-        ..iced::widget::button::Style::default()
-    }
+    .style(move |_, status| crate::style::button_style(tokens, Class::ViewerToolbarButton, status))
 }
 
 fn viewer_page_control<'a>(
@@ -1149,7 +1132,7 @@ fn viewer_page_control<'a>(
     };
 
     row![
-        viewer_page_chevron_button(CHEVRON_LEFT_SVG, tokens)
+        viewer_page_chevron_button(app.layout(), CHEVRON_LEFT_SVG, tokens)
             .on_press(Message::PreviousPage)
             .width(Length::Fixed(app.layout().viewer_page_chevron_size))
             .height(Length::Fixed(app.layout().viewer_page_chevron_size)),
@@ -1159,7 +1142,7 @@ fn viewer_page_control<'a>(
             .font(ui_font(FontWeight::MEDIUM))
             .color(tokens.text_secondary)
             .wrapping(Wrapping::None),
-        viewer_page_chevron_button(CHEVRON_RIGHT_SVG, tokens)
+        viewer_page_chevron_button(app.layout(), CHEVRON_RIGHT_SVG, tokens)
             .on_press(Message::NextPage)
             .width(Length::Fixed(app.layout().viewer_page_chevron_size))
             .height(Length::Fixed(app.layout().viewer_page_chevron_size)),
@@ -1170,12 +1153,13 @@ fn viewer_page_control<'a>(
 }
 
 fn viewer_page_chevron_button<'a>(
+    layout: &crate::style::AppLayoutTokens,
     icon: &'static [u8],
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
-        .width(16.0)
-        .height(16.0)
+        .width(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
+        .height(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
         .style(move |_, _| iced::widget::svg::Style {
             color: Some(tokens.text_secondary),
         });
@@ -1267,11 +1251,19 @@ fn viewer_toolbar_status_label<'a>(
 
 fn viewer_toolbar_title_width(app: &PDFolioApp) -> f32 {
     let selection_reserve = if app.viewer.viewer_text_selection.is_some() {
-        app.layout().viewer_toolbar_selection_width + 2.0 * (76.0 + Spacing::SM)
+        app.layout().viewer_toolbar_selection_width
+            + 2.0
+                * (app
+                    .layout()
+                    .metric("ViewerToolbarChrome", "selection_button_width", 76.0)
+                    + Spacing::SM)
     } else {
         0.0
     };
-    let chrome_reserve = 470.0 + selection_reserve;
+    let chrome_reserve = app
+        .layout()
+        .metric("ViewerToolbarChrome", "fixed_width", 470.0)
+        + selection_reserve;
     (app.viewer.viewport_width - chrome_reserve).clamp(
         app.layout().viewer_toolbar_title_min_width,
         app.layout().viewer_toolbar_title_max_width,
@@ -1279,20 +1271,22 @@ fn viewer_toolbar_title_width(app: &PDFolioApp) -> f32 {
 }
 
 fn viewer_zoom_menu_x(app: &PDFolioApp) -> f32 {
-    const VIEWER_LIBRARY_BUTTON_WIDTH: f32 = 70.0;
-    const VIEWER_OPEN_BUTTON_WIDTH: f32 = 87.0;
-    const VIEWER_ZOOM_STEP_BUTTON_WIDTH: f32 = 30.0;
-
     let zoom_control_right = Spacing::MD
-        + VIEWER_LIBRARY_BUTTON_WIDTH
+        + app
+            .layout()
+            .metric("ViewerToolbarChrome", "library_button_width", 70.0)
         + Spacing::SM
-        + VIEWER_OPEN_BUTTON_WIDTH
+        + app
+            .layout()
+            .metric("ViewerToolbarChrome", "open_button_width", 87.0)
         + Spacing::SM
         + viewer_toolbar_title_width(app)
         + Spacing::SM
         + app.layout().viewer_page_control_width
         + Spacing::SM
-        + VIEWER_ZOOM_STEP_BUTTON_WIDTH
+        + app
+            .layout()
+            .metric("ViewerToolbarChrome", "zoom_step_button_width", 30.0)
         + Spacing::SM
         + app.layout().viewer_zoom_control_width;
 

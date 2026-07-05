@@ -2,11 +2,6 @@
 
 use super::*;
 use iced::widget::{column, row, stack};
-use pdf_folio_ui_components::library::view::with_alpha;
-
-const CONTEXT_MENU_SEPARATOR_HEIGHT: f32 = 1.0;
-const CONTEXT_MENU_PANEL_SPACING: f32 = 2.0;
-
 #[derive(Debug, Clone, Copy)]
 struct ContextMenuItemSpec {
     label: &'static str,
@@ -183,9 +178,10 @@ fn context_menu_panel<'a>(
     target: &'a ContextMenuTarget,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
+    let panel_layout = tokens.class_styles[Class::ContextMenuPanel.index()].layout;
     let mut panel = column![]
-        .spacing(CONTEXT_MENU_PANEL_SPACING)
-        .padding(Spacing::XS);
+        .spacing(panel_layout.spacing.unwrap_or(2.0))
+        .padding(panel_layout.padding_x(Spacing::XS));
     let groups = context_menu_groups(app, target);
     for (group_index, group) in groups.iter().enumerate() {
         if group_index > 0 {
@@ -202,15 +198,7 @@ fn context_menu_panel<'a>(
 
     container(panel)
         .width(app.layout().context_menu_panel_width)
-        .style(move |_| {
-            let mut style = container_style(tokens, Class::ContextMenuPanel);
-            style.shadow = iced::Shadow {
-                color: tokens.shadow,
-                offset: iced::Vector::new(0.0, 8.0),
-                blur_radius: 18.0,
-            };
-            style
-        })
+        .style(move |_| container_style(tokens, Class::ContextMenuPanel))
         .into()
 }
 
@@ -578,13 +566,12 @@ fn context_menu_item<'a>(
 
 fn context_menu_separator(tokens: ThemeTokens) -> Element<'static, Message> {
     container("")
-        .height(CONTEXT_MENU_SEPARATOR_HEIGHT)
+        .height(tokens.primitives.context_menu_separator_height)
         .width(Length::Fill)
         .style(move |_| {
-            let mut style = container_style(tokens, Class::ContextMenuPanel);
-            style.background = Some(iced::Background::Color(with_alpha(tokens.border, 0.7)));
-            style.border.width = 0.0;
-            style
+            let selected_style = tokens.class_styles[Class::ContextMenuPanel.index()]
+                .resolve(ComponentState::Selected);
+            container_style(tokens, Class::ContextMenuPanel).with_visual_override(selected_style)
         })
         .into()
 }

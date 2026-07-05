@@ -1,3 +1,37 @@
+primitive "document_preview_line_spacing" 7
+primitive "document_preview_min_line_width" 12
+primitive "document_preview_heading_line_height" 4
+primitive "document_preview_body_line_height" 2
+primitive "document_preview_line_radius" 1
+primitive "flush_media_background_mix" 0.42
+primitive "library_view_toggle_icon_size" 18
+primitive "library_grid_zoom_label_width" 44
+primitive "library_metadata_picker_width" 130
+primitive "library_sort_menu_height" 360
+primitive "folder_parent_icon_width" 26
+primitive "folder_parent_icon_height" 22
+primitive "folder_icon_size" 22
+primitive "folder_icon_container_width" 38
+primitive "folder_icon_container_height" 28
+primitive "folder_icon_background_mix" 0.18
+primitive "library_switcher_sidebar_icon_size" 22
+primitive "library_switcher_sidebar_icon_slot" 30
+primitive "library_switcher_sidebar_button_height" 34
+primitive "library_switcher_sidebar_text_width" 170
+primitive "sidebar_chevron_icon_size" 18
+primitive "sidebar_chevron_button_size" 28
+primitive "file_tree_indent_width" 12
+primitive "file_tree_max_indent" 72
+primitive "file_tree_meta_char_width" 6
+primitive "file_tree_meta_min_width" 52
+primitive "file_tree_meta_max_width" 128
+primitive "file_tree_row_padding_y" 3
+primitive "raindrop_tree_indent_width" 14
+primitive "raindrop_tree_max_indent" 70
+primitive "raindrop_tree_fold_width" 20
+primitive "raindrop_tree_row_padding_y" 2
+primitive "raindrop_new_folder_icon_size" 18
+
 component "LibraryVirtualization" {
     layout overscan_rows=4 line_scroll_pixels=48
 }
@@ -18,6 +52,8 @@ component "LibrarySearchInput" {
 }
 
 component "LibrarySortDropdown" {
+    layout width=190 padding_x=9 padding_y=6
+
     normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
     hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
     pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
@@ -28,6 +64,8 @@ component "LibrarySortDropdown" {
 }
 
 component "LibraryViewToggle" {
+    layout width=34 height=34 padding=0
+
     normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
     hovered background="#2B1D0E" text="#C8B89A" border="#D4A85359" theme="espresso"
     pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
@@ -38,6 +76,8 @@ component "LibraryViewToggle" {
 }
 
 component "LibraryImportButton" {
+    layout padding_x=14 padding_y=6
+
     normal background="#24180B" text="#C8B89A" border="#D4A85340" border_width=1 radius=6 theme="espresso"
     hovered background="#30220F" text="#D4A853" border="#D4A85373" theme="espresso"
     pressed background="#3A2912" text="#D4A853" border="#D4A853" theme="espresso"
@@ -48,6 +88,8 @@ component "LibraryImportButton" {
 }
 
 component "LibraryGridZoomSlider" {
+    layout width=150
+
     normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=999 theme="espresso"
     hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
     pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
@@ -61,17 +103,41 @@ component "LibraryCard" {
     layout columns=2 width=210 row_height=415 content_width=182 title_width=182 info_height=138 media_max_height=277.2 thumbnail_width=128 masonry_gap=18 scrollbar_gutter=10
 
     normal background="#23180C" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
+    normal theme="espresso" {
+        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+    }
     hovered background="#2B1D0E" text="#DDD0BA" border="#C8B89A2E" theme="espresso"
+    hovered theme="espresso" {
+        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+    }
     selected background="#30230F" text="#DDD0BA" border="#D4A853" border_width=1.5 theme="espresso"
+    selected theme="espresso" {
+        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+    }
     pressed background="#352511" border="#D4A853" theme="espresso"
     active background="#23180C" text="#DDD0BA" border="#D4A853" border_width=1 radius=8 theme="espresso"
+    active theme="espresso" {
+        shadow color="$shadow" offset_x=0 offset_y=10 blur=18
+    }
     disabled background="#120C05" text="#8B6E52" border="#1E160B" border_width=1 radius=8 theme="espresso"
 
     normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
+    normal theme="light" {
+        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+    }
     hovered background="#FCFAF5" text="#261E14" border="#C8B89A" theme="light"
+    hovered theme="light" {
+        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+    }
     selected background="#EFE3CF" text="#261E14" border="#9C732B" theme="light"
+    selected theme="light" {
+        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+    }
     pressed background="#E8D8BD" border="#9C732B" theme="light"
     active background="#F6F2EA" text="#261E14" border="#9C732B" border_width=1 radius=8 theme="light"
+    active theme="light" {
+        shadow color="$shadow" offset_x=0 offset_y=10 blur=18
+    }
     disabled background="#EFECE5" text="#745F46" border="#E1D8C9" border_width=1 radius=8 theme="light"
 }
 
@@ -79,13 +145,37 @@ component "LibraryFolderCard" {
     layout row_height=86
 
     normal background="#211609" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
+    normal theme="espresso" {
+        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+    }
     hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
+    hovered theme="espresso" {
+        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+    }
     selected background="#30230F" text="#D4A853" border="#D4A853" border_width=1.5 theme="espresso"
+    selected theme="espresso" {
+        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+    }
+    active theme="espresso" {
+        shadow color="$shadow" offset_x=0 offset_y=10 blur=18
+    }
     disabled background="#120C05" text="#8B6E52" border="#1E160B" border_width=1 radius=8 theme="espresso"
 
     normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
+    normal theme="light" {
+        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+    }
     hovered background="#FCFAF5" text="#9C732B" border="#9C732B66" theme="light"
+    hovered theme="light" {
+        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+    }
     selected background="#EFE3CF" text="#9C732B" border="#9C732B" border_width=1.5 theme="light"
+    selected theme="light" {
+        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+    }
+    active theme="light" {
+        shadow color="$shadow" offset_x=0 offset_y=10 blur=18
+    }
     disabled background="#EFECE5" text="#745F46" border="#E1D8C9" border_width=1 radius=8 theme="light"
 }
 
@@ -93,15 +183,39 @@ component "LibraryRow" {
     layout row_height=78 folder_row_height=50 title_width=520 thumbnail_width=46 progress_width=120
 
     normal background="#1B1208" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=6 theme="espresso"
+    normal theme="espresso" {
+        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+    }
     hovered background="#23180C" text="#DDD0BA" border="#C8B89A2E" theme="espresso"
+    hovered theme="espresso" {
+        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+    }
     selected background="#30230F" text="#DDD0BA" border="#D4A853" border_width=1.5 theme="espresso"
+    selected theme="espresso" {
+        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+    }
     active background="#23180C" text="#DDD0BA" border="#D4A853" border_width=1 radius=6 theme="espresso"
+    active theme="espresso" {
+        shadow color="$shadow" offset_x=0 offset_y=10 blur=18
+    }
     disabled background="#120C05" text="#8B6E52" border="#1E160B" border_width=1 radius=6 theme="espresso"
 
     normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    normal theme="light" {
+        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+    }
     hovered background="#F6F2EA" text="#261E14" border="#C8B89A" theme="light"
+    hovered theme="light" {
+        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+    }
     selected background="#EFE3CF" text="#261E14" border="#9C732B" theme="light"
+    selected theme="light" {
+        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+    }
     active background="#FCFAF5" text="#261E14" border="#9C732B" border_width=1 radius=6 theme="light"
+    active theme="light" {
+        shadow color="$shadow" offset_x=0 offset_y=10 blur=18
+    }
     disabled background="#EFECE5" text="#745F46" border="#E1D8C9" border_width=1 radius=6 theme="light"
 }
 
@@ -128,6 +242,8 @@ component "DragInsertionMarker" {
 }
 
 component "SelectionCheckbox" {
+    layout width=24 height=24 padding=0
+
     normal background="#160F07CC" text="#DDD0BA" border="#D4A85366" border_width=1 radius=5 theme="espresso"
     hovered background="#24180B" text="#D4A853" border="#D4A853" theme="espresso"
     pressed background="#30220F" text="#D4A853" border="#D4A853" theme="espresso"
@@ -138,6 +254,8 @@ component "SelectionCheckbox" {
 }
 
 component "MasterCheckbox" {
+    layout width=24 height=24 padding=0
+
     normal background="#201409" text="#DDD0BA" border="#C8B89A66" border_width=1 radius=5 theme="espresso"
     hovered background="#2B1D0E" text="#D4A853" border="#D4A853" theme="espresso"
     pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"

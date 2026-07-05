@@ -710,7 +710,7 @@ fn duplicate_status_label_reports_unique_and_matching_count() {
 }
 
 #[test]
-fn folder_smart_count_labels_include_progress_and_missing_state() {
+fn folder_smart_count_labels_keep_directory_cards_compact() {
     let counts = FolderSmartCounts {
         total: 12,
         in_progress: 3,
@@ -719,7 +719,7 @@ fn folder_smart_count_labels_include_progress_and_missing_state() {
 
     assert_eq!(
         folder_meta_label(counts, 2),
-        "12 PDFs . 2 Folders . 3 reading . 1 missing"
+        "12 PDFs . 2 Folders . 1 missing"
     );
     assert_eq!(folder_sidebar_count_label(counts), "12 PDFs");
     assert_eq!(folder_meta_label(FolderSmartCounts::default(), 0), "Empty");

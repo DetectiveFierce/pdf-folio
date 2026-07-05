@@ -7,7 +7,7 @@ component "ViewerSidebar" {
 }
 
 component "AppMenuBar" {
-    layout height=32
+    layout height=32 file_width=48 edit_width=48 view_width=56 document_width=88 library_width=68 tools_width=58 help_width=56
 }
 
 component "AppMenuPanel" {
@@ -20,6 +20,78 @@ component "ContextMenuPanel" {
 
 component "JumpOverlay" {
     layout input_width=90
+}
+
+component "LibrarySwitcher" {
+    layout card_width=230 card_height=362 card_overlay_gutter=72 card_top_spacer=12 card_title_height=38 card_title_size=18 card_title_spacing=2 heading_size=34 create_icon_size=48 create_top_extra=12
+}
+
+component "LibraryToolbar" {
+    layout compact_width=760 narrow_width=600 breadcrumb_width=150 breadcrumb_narrow_width=94 filter_pill_width=170 filter_pill_narrow_width=112 reorder_hint_width=190 reorder_hint_narrow_width=118
+}
+
+component "LibraryEntry" {
+    layout card_tag_row_left_shift=-4 row_checkbox_lane_width=24 row_floating_width=720 thumbnail_max_height_ratio=1.32
+}
+
+component "LibraryInteraction" {
+    layout card_hover_lift=2 row_hover_lift=1 grid_zoom_min=0.25 grid_zoom_max=12 grid_zoom_step=0.05 grid_zoom_dense_column_cap=28
+}
+
+component "LibrarySwitcherPreview" {
+    layout columns=4 rows=3 height=280 tile_width=48 tile_height=77 row_height=77 row_offset=5 column_gap=5 ellipsis_row_height=25 panel_padding=4 image_width=38 image_slot_height=49 image_min_height=28 title_font_size=8 title_height=22 title_lines=3 title_inset=4 tile_spacing=2 tile_padding=2 ellipsis_icon_width=6 ellipsis_icon_height=34
+}
+
+component "LibrarySwitcherMenu" {
+    layout x=7 y=2 offset=6 down_shift=4 width=118 icon_width=18 icon_height=6 button_width=28 button_height=22 button_padding=0
+}
+
+component "ConfirmationDialog" {
+    layout width=420
+}
+
+component "DeleteFolderConfirmationDialog" {
+    layout width=520
+}
+
+component "CreateFolderDialog" {
+    layout width=420
+}
+
+component "LibraryMovePickerDialog" {
+    layout width=540 tree_width=480 tree_height=330
+}
+
+component "RaindropConnectDialog" {
+    layout width=560
+}
+
+component "RaindropImportDialog" {
+    layout width=820 height=660 pdf_panel_height=360
+}
+
+component "RaindropImportProgressDialog" {
+    layout width=460 title_width=400
+}
+
+component "RaindropImportLocationSelector" {
+    layout width=320 menu_height=220
+}
+
+component "LibraryNameDialog" {
+    layout width=360
+}
+
+component "StartupLoadingDialog" {
+    layout width=460
+}
+
+component "ErrorBannerAction" {
+    layout action_width=32
+}
+
+component "ViewerToolbarChrome" {
+    layout fixed_width=470 library_button_width=70 open_button_width=87 zoom_step_button_width=30 selection_button_width=76 icon_size=16
 }
 
 component "AppMenu" {

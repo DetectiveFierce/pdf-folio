@@ -87,8 +87,8 @@ pub(crate) fn view_parent_directory_drop_box<'a>(
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(
         PARENT_DIRECTORY_ICON_SVG,
     ))
-    .width(26.0)
-    .height(22.0)
+    .width(tokens.primitives.folder_parent_icon_width)
+    .height(tokens.primitives.folder_parent_icon_height)
     .style(move |_, _| iced::widget::svg::Style {
         color: Some(border_color),
     });
@@ -109,11 +109,13 @@ pub(crate) fn view_parent_directory_drop_box<'a>(
         .center_y(Length::Fill)
         .style(move |_| {
             let mut style = container_style(tokens, Class::LibraryFolderCard);
-            style.background = active
-                .then(|| iced::Background::Color(mix_color(tokens.surface, tokens.accent, 0.18)));
-            style.border.color = border_color;
-            style.border.width = if active { 2.0 } else { 1.5 };
-            style.border.radius = 8.0.into();
+            let state = if active {
+                ComponentState::Active
+            } else {
+                ComponentState::Normal
+            };
+            let state_style = tokens.class_styles[Class::LibraryFolderCard.index()].resolve(state);
+            style = style.with_visual_override(state_style);
             style
         });
 
@@ -145,12 +147,18 @@ pub(crate) fn folder_grid_card<'a>(
         .filter(|child| child.parent_id.as_ref() == Some(&folder.id))
         .count();
     let meta = folder_meta_label(smart_counts, child_count);
-    let folder_title_size = app.library_card_font_size(FontSize::CONTROL);
-    let folder_meta_size = app.library_card_font_size(FontSize::SM);
-    let folder_text_width = (app.library_grid_card_width() - 72.0).max(16.0);
+    let folder_title_size = app.library_card_font_size(FontSize::CONTROL + 1);
+    let folder_meta_size = app.library_card_font_size(FontSize::MD);
+    let folder_text_reserve = tokens.primitives.folder_icon_container_width
+        + app.library_card_spacing().max(Spacing::XS)
+        + 2.0 * app.library_card_padding().min(Spacing::MD);
+    let folder_text_width = (app.library_grid_card_width() - folder_text_reserve)
+        .max(tokens.primitives.document_preview_min_line_width);
     let content_alpha = folder_card_content_alpha(app, mode);
+    let folder_title_width =
+        (folder_text_width - Spacing::SM).max(tokens.primitives.document_preview_min_line_width);
     let title =
-        truncate_for_width_with_font(&folder.name, folder_text_width, 0.0, folder_title_size);
+        truncate_for_width_with_font(&folder.name, folder_title_width, 0.0, folder_title_size);
     let meta = truncate_for_width_with_font(&meta, folder_text_width, 0.0, folder_meta_size);
     let content = row![
         folder_icon(tokens, content_alpha),
@@ -166,7 +174,8 @@ pub(crate) fn folder_grid_card<'a>(
                 .color(with_alpha(tokens.text_secondary, content_alpha))
                 .wrapping(Wrapping::None),
         ]
-        .spacing(app.library_card_spacing().min(Spacing::XS))
+        .spacing(0)
+        .height(tokens.primitives.folder_icon_container_height)
         .width(Length::Fill),
     ]
     .spacing(app.library_card_spacing().max(Spacing::XS))
@@ -222,8 +231,8 @@ pub(crate) fn folder_grid_card<'a>(
 
 pub(crate) fn folder_icon<'a>(tokens: ThemeTokens, alpha: f32) -> Element<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(FOLDER_CARD_ICON_SVG))
-        .width(22.0)
-        .height(22.0)
+        .width(tokens.primitives.folder_icon_size)
+        .height(tokens.primitives.folder_icon_size)
         .style(move |_, _| iced::widget::svg::Style {
             color: Some(with_alpha(tokens.accent, alpha)),
         });
@@ -232,15 +241,14 @@ pub(crate) fn folder_icon<'a>(tokens: ThemeTokens, alpha: f32) -> Element<'a, Me
             .center_x(Length::Fill)
             .center_y(Length::Fill),
     )
-    .center(38.0)
-    .height(28.0)
+    .center(tokens.primitives.folder_icon_container_width)
+    .height(tokens.primitives.folder_icon_container_height)
     .style(move |_| {
         let mut style = container_style(tokens, Class::TagPill);
-        style.background = Some(iced::Background::Color(mix_color(
-            tokens.surface,
-            tokens.accent,
-            0.18,
-        )));
+        if let Some(iced::Background::Color(mut background)) = style.background {
+            background.a *= alpha.clamp(0.0, 1.0);
+            style.background = Some(iced::Background::Color(background));
+        }
         style
     })
     .into()
@@ -261,9 +269,6 @@ pub(crate) fn folder_meta_label(counts: FolderSmartCounts, child_count: usize) -
     }
     if child_count > 0 {
         parts.push(format_count(child_count, "Folder"));
-    }
-    if counts.in_progress > 0 {
-        parts.push(format!("{} reading", counts.in_progress));
     }
     if counts.missing > 0 {
         parts.push(format!("{} missing", counts.missing));

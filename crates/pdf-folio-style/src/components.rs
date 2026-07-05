@@ -261,10 +261,11 @@ fn checkbox_button<'a, Message: Clone + 'a>(
     tokens: ThemeTokens,
     class: Class,
 ) -> iced::widget::Button<'a, Message> {
+    let layout = tokens.class_styles[class.index()].layout;
     button(container(content).center(Length::Fill))
-        .width(Length::Fixed(24.0))
-        .height(Length::Fixed(24.0))
-        .padding(0)
+        .width(Length::Fixed(layout.width.unwrap_or(24.0)))
+        .height(Length::Fixed(layout.height.unwrap_or(24.0)))
+        .padding(layout.padding_x(0.0))
         .style(move |_, status| button_style(tokens, class, status))
 }
 
@@ -273,15 +274,25 @@ fn selection_checkbox_mark<'a, Message: 'a>(
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     if checked {
+        let mark_size = tokens.class_styles[Class::SelectionCheckbox.index()]
+            .layout
+            .width
+            .unwrap_or(24.0)
+            * 0.75;
         Svg::new(iced::widget::svg::Handle::from_memory(CHECK_SVG))
-            .width(18.0)
-            .height(18.0)
+            .width(mark_size)
+            .height(mark_size)
             .style(move |_, _| iced::widget::svg::Style {
                 color: Some(tokens.text_primary),
             })
             .into()
     } else {
-        container("").width(18.0).height(18.0).into()
+        let mark_size = tokens.class_styles[Class::SelectionCheckbox.index()]
+            .layout
+            .width
+            .unwrap_or(24.0)
+            * 0.75;
+        container("").width(mark_size).height(mark_size).into()
     }
 }
 

@@ -345,6 +345,9 @@ impl VisualOverride for container::Style {
         if let Some(radius) = style.radius {
             self.border.radius = radius.into();
         }
+        if let Some(shadow) = style.shadow {
+            self.shadow = shadow.into();
+        }
         self
     }
 }
@@ -360,6 +363,9 @@ impl VisualOverride for button::Style {
         apply_border_override(&mut self.border, style);
         if let Some(radius) = style.radius {
             self.border.radius = radius.into();
+        }
+        if let Some(shadow) = style.shadow {
+            self.shadow = shadow.into();
         }
         self
     }
@@ -673,7 +679,7 @@ pub fn slider_style(tokens: ThemeTokens, class: Class, status: slider::Status) -
     slider::Style {
         rail: slider::Rail {
             backgrounds: (rail_active.into(), rail_rest.into()),
-            width: 4.0,
+            width: tokens.primitives.slider_rail_width,
             border: Border {
                 radius,
                 width: style.border_width.unwrap_or(BorderWidth::NONE),
@@ -681,7 +687,9 @@ pub fn slider_style(tokens: ThemeTokens, class: Class, status: slider::Status) -
             },
         },
         handle: slider::Handle {
-            shape: slider::HandleShape::Circle { radius: 7.0 },
+            shape: slider::HandleShape::Circle {
+                radius: tokens.primitives.slider_handle_radius,
+            },
             background: rail_active.into(),
             border_color,
             border_width: style.border_width.unwrap_or(BorderWidth::HAIRLINE),
@@ -773,7 +781,7 @@ pub fn menu_style_for_class(tokens: ThemeTokens, class: Class) -> overlay::menu:
             .text_color
             .unwrap_or(style.selected_text_color),
         selected_background: style.selected_background,
-        shadow: style.shadow,
+        shadow: override_style.shadow.map_or(style.shadow, Into::into),
     }
 }
 
@@ -872,14 +880,14 @@ pub fn scrollable_style(
         border: Border {
             width: BorderWidth::NONE,
             color: tokens.border,
-            radius: Radius::SM.into(),
+            radius: tokens.primitives.scrollbar_radius.into(),
         },
         scroller: scrollable::Scroller {
             background: Background::Color(base_scroller),
             border: Border {
                 width: BorderWidth::NONE,
                 color: base_scroller,
-                radius: Radius::SM.into(),
+                radius: tokens.primitives.scrollbar_radius.into(),
             },
         },
     };
@@ -898,12 +906,12 @@ pub fn scrollable_style(
             border: Border {
                 width: BorderWidth::HAIRLINE,
                 color: tokens.focus,
-                radius: 999.0.into(),
+                radius: tokens.primitives.auto_scroll_radius.into(),
             },
             shadow: IcedShadow {
                 color: tokens.shadow,
                 offset: Vector::ZERO,
-                blur_radius: 4.0,
+                blur_radius: tokens.primitives.auto_scroll_shadow_blur,
             },
             icon: tokens.text_primary,
         },
@@ -932,7 +940,7 @@ pub fn sidebar_scrollable_style(
             border: Border {
                 width: BorderWidth::NONE,
                 color: thumb,
-                radius: 999.0.into(),
+                radius: tokens.primitives.scrollbar_radius.into(),
             },
         },
     };

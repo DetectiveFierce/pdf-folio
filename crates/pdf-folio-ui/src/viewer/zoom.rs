@@ -4,12 +4,12 @@ use std::fmt;
 
 use iced::widget::text::Wrapping;
 use iced::widget::{button, column, container, mouse_area, row, text, text_input, Svg};
-use iced::{alignment, Alignment, Background, Element, Length};
+use iced::{alignment, Alignment, Element, Length};
 
 use crate::messages::Message;
 use crate::style::{
-    button_style, menu_style_for_class, mix_color, text_input_style, ui_font, Class,
-    ComponentState, FontSize, FontWeight, Spacing, ThemeTokens, VisualOverride,
+    button_style, menu_style_for_class, text_input_style, ui_font, Class, ComponentState, FontSize,
+    FontWeight, Spacing, ThemeTokens, VisualOverride,
 };
 use crate::viewer::state::ViewerSpreadMode;
 use crate::PDFolioApp;
@@ -106,7 +106,11 @@ pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Elem
             .padding([Spacing::XS, Spacing::SM])
             .size(FontSize::MD)
             .font(ui_font(FontWeight::MEDIUM))
-            .width(Length::Fixed(58.0))
+            .width(Length::Fixed(app.layout().metric(
+                "ViewerZoomControl",
+                "input_width",
+                58.0,
+            )))
             .style(move |_, status| text_input_style(tokens, Class::ViewerFindInput, status))
             .into()
     } else {
@@ -118,8 +122,16 @@ pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Elem
                     .color(tokens.text_secondary)
                     .wrapping(Wrapping::None),
             )
-            .width(Length::Fixed(58.0))
-            .height(Length::Fixed(28.0))
+            .width(Length::Fixed(app.layout().metric(
+                "ViewerZoomControl",
+                "input_width",
+                58.0,
+            )))
+            .height(Length::Fixed(app.layout().metric(
+                "ViewerZoomControl",
+                "button_size",
+                28.0,
+            )))
             .center(Length::Fill),
         )
         .on_double_click(Message::StartZoomInputEdit)
@@ -128,10 +140,18 @@ pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Elem
 
     row![
         value,
-        zoom_chevron_button(tokens)
+        zoom_chevron_button(app.layout(), tokens)
             .on_press(Message::ToggleZoomMenu)
-            .width(Length::Fixed(28.0))
-            .height(Length::Fixed(28.0))
+            .width(Length::Fixed(app.layout().metric(
+                "ViewerZoomControl",
+                "button_size",
+                28.0
+            ),))
+            .height(Length::Fixed(app.layout().metric(
+                "ViewerZoomControl",
+                "button_size",
+                28.0
+            ),))
     ]
     .spacing(0)
     .align_y(Alignment::Center)
@@ -140,7 +160,11 @@ pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Elem
 }
 
 pub(crate) fn zoom_menu<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element<'a, Message> {
-    let mut options = column![].spacing(0).padding(0);
+    let mut options = column![].spacing(0).padding(app.layout().metric(
+        "ViewerZoomControl",
+        "menu_padding",
+        0.0,
+    ));
 
     for (index, preset) in ZoomPreset::ALL.into_iter().enumerate() {
         let active = preset_matches_current(preset, app);
@@ -167,22 +191,25 @@ pub(crate) fn zoom_menu<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element
         .into()
 }
 
-fn zoom_chevron_button<'a>(tokens: ThemeTokens) -> iced::widget::Button<'a, Message> {
+fn zoom_chevron_button<'a>(
+    layout: &crate::style::AppLayoutTokens,
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(CHEVRON_DOWN_SVG))
-        .width(16.0)
-        .height(16.0)
+        .width(layout.metric("ViewerZoomControl", "icon_size", 16.0))
+        .height(layout.metric("ViewerZoomControl", "icon_size", 16.0))
         .style(move |_, _| iced::widget::svg::Style {
             color: Some(tokens.text_secondary),
         });
 
     button(container(icon).center(Length::Fill))
-        .padding(0)
+        .padding(layout.metric("ViewerZoomControl", "button_padding", 0.0))
         .style(move |_, status| button_style(tokens, Class::ViewerToolbarButton, status))
 }
 
 fn zoom_menu_row<'a>(
     preset: ZoomPreset,
-    striped: bool,
+    _striped: bool,
     active: bool,
     tokens: ThemeTokens,
     row_height: f32,
@@ -201,40 +228,29 @@ fn zoom_menu_row<'a>(
         container(label)
             .width(Length::Fill)
             .height(Length::Fixed(row_height))
-            .padding([0.0, Spacing::SM])
+            .padding([
+                0.0,
+                tokens.class_styles[Class::ViewerZoomMenuItem.index()]
+                    .layout
+                    .padding_x(Spacing::SM),
+            ])
             .align_y(alignment::Vertical::Center),
     )
     .width(Length::Fill)
     .height(Length::Fixed(row_height))
-    .padding(0)
+    .padding(
+        tokens.class_styles[Class::ViewerZoomMenuItem.index()]
+            .layout
+            .padding_x(0.0),
+    )
     .on_press(Message::ZoomPresetSelected(preset))
     .style(move |_, status| {
         let mut style = button_style(tokens, Class::ViewerZoomMenuItem, status);
-        let row_base = if striped {
-            mix_color(tokens.surface_raised, tokens.accent, 0.08)
-        } else {
-            mix_color(tokens.surface_raised, tokens.background, 0.10)
-        };
-        let row_background = match status {
-            iced::widget::button::Status::Hovered => mix_color(row_base, tokens.accent, 0.18),
-            iced::widget::button::Status::Pressed => mix_color(row_base, tokens.accent, 0.28),
-            iced::widget::button::Status::Disabled | iced::widget::button::Status::Active => {
-                row_base
-            }
-        };
-        style.background = Some(Background::Color(row_background));
         if active {
             let active_style = tokens.class_styles[Class::ViewerZoomMenuItem.index()]
                 .resolve(ComponentState::Active);
             style = style.with_visual_override(active_style);
-            style.background = Some(Background::Color(mix_color(
-                row_background,
-                tokens.accent,
-                0.18,
-            )));
         }
-        style.border.radius = 0.0.into();
-        style.border.width = 0.0;
         style
     })
     .into()

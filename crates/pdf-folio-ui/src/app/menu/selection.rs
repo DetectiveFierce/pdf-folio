@@ -124,7 +124,7 @@ pub(crate) fn selection_menu_button<'a>(
         .align_y(iced::Alignment::Center),
     )
     .padding([Spacing::SM, Spacing::MD])
-    .height(30.0)
+    .height(tokens.primitives.selection_menu_button_height)
     .on_press(Message::SelectionMenuOpened(menu))
     .style(move |_, status| {
         if active {
@@ -182,7 +182,10 @@ pub(crate) fn selection_menu_panel<'a>(
         SelectionMenu::Metadata => &BULK_METADATA_ACTIONS,
         SelectionMenu::Maintenance => &BULK_MAINTENANCE_ACTIONS,
     };
-    let mut panel = column![].spacing(2.0).padding(Spacing::XS);
+    let panel_layout = tokens.class_styles[Class::MenuPanel.index()].layout;
+    let mut panel = column![]
+        .spacing(panel_layout.spacing.unwrap_or(2.0))
+        .padding(panel_layout.padding_x(Spacing::XS));
     for action in actions {
         panel = panel.push(selection_menu_item(
             *action,
@@ -194,15 +197,7 @@ pub(crate) fn selection_menu_panel<'a>(
 
     container(panel)
         .width(app.layout().app_menu_panel_width)
-        .style(move |_| {
-            let mut style = container_style(tokens, Class::MenuPanel);
-            style.shadow = iced::Shadow {
-                color: tokens.shadow,
-                offset: iced::Vector::new(0.0, 8.0),
-                blur_radius: 18.0,
-            };
-            style
-        })
+        .style(move |_| container_style(tokens, Class::MenuPanel))
         .into()
 }
 
@@ -311,7 +306,7 @@ pub(crate) fn selection_menu_item(
 
 pub(crate) fn app_menu_separator<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
     container("")
-        .height(1.0)
+        .height(tokens.primitives.menu_separator_height)
         .width(Length::Fill)
         .style(move |_| {
             let selected_style =

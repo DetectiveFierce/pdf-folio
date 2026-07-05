@@ -1,6 +1,36 @@
 use super::*;
 
 impl PDFolioApp {
+    pub(super) fn library_grid_zoom_min(&self) -> f32 {
+        self.layout()
+            .metric("LibraryInteraction", "grid_zoom_min", 0.25)
+    }
+
+    pub(super) fn library_grid_zoom_limit(&self) -> f32 {
+        self.layout()
+            .metric("LibraryInteraction", "grid_zoom_max", 12.0)
+    }
+
+    pub(super) fn library_grid_zoom_step(&self) -> f32 {
+        self.layout()
+            .metric("LibraryInteraction", "grid_zoom_step", 0.05)
+    }
+
+    pub(super) fn library_grid_dense_column_cap(&self) -> usize {
+        self.layout()
+            .count("LibraryInteraction", "grid_zoom_dense_column_cap", 28)
+    }
+
+    pub(super) fn library_card_hover_lift(&self) -> f32 {
+        self.layout()
+            .metric("LibraryInteraction", "card_hover_lift", 2.0)
+    }
+
+    pub(super) fn library_row_hover_lift(&self) -> f32 {
+        self.layout()
+            .metric("LibraryInteraction", "row_hover_lift", 1.0)
+    }
+
     pub(super) fn visible_library_entries(&self) -> Vec<LibraryEntry> {
         let source = self
             .library
@@ -31,14 +61,14 @@ impl PDFolioApp {
     pub(super) fn library_grid_zoom(&self) -> f32 {
         self.library
             .library_grid_zoom
-            .clamp(LIBRARY_GRID_ZOOM_MIN, self.library_grid_zoom_max())
+            .clamp(self.library_grid_zoom_min(), self.library_grid_zoom_max())
     }
 
     pub(super) fn library_grid_zoom_max(&self) -> f32 {
         let width = self.library_available_grid_width();
         (width / self.layout().library_grid_card_width)
             .max(1.0)
-            .clamp(1.0, LIBRARY_GRID_ZOOM_MAX)
+            .clamp(1.0, self.library_grid_zoom_limit())
     }
 
     pub(super) fn library_available_grid_width(&self) -> f32 {
@@ -70,12 +100,12 @@ impl PDFolioApp {
         if self.library.compact_view_mode || columns == 0 {
             return;
         }
-        let columns = columns.min(LIBRARY_GRID_ZOOM_DENSE_COLUMN_CAP);
+        let columns = columns.min(self.library_grid_dense_column_cap());
         let available_width = self.library_available_grid_width().max(1.0);
         let total_gap = columns.saturating_sub(1) as f32 * self.layout().library_masonry_gap;
         let card_width = ((available_width - total_gap) / columns as f32).max(1.0);
         self.library.library_grid_zoom = (card_width / self.layout().library_grid_card_width)
-            .clamp(LIBRARY_GRID_ZOOM_MIN, self.library_grid_zoom_max());
+            .clamp(self.library_grid_zoom_min(), self.library_grid_zoom_max());
     }
 
     pub(super) fn library_grid_card_width(&self) -> f32 {

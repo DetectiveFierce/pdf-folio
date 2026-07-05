@@ -94,7 +94,7 @@ fn view_outline_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Messa
             &app.viewer.expanded_outline_paths,
             tokens,
         ))
-        .direction(sidebar_scroll_direction())
+        .direction(sidebar_scroll_direction(tokens))
         .height(Length::Fill)
         .style(move |_, status| sidebar_scrollable_style(tokens, status))
         .into()
@@ -116,7 +116,7 @@ fn view_thumbnails_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Me
     }
 
     scrollable(pages)
-        .direction(sidebar_scroll_direction())
+        .direction(sidebar_scroll_direction(tokens))
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_, status| sidebar_scrollable_style(tokens, status))
@@ -188,11 +188,11 @@ fn thumbnail_button(app: &PDFolioApp, page: u16, tokens: ThemeTokens) -> Element
         .into()
 }
 
-fn sidebar_scroll_direction() -> Direction {
+fn sidebar_scroll_direction(tokens: ThemeTokens) -> Direction {
     Direction::Vertical(
         Scrollbar::new()
-            .width(4.0)
-            .scroller_width(2.0)
+            .width(tokens.primitives.sidebar_scrollbar_width)
+            .scroller_width(tokens.primitives.sidebar_scrollbar_scroller_width)
             .anchor(Anchor::End),
     )
 }

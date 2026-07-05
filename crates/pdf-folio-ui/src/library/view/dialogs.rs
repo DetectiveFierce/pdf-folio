@@ -4,9 +4,6 @@ use pdf_folio_raindrop::{RaindropImportDestination, RaindropImportPhase};
 
 const RAINDROP_INTEGRATIONS_URL: &str = "https://app.raindrop.io/settings/integrations";
 const FOLDER_PLUS_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"##;
-const RAINDROP_IMPORT_DIALOG_WIDTH: f32 = 820.0;
-const RAINDROP_IMPORT_DIALOG_HEIGHT: f32 = 660.0;
-const RAINDROP_IMPORT_PDF_PANEL_HEIGHT: f32 = 360.0;
 
 pub(crate) fn view_confirmation_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
@@ -35,7 +32,7 @@ pub(crate) fn view_confirmation_dialog(app: &PDFolioApp) -> Element<'_, Message>
 
     container(
         container(dialog)
-            .width(420.0)
+            .width(app.layout().metric("ConfirmationDialog", "width", 420.0))
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)
@@ -58,9 +55,6 @@ pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
         .map_or("Selected folder", |folder| folder.name.as_str());
     let pdf_count = folder_delete_entry_count(app, folder_id);
     let nested_folder_count = folder_delete_nested_folder_count(app, folder_id);
-    let warning_background = mix_color(tokens.surface_raised, tokens.error, 0.16);
-    let warning_border = mix_color(tokens.border, tokens.error, 0.58);
-
     let warning_panel = container(
         column![
             text("This cannot be undone from PDF-Folio.")
@@ -79,13 +73,7 @@ pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
     )
     .width(Length::Fill)
     .padding(Spacing::MD)
-    .style(move |_| {
-        let mut style = container_style(tokens, Class::SidebarDetailPanel);
-        style.background = Some(iced::Background::Color(warning_background));
-        style.border.color = warning_border;
-        style.border.width = 1.0;
-        style
-    });
+    .style(move |_| container_style(tokens, Class::ErrorBanner));
 
     let counts = row![
         delete_folder_count_card("PDFs", pdf_count, tokens),
@@ -126,7 +114,10 @@ pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
 
     container(
         container(dialog)
-            .width(520.0)
+            .width(
+                app.layout()
+                    .metric("DeleteFolderConfirmationDialog", "width", 520.0),
+            )
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)
@@ -216,6 +207,7 @@ pub(crate) fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message
             .size(FontSize::MD)
             .color(tokens.text_secondary),
         text_input("Folder name", &app.library.new_folder_name)
+            .id(Id::new(LIBRARY_CREATE_FOLDER_INPUT_ID))
             .on_input(Message::NewFolderNameChanged)
             .on_submit(Message::CreateFolder)
             .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
@@ -232,7 +224,7 @@ pub(crate) fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message
 
     container(
         container(dialog)
-            .width(420.0)
+            .width(app.layout().metric("CreateFolderDialog", "width", 420.0))
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)
@@ -272,14 +264,19 @@ pub(crate) fn view_library_move_picker_dialog(app: &PDFolioApp) -> Element<'_, M
                 .find(|folder| &folder.id == folder_id)
         })
         .map_or_else(|| String::from("Library"), |folder| folder.name.clone());
-    let tree_width = 480.0;
+    let tree_width = app
+        .layout()
+        .metric("LibraryMovePickerDialog", "tree_width", 480.0);
     let tree = container(
         scrollable(view_move_picker_tree(app, picker, tree_width, tokens))
-            .direction(sidebar_scroll_direction())
+            .direction(sidebar_scroll_direction(tokens))
             .height(Length::Fill)
             .style(move |_, status| sidebar_scrollable_style(tokens, status)),
     )
-    .height(330.0)
+    .height(
+        app.layout()
+            .metric("LibraryMovePickerDialog", "tree_height", 330.0),
+    )
     .width(Length::Fill)
     .style(move |_| container_style(tokens, Class::FileTree));
 
@@ -308,7 +305,10 @@ pub(crate) fn view_library_move_picker_dialog(app: &PDFolioApp) -> Element<'_, M
 
     container(
         container(dialog)
-            .width(540.0)
+            .width(
+                app.layout()
+                    .metric("LibraryMovePickerDialog", "width", 540.0),
+            )
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)
@@ -481,7 +481,7 @@ pub(crate) fn view_raindrop_connect_dialog(app: &PDFolioApp) -> Element<'_, Mess
 
     container(
         container(dialog)
-            .width(560.0)
+            .width(app.layout().metric("RaindropConnectDialog", "width", 560.0))
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)
@@ -526,11 +526,17 @@ pub(crate) fn view_raindrop_import_dialog(app: &PDFolioApp) -> Element<'_, Messa
             }
             container(
                 scrollable(rows)
-                    .height(RAINDROP_IMPORT_PDF_PANEL_HEIGHT)
+                    .height(
+                        app.layout()
+                            .metric("RaindropImportDialog", "pdf_panel_height", 360.0),
+                    )
                     .style(move |_, status| scrollable_style(tokens, Class::LibraryRow, status)),
             )
             .width(Length::Fill)
-            .height(RAINDROP_IMPORT_PDF_PANEL_HEIGHT)
+            .height(
+                app.layout()
+                    .metric("RaindropImportDialog", "pdf_panel_height", 360.0),
+            )
             .padding(Spacing::SM)
             .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
             .into()
@@ -549,7 +555,10 @@ pub(crate) fn view_raindrop_import_dialog(app: &PDFolioApp) -> Element<'_, Messa
                 .spacing(Spacing::MD),
             )
             .width(Length::Fill)
-            .height(RAINDROP_IMPORT_PDF_PANEL_HEIGHT)
+            .height(
+                app.layout()
+                    .metric("RaindropImportDialog", "pdf_panel_height", 360.0),
+            )
             .center(Length::Fill)
             .padding(Spacing::LG)
             .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
@@ -619,8 +628,8 @@ pub(crate) fn view_raindrop_import_dialog(app: &PDFolioApp) -> Element<'_, Messa
 
     container(
         container(dialog)
-            .width(RAINDROP_IMPORT_DIALOG_WIDTH)
-            .height(RAINDROP_IMPORT_DIALOG_HEIGHT)
+            .width(app.layout().metric("RaindropImportDialog", "width", 820.0))
+            .height(app.layout().metric("RaindropImportDialog", "height", 660.0))
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)
@@ -668,7 +677,8 @@ pub(crate) fn view_raindrop_import_progress_dialog(app: &PDFolioApp) -> Element<
         container(progress_bar(value, tokens)).width(Length::Fill),
         text(truncate_for_width_with_font(
             &progress.current_title,
-            400.0,
+            app.layout()
+                .metric("RaindropImportProgressDialog", "title_width", 400.0),
             0.0,
             FontSize::SM
         ))
@@ -695,7 +705,10 @@ pub(crate) fn view_raindrop_import_progress_dialog(app: &PDFolioApp) -> Element<
 
     container(
         container(content)
-            .width(460.0)
+            .width(
+                app.layout()
+                    .metric("RaindropImportProgressDialog", "width", 460.0),
+            )
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)
@@ -729,7 +742,10 @@ fn raindrop_import_location_selector<'a>(
             .width(Length::Fill),
     ]
     .spacing(Spacing::SM)
-    .width(320.0);
+    .width(
+        app.layout()
+            .metric("RaindropImportLocationSelector", "width", 320.0),
+    );
 
     if app.library.raindrop_import_location_menu_open {
         content = content.push(raindrop_import_location_menu(
@@ -755,7 +771,12 @@ fn raindrop_import_location_selector<'a>(
         );
     }
 
-    container(content).width(320.0).into()
+    container(content)
+        .width(
+            app.layout()
+                .metric("RaindropImportLocationSelector", "width", 320.0),
+        )
+        .into()
 }
 
 fn raindrop_import_location_menu<'a>(
@@ -786,7 +807,10 @@ fn raindrop_import_location_menu<'a>(
 
     container(
         scrollable(rows)
-            .height(220.0)
+            .height(
+                app.layout()
+                    .metric("RaindropImportLocationSelector", "menu_height", 220.0),
+            )
             .style(move |_, status| scrollable_style(tokens, Class::LibraryRow, status)),
     )
     .width(Length::Fill)
@@ -869,7 +893,12 @@ fn raindrop_import_location_row<'a>(
         ""
     };
     let mut row_content = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
-    row_content = row_content.push(container("").width((depth as f32 * 14.0).min(70.0)));
+    row_content = row_content.push(
+        container("").width(
+            (depth as f32 * tokens.primitives.raindrop_tree_indent_width)
+                .min(tokens.primitives.raindrop_tree_max_indent),
+        ),
+    );
     let fold_control: Element<'a, Message> = if has_children {
         button(
             text(chevron)
@@ -877,19 +906,19 @@ fn raindrop_import_location_row<'a>(
                 .font(ui_font(FontWeight::SEMIBOLD))
                 .color(tokens.text_secondary),
         )
-        .padding(0)
-        .width(20.0)
+        .padding(
+            tokens.class_styles[Class::FileTreeFoldButton.index()]
+                .layout
+                .padding_top(0.0),
+        )
+        .width(tokens.primitives.raindrop_tree_fold_width)
         .on_press(toggle_message.unwrap_or_else(|| select_message.clone()))
-        .style(move |_, _| iced::widget::button::Style {
-            background: None,
-            text_color: tokens.text_secondary,
-            border: iced::Border::default(),
-            shadow: iced::Shadow::default(),
-            snap: true,
-        })
+        .style(move |_, status| button_style(tokens, Class::FileTreeFoldButton, status))
         .into()
     } else {
-        container("").width(20.0).into()
+        container("")
+            .width(tokens.primitives.raindrop_tree_fold_width)
+            .into()
     };
     row_content = row_content.push(fold_control);
     row_content = row_content.push(
@@ -908,17 +937,20 @@ fn raindrop_import_location_row<'a>(
             .width(Length::Fill),
     );
 
-    button(container(row_content).padding([2.0, Spacing::XS]))
-        .width(Length::Fill)
-        .on_press(select_message)
-        .style(move |_, status| button_style(tokens, Class::MenuItem, status))
-        .into()
+    button(
+        container(row_content)
+            .padding([tokens.primitives.raindrop_tree_row_padding_y, Spacing::XS]),
+    )
+    .width(Length::Fill)
+    .on_press(select_message)
+    .style(move |_, status| button_style(tokens, Class::MenuItem, status))
+    .into()
 }
 
 fn raindrop_new_folder_row<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(FOLDER_PLUS_SVG))
-        .width(18.0)
-        .height(18.0)
+        .width(tokens.primitives.raindrop_new_folder_icon_size)
+        .height(tokens.primitives.raindrop_new_folder_icon_size)
         .style(move |_, _| iced::widget::svg::Style {
             color: Some(tokens.text_primary),
         });
@@ -930,7 +962,7 @@ fn raindrop_new_folder_row<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
             .color(tokens.text_primary)
     ]
     .spacing(Spacing::SM)
-    .padding([2.0, Spacing::XS])
+    .padding([tokens.primitives.raindrop_tree_row_padding_y, Spacing::XS])
     .align_y(iced::Alignment::Center);
 
     button(content)

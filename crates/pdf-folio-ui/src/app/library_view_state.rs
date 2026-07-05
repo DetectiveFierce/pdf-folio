@@ -56,13 +56,13 @@ impl PDFolioApp {
             ((available_width + self.layout().library_masonry_gap) / column_pitch)
                 .floor()
                 .max(1.0)
-                .min(LIBRARY_GRID_ZOOM_DENSE_COLUMN_CAP as f32) as usize
+                .min(self.library_grid_dense_column_cap() as f32) as usize
         }
     }
 
     pub(super) fn library_row_height(&self) -> f32 {
         if self.library.compact_view_mode {
-            self.layout().library_list_row_height + LIBRARY_ROW_HOVER_LIFT
+            self.layout().library_list_row_height + self.library_row_hover_lift()
         } else {
             self.layout().library_grid_row_height * self.library_grid_zoom()
         }
@@ -114,7 +114,7 @@ impl PDFolioApp {
             })
             .unwrap_or(self.library_card_media_max_height());
 
-        thumbnail_height + self.library_card_info_height() + LIBRARY_CARD_HOVER_LIFT
+        thumbnail_height + self.library_card_info_height() + self.library_card_hover_lift()
     }
 
     pub(super) fn library_card_hover_progress(&self, entry_id: &EntryId) -> f32 {

@@ -1,6 +1,7 @@
 //! Semantic design tokens for the UI crate.
 
 use iced::{font, Color, Font};
+use std::collections::HashMap;
 
 use crate::classes::{Class, ComponentState};
 
@@ -87,6 +88,20 @@ pub struct AppLayoutTokens {
     pub selection_author_input_min_width: f32,
     /// Top app menu bar height.
     pub app_menu_bar_height: f32,
+    /// Width of the File app menu button.
+    pub app_menu_file_width: f32,
+    /// Width of the Edit app menu button.
+    pub app_menu_edit_width: f32,
+    /// Width of the View app menu button.
+    pub app_menu_view_width: f32,
+    /// Width of the Document app menu button.
+    pub app_menu_document_width: f32,
+    /// Width of the Library app menu button.
+    pub app_menu_library_width: f32,
+    /// Width of the Tools app menu button.
+    pub app_menu_tools_width: f32,
+    /// Width of the Help app menu button.
+    pub app_menu_help_width: f32,
     /// Selection context row height.
     pub selection_context_row_height: f32,
     /// Dropdown panel width.
@@ -125,12 +140,43 @@ pub struct AppLayoutTokens {
     pub viewer_zoom_menu_width: f32,
     /// Viewer zoom menu row height.
     pub viewer_zoom_menu_row_height: f32,
+    /// Additional KDL-backed component metrics keyed as `Component.property`.
+    pub metrics: HashMap<String, f32>,
+    /// Additional KDL-backed component counts keyed as `Component.property`.
+    pub counts: HashMap<String, usize>,
 }
 
 impl AppLayoutTokens {
     /// Returns the default app window size as expected by iced.
     pub fn window_size(&self) -> [f32; 2] {
         [self.window_width, self.window_height]
+    }
+
+    /// Returns an extra KDL-backed component metric.
+    pub fn metric(&self, component: &str, property: &str, fallback: f32) -> f32 {
+        self.metrics
+            .get(&format!("{component}.{property}"))
+            .copied()
+            .unwrap_or(fallback)
+    }
+
+    /// Returns an extra KDL-backed component count.
+    pub fn count(&self, component: &str, property: &str, fallback: usize) -> usize {
+        self.counts
+            .get(&format!("{component}.{property}"))
+            .copied()
+            .unwrap_or(fallback)
+    }
+
+    /// Stores an extra KDL-backed component metric.
+    pub fn set_metric(&mut self, component: &str, property: &str, value: f32) {
+        self.metrics
+            .insert(format!("{component}.{property}"), value);
+    }
+
+    /// Stores an extra KDL-backed component count.
+    pub fn set_count(&mut self, component: &str, property: &str, value: usize) {
+        self.counts.insert(format!("{component}.{property}"), value);
     }
 }
 
@@ -178,6 +224,13 @@ impl Default for AppLayoutTokens {
             selection_title_input_min_width: 120.0,
             selection_author_input_min_width: 96.0,
             app_menu_bar_height: 32.0,
+            app_menu_file_width: 48.0,
+            app_menu_edit_width: 48.0,
+            app_menu_view_width: 56.0,
+            app_menu_document_width: 88.0,
+            app_menu_library_width: 68.0,
+            app_menu_tools_width: 58.0,
+            app_menu_help_width: 56.0,
             selection_context_row_height: 46.0,
             app_menu_panel_width: 270.0,
             app_menu_item_height: 30.0,
@@ -197,6 +250,8 @@ impl Default for AppLayoutTokens {
             viewer_zoom_control_width: 98.0,
             viewer_zoom_menu_width: 118.0,
             viewer_zoom_menu_row_height: 22.0,
+            metrics: HashMap::new(),
+            counts: HashMap::new(),
         }
     }
 }
@@ -325,6 +380,8 @@ pub struct VisualStyle {
     pub border: Option<VisualBorder>,
     /// Radius override.
     pub radius: Option<CornerRadius>,
+    /// Shadow override.
+    pub shadow: Option<BoxShadow>,
 }
 
 impl VisualStyle {
@@ -336,6 +393,7 @@ impl VisualStyle {
         border_width: None,
         border: None,
         radius: None,
+        shadow: None,
     };
 
     /// Merges another style over this one.
@@ -367,6 +425,33 @@ impl VisualStyle {
                 Some(value) => Some(value),
                 None => self.radius,
             },
+            shadow: match overlay.shadow {
+                Some(value) => Some(value),
+                None => self.shadow,
+            },
+        }
+    }
+}
+
+/// Box shadow styling for components.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoxShadow {
+    /// Horizontal shadow offset.
+    pub offset_x: f32,
+    /// Vertical shadow offset.
+    pub offset_y: f32,
+    /// Shadow blur radius.
+    pub blur_radius: f32,
+    /// Shadow color.
+    pub color: Color,
+}
+
+impl From<BoxShadow> for iced::Shadow {
+    fn from(shadow: BoxShadow) -> Self {
+        Self {
+            color: shadow.color,
+            offset: iced::Vector::new(shadow.offset_x, shadow.offset_y),
+            blur_radius: shadow.blur_radius,
         }
     }
 }
@@ -790,6 +875,96 @@ pub struct PrimitiveTokens {
     pub viewer_text_selection_alpha: f32,
     /// Progress bar girth.
     pub progress_girth: f32,
+    /// Slider rail width.
+    pub slider_rail_width: f32,
+    /// Slider handle radius.
+    pub slider_handle_radius: f32,
+    /// Standard scrollbar rail width.
+    pub scrollbar_width: f32,
+    /// Standard scrollbar scroller width.
+    pub scrollbar_scroller_width: f32,
+    /// Sidebar scrollbar rail width.
+    pub sidebar_scrollbar_width: f32,
+    /// Sidebar scrollbar scroller width.
+    pub sidebar_scrollbar_scroller_width: f32,
+    /// Scrollbar radius.
+    pub scrollbar_radius: f32,
+    /// Auto-scroll affordance radius.
+    pub auto_scroll_radius: f32,
+    /// Auto-scroll affordance shadow blur.
+    pub auto_scroll_shadow_blur: f32,
+    /// Generated document preview line spacing.
+    pub document_preview_line_spacing: f32,
+    /// Generated document preview minimum line width.
+    pub document_preview_min_line_width: f32,
+    /// Generated document preview heading line height.
+    pub document_preview_heading_line_height: f32,
+    /// Generated document preview body line height.
+    pub document_preview_body_line_height: f32,
+    /// Generated document preview line radius.
+    pub document_preview_line_radius: f32,
+    /// Flush media background mix amount.
+    pub flush_media_background_mix: f32,
+    /// Library view toggle icon size.
+    pub library_view_toggle_icon_size: f32,
+    /// Library grid zoom value label width.
+    pub library_grid_zoom_label_width: f32,
+    /// Library metadata-density picker width.
+    pub library_metadata_picker_width: f32,
+    /// Library sort picker menu height.
+    pub library_sort_menu_height: f32,
+    /// Parent-directory drop icon width.
+    pub folder_parent_icon_width: f32,
+    /// Parent-directory drop icon height.
+    pub folder_parent_icon_height: f32,
+    /// Folder card glyph size.
+    pub folder_icon_size: f32,
+    /// Folder icon capsule width.
+    pub folder_icon_container_width: f32,
+    /// Folder icon capsule height.
+    pub folder_icon_container_height: f32,
+    /// Folder icon capsule background accent mix.
+    pub folder_icon_background_mix: f32,
+    /// Library switcher sidebar icon size.
+    pub library_switcher_sidebar_icon_size: f32,
+    /// Library switcher sidebar icon slot size.
+    pub library_switcher_sidebar_icon_slot: f32,
+    /// Library switcher sidebar button height.
+    pub library_switcher_sidebar_button_height: f32,
+    /// Library switcher sidebar text width.
+    pub library_switcher_sidebar_text_width: f32,
+    /// Sidebar chevron icon size.
+    pub sidebar_chevron_icon_size: f32,
+    /// Sidebar chevron button size.
+    pub sidebar_chevron_button_size: f32,
+    /// File tree indent width per depth level.
+    pub file_tree_indent_width: f32,
+    /// File tree maximum indentation.
+    pub file_tree_max_indent: f32,
+    /// File tree metadata width per character.
+    pub file_tree_meta_char_width: f32,
+    /// File tree minimum metadata width.
+    pub file_tree_meta_min_width: f32,
+    /// File tree maximum metadata width.
+    pub file_tree_meta_max_width: f32,
+    /// File tree row vertical padding.
+    pub file_tree_row_padding_y: f32,
+    /// Raindrop import tree indent width per depth level.
+    pub raindrop_tree_indent_width: f32,
+    /// Raindrop import tree maximum indentation.
+    pub raindrop_tree_max_indent: f32,
+    /// Raindrop import tree fold control width.
+    pub raindrop_tree_fold_width: f32,
+    /// Raindrop import tree row vertical padding.
+    pub raindrop_tree_row_padding_y: f32,
+    /// Raindrop import new-folder icon size.
+    pub raindrop_new_folder_icon_size: f32,
+    /// App menu separator height.
+    pub menu_separator_height: f32,
+    /// Context menu separator height.
+    pub context_menu_separator_height: f32,
+    /// Selection toolbar menu button height.
+    pub selection_menu_button_height: f32,
 }
 
 impl Default for PrimitiveTokens {
@@ -802,6 +977,51 @@ impl Default for PrimitiveTokens {
             viewer_text_selection_mix: 0.72,
             viewer_text_selection_alpha: 0.42,
             progress_girth: 3.0,
+            slider_rail_width: 4.0,
+            slider_handle_radius: 7.0,
+            scrollbar_width: 4.0,
+            scrollbar_scroller_width: 2.0,
+            sidebar_scrollbar_width: 4.0,
+            sidebar_scrollbar_scroller_width: 2.0,
+            scrollbar_radius: 6.0,
+            auto_scroll_radius: 999.0,
+            auto_scroll_shadow_blur: 4.0,
+            document_preview_line_spacing: 7.0,
+            document_preview_min_line_width: 12.0,
+            document_preview_heading_line_height: 4.0,
+            document_preview_body_line_height: 2.0,
+            document_preview_line_radius: 1.0,
+            flush_media_background_mix: 0.42,
+            library_view_toggle_icon_size: 18.0,
+            library_grid_zoom_label_width: 44.0,
+            library_metadata_picker_width: 130.0,
+            library_sort_menu_height: 360.0,
+            folder_parent_icon_width: 26.0,
+            folder_parent_icon_height: 22.0,
+            folder_icon_size: 22.0,
+            folder_icon_container_width: 38.0,
+            folder_icon_container_height: 28.0,
+            folder_icon_background_mix: 0.18,
+            library_switcher_sidebar_icon_size: 22.0,
+            library_switcher_sidebar_icon_slot: 30.0,
+            library_switcher_sidebar_button_height: 34.0,
+            library_switcher_sidebar_text_width: 170.0,
+            sidebar_chevron_icon_size: 18.0,
+            sidebar_chevron_button_size: 28.0,
+            file_tree_indent_width: 12.0,
+            file_tree_max_indent: 72.0,
+            file_tree_meta_char_width: 6.0,
+            file_tree_meta_min_width: 52.0,
+            file_tree_meta_max_width: 128.0,
+            file_tree_row_padding_y: 3.0,
+            raindrop_tree_indent_width: 14.0,
+            raindrop_tree_max_indent: 70.0,
+            raindrop_tree_fold_width: 20.0,
+            raindrop_tree_row_padding_y: 2.0,
+            raindrop_new_folder_icon_size: 18.0,
+            menu_separator_height: 1.0,
+            context_menu_separator_height: 1.0,
+            selection_menu_button_height: 30.0,
         }
     }
 }

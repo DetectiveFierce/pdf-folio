@@ -1,3 +1,7 @@
+primitive "menu_separator_height" 1
+primitive "context_menu_separator_height" 1
+primitive "selection_menu_button_height" 30
+
 component "AppShell" {
     normal background="#0F0A04" text="#DDD0BA" border_width=0 radius=0 theme="espresso"
     normal background="#F1EFE9" text="#261E14" border_width=0 radius=0 theme="light"
@@ -9,6 +13,8 @@ component "Toolbar" {
 }
 
 component "MenuBar" {
+    layout spacing=2 padding_x=9 padding_y=0
+
     normal background="#0E0904" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=0 theme="espresso"
     active background="#180F06" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=0 theme="espresso"
     selected background="#45331D" text="#DDD0BA" border="#45331D" border_width=0 radius=0 theme="espresso"
@@ -19,6 +25,8 @@ component "MenuBar" {
 }
 
 component "MenuButton" {
+    layout height=24
+
     normal background="#0E0904" text="#8B6E52" border="#00000000" border_width=0 radius=0 theme="espresso"
     hovered background="#160F07" text="#C8B89A" border="#00000000" border_width=0 theme="espresso"
     pressed background="#211609" text="#D4A853" border="#D4A853" border_width=0 theme="espresso"
@@ -31,8 +39,18 @@ component "MenuButton" {
 }
 
 component "MenuPanel" {
+    layout spacing=2 padding=4 separator_height=1
+
     normal background="#23180C" text="#DDD0BA" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
+    selected background="#C8B89A2E" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal theme="espresso" {
+        shadow color="$shadow" offset_x=0 offset_y=8 blur=18
+    }
     normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    selected background="#D8CEBC" text="#261E14" border="#00000000" border_width=0 radius=0 theme="light"
+    normal theme="light" {
+        shadow color="$shadow" offset_x=0 offset_y=8 blur=18
+    }
 }
 
 component "MenuItem" {
@@ -48,10 +66,18 @@ component "MenuItem" {
 }
 
 component "ContextMenuPanel" {
-    layout width=250 item_height=30
+    layout width=250 item_height=30 spacing=2 padding=4 separator_height=1
 
     normal background="#23180C" text="#DDD0BA" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
+    selected background="#C8B89A2E" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal theme="espresso" {
+        shadow color="$shadow" offset_x=0 offset_y=8 blur=18
+    }
     normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    selected background="#D8CEBC" text="#261E14" border="#00000000" border_width=0 radius=0 theme="light"
+    normal theme="light" {
+        shadow color="$shadow" offset_x=0 offset_y=8 blur=18
+    }
 }
 
 component "ContextMenuItem" {

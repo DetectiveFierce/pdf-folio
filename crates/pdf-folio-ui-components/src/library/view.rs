@@ -29,7 +29,8 @@ pub fn document_preview_lines<'a, Message: 'a>(
     alpha: f32,
 ) -> Element<'a, Message> {
     let line_widths = [0.68, 0.98, 0.78, 0.92, 0.54, 0.74, 0.98, 0.62];
-    let mut lines = column![].spacing(7.0);
+    let layout = tokens.class_styles[Class::PagePlaceholder.index()].layout;
+    let mut lines = column![].spacing(tokens.primitives.document_preview_line_spacing);
     for (index, fraction) in line_widths.into_iter().enumerate() {
         let color = if index == 0 {
             with_alpha(tokens.accent, alpha * 0.78)
@@ -38,12 +39,16 @@ pub fn document_preview_lines<'a, Message: 'a>(
         };
         lines = lines.push(
             container("")
-                .width((width * fraction).max(12.0))
-                .height(if index == 0 { 4.0 } else { 2.0 })
+                .width((width * fraction).max(tokens.primitives.document_preview_min_line_width))
+                .height(if index == 0 {
+                    tokens.primitives.document_preview_heading_line_height
+                } else {
+                    tokens.primitives.document_preview_body_line_height
+                })
                 .style(move |_| iced::widget::container::Style {
                     background: Some(iced::Background::Color(color)),
                     border: iced::Border {
-                        radius: 1.0.into(),
+                        radius: tokens.primitives.document_preview_line_radius.into(),
                         ..iced::Border::default()
                     },
                     ..iced::widget::container::Style::default()
@@ -52,26 +57,36 @@ pub fn document_preview_lines<'a, Message: 'a>(
     }
 
     container(lines)
-        .padding([14.0, 14.0])
+        .padding([layout.padding_y(14.0), layout.padding_x(14.0)])
         .width(width)
         .height(height)
         .into()
 }
 
 pub fn flush_media_style(tokens: ThemeTokens, alpha: f32) -> iced::widget::container::Style {
-    let mut background = mix_color(tokens.background, tokens.surface_raised, 0.42);
+    let mut style = container_style(tokens, Class::PagePlaceholder);
+    let mut background = style
+        .background
+        .and_then(|background| match background {
+            iced::Background::Color(color) => Some(color),
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            mix_color(
+                tokens.background,
+                tokens.surface_raised,
+                tokens.primitives.flush_media_background_mix,
+            )
+        });
     background.a *= alpha.clamp(0.0, 1.0);
 
-    iced::widget::container::Style {
-        background: Some(iced::Background::Color(background)),
-        text_color: Some(with_alpha(tokens.text_secondary, alpha)),
-        border: iced::Border {
-            width: 0.0,
-            color: with_alpha(tokens.border, alpha),
-            radius: iced::border::top(pdf_folio_style::Radius::MD),
-        },
-        ..iced::widget::container::Style::default()
-    }
+    style.background = Some(iced::Background::Color(background));
+    style.text_color = Some(with_alpha(
+        style.text_color.unwrap_or(tokens.text_secondary),
+        alpha,
+    ));
+    style.border.color = with_alpha(style.border.color, alpha);
+    style
 }
 
 pub fn breadcrumb_button<'a, Message: Clone + 'a>(
@@ -137,8 +152,8 @@ pub fn library_layout_toggle_button<'a, Message: Clone + 'a>(
         (list_icon, "Switch to list")
     };
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
-        .width(18.0)
-        .height(18.0)
+        .width(tokens.primitives.library_view_toggle_icon_size)
+        .height(tokens.primitives.library_view_toggle_icon_size)
         .style(move |_, _| iced::widget::svg::Style {
             color: Some(tokens.text_primary),
         });
@@ -147,9 +162,23 @@ pub fn library_layout_toggle_button<'a, Message: Clone + 'a>(
             .center_x(Length::Fill)
             .center_y(Length::Fill),
     )
-    .width(34.0)
-    .height(34.0)
-    .padding(0)
+    .width(
+        tokens.class_styles[Class::LibraryViewToggle.index()]
+            .layout
+            .width
+            .unwrap_or(34.0),
+    )
+    .height(
+        tokens.class_styles[Class::LibraryViewToggle.index()]
+            .layout
+            .height
+            .unwrap_or(34.0),
+    )
+    .padding(
+        tokens.class_styles[Class::LibraryViewToggle.index()]
+            .layout
+            .padding_x(0.0),
+    )
     .style(move |_, status| button_style(tokens, Class::LibraryViewToggle, status))
     .on_press(message);
 
@@ -184,13 +213,18 @@ pub fn library_grid_zoom_control<'a, Message: Clone + 'a>(
             .color(tokens.text_secondary),
         slider(min..=max, value, on_change)
             .step(step)
-            .width(150.0)
+            .width(
+                tokens.class_styles[Class::LibraryGridZoomSlider.index()]
+                    .layout
+                    .width
+                    .unwrap_or(150.0),
+            )
             .style(move |_, status| slider_style(tokens, Class::LibraryGridZoomSlider, status)),
         text(label)
             .size(FontSize::SM)
             .font(ui_font(FontWeight::MEDIUM))
             .color(tokens.text_secondary)
-            .width(44.0),
+            .width(tokens.primitives.library_grid_zoom_label_width),
     ]
     .spacing(Spacing::SM)
     .align_y(iced::Alignment::Center);
@@ -219,7 +253,14 @@ pub fn library_new_folder_button<'a, Message: 'a>(
             .font(ui_font(FontWeight::MEDIUM))
             .color(tokens.text_secondary),
     )
-    .padding([Spacing::SM, Spacing::LG])
+    .padding([
+        tokens.class_styles[Class::LibraryImportButton.index()]
+            .layout
+            .padding_y(Spacing::SM),
+        tokens.class_styles[Class::LibraryImportButton.index()]
+            .layout
+            .padding_x(Spacing::LG),
+    ])
     .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
 }
 
@@ -269,8 +310,15 @@ pub fn library_metadata_density_picker<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     pick_list(options, Some(selected), on_select)
         .placeholder("Metadata")
-        .width(130.0)
-        .padding([Spacing::SM, Spacing::MD])
+        .width(tokens.primitives.library_metadata_picker_width)
+        .padding([
+            tokens.class_styles[Class::LibrarySortDropdown.index()]
+                .layout
+                .padding_y(Spacing::SM),
+            tokens.class_styles[Class::LibrarySortDropdown.index()]
+                .layout
+                .padding_x(Spacing::MD),
+        ])
         .text_size(FontSize::MD)
         .font(ui_font(FontWeight::MEDIUM))
         .style(move |_, status| pick_list_style(tokens, Class::LibrarySortDropdown, status))
@@ -286,9 +334,21 @@ pub fn library_sort_picker<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     pick_list(options, Some(selected), on_select)
         .placeholder("Sort")
-        .width(190.0)
-        .menu_height(360.0)
-        .padding([Spacing::SM, Spacing::MD])
+        .width(
+            tokens.class_styles[Class::LibrarySortDropdown.index()]
+                .layout
+                .width
+                .unwrap_or(190.0),
+        )
+        .menu_height(tokens.primitives.library_sort_menu_height)
+        .padding([
+            tokens.class_styles[Class::LibrarySortDropdown.index()]
+                .layout
+                .padding_y(Spacing::SM),
+            tokens.class_styles[Class::LibrarySortDropdown.index()]
+                .layout
+                .padding_x(Spacing::MD),
+        ])
         .text_size(FontSize::MD)
         .font(ui_font(FontWeight::MEDIUM))
         .style(move |_, status| pick_list_style(tokens, Class::LibrarySortDropdown, status))

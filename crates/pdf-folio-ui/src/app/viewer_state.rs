@@ -116,9 +116,10 @@ impl PDFolioApp {
             },
             library: LibraryRuntime {
                 compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),
-                library_grid_zoom: preferences
-                    .grid_zoom
-                    .clamp(LIBRARY_GRID_ZOOM_MIN, LIBRARY_GRID_ZOOM_MAX),
+                library_grid_zoom: preferences.grid_zoom.clamp(
+                    layout.metric("LibraryInteraction", "grid_zoom_min", 0.25),
+                    layout.metric("LibraryInteraction", "grid_zoom_max", 12.0),
+                ),
                 library_metadata_density: LibraryMetadataDensity::from_visible_fields(
                     &preferences.visible_metadata_fields,
                 ),

@@ -2,6 +2,15 @@ primitive "viewer_find_fill" "#FFB92285"
 primitive "viewer_find_selected_fill" "#DE7F00AD"
 primitive "viewer_text_selection_mix" 0.72
 primitive "viewer_text_selection_alpha" 0.42
+primitive "slider_rail_width" 4
+primitive "slider_handle_radius" 7
+primitive "scrollbar_width" 4
+primitive "scrollbar_scroller_width" 2
+primitive "sidebar_scrollbar_width" 4
+primitive "sidebar_scrollbar_scroller_width" 2
+primitive "scrollbar_radius" 6
+primitive "auto_scroll_radius" 999
+primitive "auto_scroll_shadow_blur" 4
 
 component "ViewerToolbar" {
     layout title_min_width=28 title_max_width=360 selection_width=116
@@ -33,7 +42,7 @@ component "ViewerPageControl" {
 }
 
 component "ViewerZoomControl" {
-    layout control_width=98 menu_width=118 menu_row_height=22
+    layout control_width=98 menu_width=118 menu_row_height=22 input_width=58 button_size=28 button_padding=0 icon_size=16 menu_padding=0
 
     normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="espresso"
     normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="light"
@@ -45,6 +54,8 @@ component "ViewerZoomMenu" {
 }
 
 component "ViewerZoomMenuItem" {
+    layout padding_x=6 padding_y=0
+
     normal background="#23180C" text="$text_primary" border="#00000000" border_width=0 radius=0 theme="espresso"
     hovered background="#2B1D0E" text="$accent" border="#D4A85340" border_width=1 theme="espresso"
     pressed background="#352511" text="$accent" border="#D4A853" theme="espresso"
@@ -89,10 +100,18 @@ component "ViewerThumbnail" {
 }
 
 component "ViewerFindBar" {
-    layout width=600 height=42
+    layout width=600 height=42 input_width=140 counter_width=44 button_size=30 button_padding=0 icon_size=16 checkbox_size=16
 
     normal background="#23180C" text="#DDD0BA" border="#D4A85359" border_width=1 radius=8 theme="espresso"
+    normal theme="espresso" {
+        radius top_left=8 top_right=0 bottom_right=0 bottom_left=0
+        shadow color="$shadow" offset_x=0 offset_y=8 blur=18
+    }
     normal background="#FCFAF5" text="#261E14" border="#9C732B66" border_width=1 radius=8 theme="light"
+    normal theme="light" {
+        radius top_left=8 top_right=0 bottom_right=0 bottom_left=0
+        shadow color="$shadow" offset_x=0 offset_y=8 blur=18
+    }
 }
 
 component "ViewerFindInput" {

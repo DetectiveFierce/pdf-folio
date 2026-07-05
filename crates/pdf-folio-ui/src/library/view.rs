@@ -18,15 +18,6 @@ use pdf_folio_ui_components::library::view::{
 };
 use std::time::Duration;
 
-const LIBRARY_TOOLBAR_COMPACT_WIDTH: f32 = 760.0;
-const LIBRARY_TOOLBAR_NARROW_WIDTH: f32 = 600.0;
-const LIBRARY_BREADCRUMB_MAX_WIDTH: f32 = 150.0;
-const LIBRARY_BREADCRUMB_NARROW_WIDTH: f32 = 94.0;
-const LIBRARY_FILTER_PILL_MAX_WIDTH: f32 = 170.0;
-const LIBRARY_FILTER_PILL_NARROW_WIDTH: f32 = 112.0;
-const LIBRARY_REORDER_HINT_WIDTH: f32 = 190.0;
-const LIBRARY_REORDER_HINT_NARROW_WIDTH: f32 = 118.0;
-
 #[path = "view/dialogs.rs"]
 mod dialogs;
 #[path = "view/entries.rs"]
@@ -50,8 +41,12 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let entry_scroll_offset = (app.library.library_scroll_offset - folder_section_height).max(0.0);
     let window = app.visible_library_entry_window_at(entries.len(), entry_scroll_offset);
     let toolbar_width = library_toolbar_available_width(app);
-    let compact_toolbar = toolbar_width < LIBRARY_TOOLBAR_COMPACT_WIDTH;
-    let narrow_toolbar = toolbar_width < LIBRARY_TOOLBAR_NARROW_WIDTH;
+    let compact_toolbar = toolbar_width
+        < app
+            .layout()
+            .metric("LibraryToolbar", "compact_width", 760.0);
+    let narrow_toolbar =
+        toolbar_width < app.layout().metric("LibraryToolbar", "narrow_width", 600.0);
     let mut search_row = row![];
     if !app.library.library_tag_sidebar_open {
         search_row = search_row.push(sidebar_chevron_button(
@@ -142,6 +137,7 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         content = content.push(dismissible_error_banner(
             error,
             tokens,
+            app.layout(),
             Message::DismissLibraryError,
         ));
     }
@@ -276,12 +272,17 @@ pub(crate) fn view_library_breadcrumb_row<'a>(
     reorder_hint: &'a str,
 ) -> Element<'a, Message> {
     let toolbar_width = library_toolbar_available_width(app);
-    let compact = toolbar_width < LIBRARY_TOOLBAR_COMPACT_WIDTH;
-    let narrow = toolbar_width < LIBRARY_TOOLBAR_NARROW_WIDTH;
+    let compact = toolbar_width
+        < app
+            .layout()
+            .metric("LibraryToolbar", "compact_width", 760.0);
+    let narrow = toolbar_width < app.layout().metric("LibraryToolbar", "narrow_width", 600.0);
     let breadcrumb_width = if narrow {
-        LIBRARY_BREADCRUMB_NARROW_WIDTH
+        app.layout()
+            .metric("LibraryToolbar", "breadcrumb_narrow_width", 94.0)
     } else {
-        LIBRARY_BREADCRUMB_MAX_WIDTH
+        app.layout()
+            .metric("LibraryToolbar", "breadcrumb_width", 150.0)
     };
     let breadcrumbs = app.folder_breadcrumbs();
     let active_index = breadcrumbs.len().saturating_sub(1);
@@ -321,19 +322,21 @@ pub(crate) fn view_library_breadcrumb_row<'a>(
     .align_y(iced::Alignment::Center)
     .width(Length::Fill);
     controls = controls.push(component_library_grid_zoom_control(
-        LIBRARY_GRID_ZOOM_MIN,
+        app.library_grid_zoom_min(),
         app.library_grid_zoom_max(),
         app.library_grid_zoom(),
-        LIBRARY_GRID_ZOOM_STEP,
+        app.library_grid_zoom_step(),
         app.library_grid_zoom_label(),
         tokens,
         Message::LibraryGridZoomChanged,
     ));
 
     let reorder_hint_width = if narrow {
-        LIBRARY_REORDER_HINT_NARROW_WIDTH
+        app.layout()
+            .metric("LibraryToolbar", "reorder_hint_narrow_width", 118.0)
     } else {
-        LIBRARY_REORDER_HINT_WIDTH
+        app.layout()
+            .metric("LibraryToolbar", "reorder_hint_width", 190.0)
     };
     let visible_reorder_hint =
         truncate_for_width_with_font(reorder_hint, reorder_hint_width, 0.0, FontSize::SM);
@@ -457,9 +460,11 @@ pub(crate) fn library_filter_summary<'a>(
 
     let mut row = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
     let pill_width = if narrow {
-        LIBRARY_FILTER_PILL_NARROW_WIDTH
+        app.layout()
+            .metric("LibraryToolbar", "filter_pill_narrow_width", 112.0)
     } else {
-        LIBRARY_FILTER_PILL_MAX_WIDTH
+        app.layout()
+            .metric("LibraryToolbar", "filter_pill_width", 170.0)
     };
     for label in labels {
         let visible_label = truncate_for_width_with_font(&label, pill_width, 0.0, FontSize::SM);

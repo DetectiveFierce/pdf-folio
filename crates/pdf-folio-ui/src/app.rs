@@ -204,26 +204,19 @@ const CHEVRON_UP_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width
 const CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"##;
 const GRID_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>"##;
 const LIST_LAYOUT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>"##;
-const FILE_TREE_LABEL_SIZE: u32 = FontSize::MD;
-const FILE_TREE_ROW_HEIGHT: f32 = 26.0;
 const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
 const VIEWER_SCROLLABLE_ID: &str = "viewer-scrollable";
 const LIBRARY_SEARCH_INPUT_ID: &str = "library-search-input";
 const LIBRARY_NAME_DIALOG_INPUT_ID: &str = "library-name-dialog-input";
+const LIBRARY_CREATE_FOLDER_INPUT_ID: &str = "library-create-folder-input";
 const VIEWER_FIND_INPUT_ID: &str = "viewer-find-input";
 const LIBRARY_FOLDER_RENAME_INPUT_ID: &str = "library-folder-rename-input";
 const LIBRARY_DETAILS_TITLE_INPUT_ID: &str = "library-details-title-input";
 const LIBRARY_CARD_HOVER_TICK_MS: u64 = 16;
 const LIBRARY_CARD_HOVER_DURATION_MS: u64 = 180;
-const LIBRARY_CARD_HOVER_LIFT: f32 = 2.0;
-const LIBRARY_ROW_HOVER_LIFT: f32 = 1.0;
-const LIBRARY_GRID_ZOOM_MIN: f32 = 0.25;
-const LIBRARY_GRID_ZOOM_MAX: f32 = 12.0;
 const VIEWER_THUMBNAIL_WIDTH_PX: u16 = 128;
 pub(crate) const VIEWER_ANIMATION_TICK_MS: u64 = 16;
 const VIEWER_PAGE_FADE_MS: u64 = 50;
-const LIBRARY_GRID_ZOOM_STEP: f32 = 0.05;
-const LIBRARY_GRID_ZOOM_DENSE_COLUMN_CAP: usize = 28;
 const LIBRARY_SORT_OPTIONS: [LibrarySortMode; 10] = [
     LibrarySortMode::Manual,
     LibrarySortMode::TitleAsc,
@@ -834,8 +827,8 @@ fn truncate_for_width(label: &str, width: f32, reserved_width: f32) -> String {
     truncate_for_width_with_font(label, width, reserved_width, FontSize::SM)
 }
 
-fn file_tree_label(label: &str, width: f32) -> String {
-    truncate_for_width_with_font(label, width, 0.0, FILE_TREE_LABEL_SIZE)
+fn file_tree_label(label: &str, width: f32, font_size: u32) -> String {
+    truncate_for_width_with_font(label, width, 0.0, font_size)
 }
 
 fn file_tree_font(weight: iced::font::Weight) -> Font {

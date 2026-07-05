@@ -639,7 +639,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::LibraryGridZoomChanged(zoom) => {
             app.library.library_grid_zoom =
-                zoom.clamp(LIBRARY_GRID_ZOOM_MIN, LIBRARY_GRID_ZOOM_MAX);
+                zoom.clamp(app.library_grid_zoom_min(), app.library_grid_zoom_limit());
             app.library.library_scroll_offset = app
                 .library
                 .library_scroll_offset
@@ -1750,6 +1750,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::OpenCreateFolderDialog => {
             app.library.create_folder_dialog_open = true;
+            return operation::focus(Id::new(LIBRARY_CREATE_FOLDER_INPUT_ID));
         }
         Message::CreateFolder => {
             let name = app.library.new_folder_name.trim().to_owned();

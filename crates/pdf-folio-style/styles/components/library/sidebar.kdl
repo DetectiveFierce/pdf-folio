@@ -87,7 +87,8 @@ component "SidebarTab" {
 }
 
 component "FileTree" {
-    layout padding_top=8
+    layout height=26 padding_top=8
+    text size=14 weight="medium"
 
     normal theme="espresso" {
         colors background="#201409" text="$text_secondary" border="#00000000"

@@ -10,9 +10,9 @@ use kdl::{KdlDocument, KdlNode, KdlValue};
 
 use crate::classes::{mix_color, Class, ComponentState};
 use crate::tokens::{
-    AppLabelTokens, AppLayoutTokens, BorderSide, BoxSpacing, ClassStyle, ComponentLayout,
-    ComponentTextStyle, CornerRadius, LabelSection, PrimitiveTokens, ThemeTokens, VisualBorder,
-    VisualStyle,
+    AppLabelTokens, AppLayoutTokens, BorderSide, BoxShadow, BoxSpacing, ClassStyle,
+    ComponentLayout, ComponentTextStyle, CornerRadius, LabelSection, PrimitiveTokens, ThemeTokens,
+    VisualBorder, VisualStyle,
 };
 
 const BUNDLED_STYLE_FILES: [(&str, &str); 7] = [
@@ -408,9 +408,7 @@ impl RawStyleBook {
                     self.layout.viewer_zoom_menu_row_height = value_as_f32(name, value)?
                 }
                 other => {
-                    return Err(format!(
-                        "{name}: unknown ViewerZoomControl layout `{other}`"
-                    ))
+                    self.apply_generic_app_layout_property(name, "ViewerZoomControl", other, value)?
                 }
             },
             Class::ViewerSidebar => match property {
@@ -424,7 +422,9 @@ impl RawStyleBook {
             Class::ViewerFindBar => match property {
                 "width" => self.layout.viewer_find_bar_width = value_as_f32(name, value)?,
                 "height" => self.layout.viewer_find_bar_height = value_as_f32(name, value)?,
-                other => return Err(format!("{name}: unknown ViewerFindBar layout `{other}`")),
+                other => {
+                    self.apply_generic_app_layout_property(name, "ViewerFindBar", other, value)?
+                }
             },
             Class::LibraryCard => match property {
                 "columns" => self.layout.card_grid_columns = value_as_usize(name, value)?,
@@ -496,10 +496,15 @@ impl RawStyleBook {
                 "input_width" => self.layout.jump_input_width = value_as_f32(name, value)?,
                 other => return Err(format!("{name}: unknown JumpOverlay layout `{other}`")),
             },
+            Class::MenuPanel => {
+                self.apply_generic_app_layout_property(name, "MenuPanel", property, value)?
+            }
             Class::ContextMenuPanel => match property {
                 "width" => self.layout.context_menu_panel_width = value_as_f32(name, value)?,
                 "item_height" => self.layout.context_menu_item_height = value_as_f32(name, value)?,
-                other => return Err(format!("{name}: unknown ContextMenuPanel layout `{other}`")),
+                other => {
+                    self.apply_generic_app_layout_property(name, "ContextMenuPanel", other, value)?
+                }
             },
             _ => return Err(format!("{name}: unknown layout property `{property}`")),
         }
@@ -700,6 +705,27 @@ impl RawStyleBook {
                     "height" => {
                         self.layout.app_menu_bar_height = value_as_f32(name, entry.value())?
                     }
+                    "file_width" => {
+                        self.layout.app_menu_file_width = value_as_f32(name, entry.value())?
+                    }
+                    "edit_width" => {
+                        self.layout.app_menu_edit_width = value_as_f32(name, entry.value())?
+                    }
+                    "view_width" => {
+                        self.layout.app_menu_view_width = value_as_f32(name, entry.value())?
+                    }
+                    "document_width" => {
+                        self.layout.app_menu_document_width = value_as_f32(name, entry.value())?
+                    }
+                    "library_width" => {
+                        self.layout.app_menu_library_width = value_as_f32(name, entry.value())?
+                    }
+                    "tools_width" => {
+                        self.layout.app_menu_tools_width = value_as_f32(name, entry.value())?
+                    }
+                    "help_width" => {
+                        self.layout.app_menu_help_width = value_as_f32(name, entry.value())?
+                    }
                     other => return Err(format!("{name}: unknown AppMenuBar layout `{other}`")),
                 },
                 "AppMenuPanel" => match property {
@@ -715,12 +741,46 @@ impl RawStyleBook {
                     "input_width" => {
                         self.layout.jump_input_width = value_as_f32(name, entry.value())?
                     }
-                    other => return Err(format!("{name}: unknown JumpOverlay layout `{other}`")),
+                    other => self.apply_generic_app_layout_property(
+                        name,
+                        component_name,
+                        other,
+                        entry.value(),
+                    )?,
                 },
-                other => return Err(format!("{name}: unknown app component `{other}`")),
+                other => {
+                    self.apply_generic_app_layout_property(name, other, property, entry.value())?
+                }
             }
         }
         Ok(())
+    }
+
+    fn apply_generic_app_layout_property(
+        &mut self,
+        name: &str,
+        component_name: &str,
+        property: &str,
+        value: &KdlValue,
+    ) -> Result<(), String> {
+        match value {
+            KdlValue::Integer(value) => {
+                if let Ok(count) = usize::try_from(*value) {
+                    self.layout.set_count(component_name, property, count);
+                }
+                self.layout
+                    .set_metric(component_name, property, *value as f32);
+                Ok(())
+            }
+            KdlValue::Float(value) => {
+                self.layout
+                    .set_metric(component_name, property, *value as f32);
+                Ok(())
+            }
+            _ => Err(format!(
+                "{name}: generic layout `{component_name}.{property}` must be numeric"
+            )),
+        }
     }
 
     fn apply_app_component_labels_node(
@@ -916,6 +976,9 @@ fn parse_visual_style(
                 "rounding" | "radius" => {
                     style.radius = Some(parse_corner_radius(name, child, style.radius)?);
                 }
+                "shadow" => {
+                    style.shadow = Some(parse_box_shadow(name, child, tokens)?);
+                }
                 other => {
                     return Err(format!(
                         "{name}: unsupported nested visual property `{other}`"
@@ -1081,6 +1144,28 @@ fn parse_corner_radius(
         }
     }
     Ok(radius)
+}
+
+fn parse_box_shadow(name: &str, node: &KdlNode, tokens: &ThemeTokens) -> Result<BoxShadow, String> {
+    let mut shadow = BoxShadow {
+        offset_x: 0.0,
+        offset_y: 0.0,
+        blur_radius: 0.0,
+        color: tokens.shadow,
+    };
+    for entry in node.entries() {
+        let Some(property) = entry.name().map(|name| name.value()) else {
+            continue;
+        };
+        match property {
+            "offset_x" | "x" => shadow.offset_x = value_as_f32(name, entry.value())?,
+            "offset_y" | "y" => shadow.offset_y = value_as_f32(name, entry.value())?,
+            "blur_radius" | "blur" => shadow.blur_radius = value_as_f32(name, entry.value())?,
+            "color" => shadow.color = parse_color_value(name, entry.value(), tokens)?,
+            other => return Err(format!("{name}: unsupported shadow property `{other}`")),
+        }
+    }
+    Ok(shadow)
 }
 
 fn parse_box_spacing(name: &str, node: &KdlNode) -> Result<BoxSpacing, String> {
@@ -1417,6 +1502,55 @@ fn set_primitive(tokens: &mut PrimitiveTokens, token: &str, value: f32) -> Resul
         "viewer_text_selection_mix" => tokens.viewer_text_selection_mix = value,
         "viewer_text_selection_alpha" => tokens.viewer_text_selection_alpha = value,
         "progress_girth" => tokens.progress_girth = value,
+        "slider_rail_width" => tokens.slider_rail_width = value,
+        "slider_handle_radius" => tokens.slider_handle_radius = value,
+        "scrollbar_width" => tokens.scrollbar_width = value,
+        "scrollbar_scroller_width" => tokens.scrollbar_scroller_width = value,
+        "sidebar_scrollbar_width" => tokens.sidebar_scrollbar_width = value,
+        "sidebar_scrollbar_scroller_width" => tokens.sidebar_scrollbar_scroller_width = value,
+        "scrollbar_radius" => tokens.scrollbar_radius = value,
+        "auto_scroll_radius" => tokens.auto_scroll_radius = value,
+        "auto_scroll_shadow_blur" => tokens.auto_scroll_shadow_blur = value,
+        "document_preview_line_spacing" => tokens.document_preview_line_spacing = value,
+        "document_preview_min_line_width" => tokens.document_preview_min_line_width = value,
+        "document_preview_heading_line_height" => {
+            tokens.document_preview_heading_line_height = value
+        }
+        "document_preview_body_line_height" => tokens.document_preview_body_line_height = value,
+        "document_preview_line_radius" => tokens.document_preview_line_radius = value,
+        "flush_media_background_mix" => tokens.flush_media_background_mix = value,
+        "library_view_toggle_icon_size" => tokens.library_view_toggle_icon_size = value,
+        "library_grid_zoom_label_width" => tokens.library_grid_zoom_label_width = value,
+        "library_metadata_picker_width" => tokens.library_metadata_picker_width = value,
+        "library_sort_menu_height" => tokens.library_sort_menu_height = value,
+        "folder_parent_icon_width" => tokens.folder_parent_icon_width = value,
+        "folder_parent_icon_height" => tokens.folder_parent_icon_height = value,
+        "folder_icon_size" => tokens.folder_icon_size = value,
+        "folder_icon_container_width" => tokens.folder_icon_container_width = value,
+        "folder_icon_container_height" => tokens.folder_icon_container_height = value,
+        "folder_icon_background_mix" => tokens.folder_icon_background_mix = value,
+        "library_switcher_sidebar_icon_size" => tokens.library_switcher_sidebar_icon_size = value,
+        "library_switcher_sidebar_icon_slot" => tokens.library_switcher_sidebar_icon_slot = value,
+        "library_switcher_sidebar_button_height" => {
+            tokens.library_switcher_sidebar_button_height = value
+        }
+        "library_switcher_sidebar_text_width" => tokens.library_switcher_sidebar_text_width = value,
+        "sidebar_chevron_icon_size" => tokens.sidebar_chevron_icon_size = value,
+        "sidebar_chevron_button_size" => tokens.sidebar_chevron_button_size = value,
+        "file_tree_indent_width" => tokens.file_tree_indent_width = value,
+        "file_tree_max_indent" => tokens.file_tree_max_indent = value,
+        "file_tree_meta_char_width" => tokens.file_tree_meta_char_width = value,
+        "file_tree_meta_min_width" => tokens.file_tree_meta_min_width = value,
+        "file_tree_meta_max_width" => tokens.file_tree_meta_max_width = value,
+        "file_tree_row_padding_y" => tokens.file_tree_row_padding_y = value,
+        "raindrop_tree_indent_width" => tokens.raindrop_tree_indent_width = value,
+        "raindrop_tree_max_indent" => tokens.raindrop_tree_max_indent = value,
+        "raindrop_tree_fold_width" => tokens.raindrop_tree_fold_width = value,
+        "raindrop_tree_row_padding_y" => tokens.raindrop_tree_row_padding_y = value,
+        "raindrop_new_folder_icon_size" => tokens.raindrop_new_folder_icon_size = value,
+        "menu_separator_height" => tokens.menu_separator_height = value,
+        "context_menu_separator_height" => tokens.context_menu_separator_height = value,
+        "selection_menu_button_height" => tokens.selection_menu_button_height = value,
         other => return Err(format!("unknown primitive `{other}`")),
     }
     Ok(())
@@ -1490,6 +1624,13 @@ fn set_layout_metric(tokens: &mut AppLayoutTokens, token: &str, value: f32) -> R
         "selection_title_input_min_width" => tokens.selection_title_input_min_width = value,
         "selection_author_input_min_width" => tokens.selection_author_input_min_width = value,
         "app_menu_bar_height" => tokens.app_menu_bar_height = value,
+        "app_menu_file_width" => tokens.app_menu_file_width = value,
+        "app_menu_edit_width" => tokens.app_menu_edit_width = value,
+        "app_menu_view_width" => tokens.app_menu_view_width = value,
+        "app_menu_document_width" => tokens.app_menu_document_width = value,
+        "app_menu_library_width" => tokens.app_menu_library_width = value,
+        "app_menu_tools_width" => tokens.app_menu_tools_width = value,
+        "app_menu_help_width" => tokens.app_menu_help_width = value,
         "selection_context_row_height" => tokens.selection_context_row_height = value,
         "app_menu_panel_width" => tokens.app_menu_panel_width = value,
         "app_menu_item_height" => tokens.app_menu_item_height = value,
@@ -1688,6 +1829,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
                 border_width: Some(1.0),
                 border: Some(VisualBorder::uniform(1.0, tokens.border)),
                 radius: Some(CornerRadius::uniform(0.0)),
+                shadow: None,
             },
         );
     }
@@ -1733,6 +1875,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
                 border_width: Some(1.0),
                 border: Some(VisualBorder::uniform(1.0, tokens.border)),
                 radius: Some(CornerRadius::uniform(6.0)),
+                shadow: None,
             },
         );
     }
@@ -1763,6 +1906,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
                 border_width: Some(1.0),
                 border: Some(VisualBorder::uniform(1.0, tokens.border)),
                 radius: Some(CornerRadius::uniform(6.0)),
+                shadow: None,
             },
         );
         set_class_state(

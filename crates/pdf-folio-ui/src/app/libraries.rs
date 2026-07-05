@@ -170,7 +170,7 @@ impl PDFolioApp {
         self.library.compact_view_mode = matches!(preferences.layout_mode, LibraryLayoutMode::List);
         self.library.library_grid_zoom = preferences
             .grid_zoom
-            .clamp(LIBRARY_GRID_ZOOM_MIN, LIBRARY_GRID_ZOOM_MAX);
+            .clamp(self.library_grid_zoom_min(), self.library_grid_zoom_limit());
         self.library.library_metadata_density =
             LibraryMetadataDensity::from_visible_fields(&preferences.visible_metadata_fields);
         self.library.library_sort_mode = preferences.sort_mode;

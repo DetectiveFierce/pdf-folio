@@ -68,8 +68,8 @@ pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message>
 
 fn library_switcher_sidebar_button(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(LIBRARIES_SVG))
-        .width(22.0)
-        .height(22.0)
+        .width(tokens.primitives.library_switcher_sidebar_icon_size)
+        .height(tokens.primitives.library_switcher_sidebar_icon_size)
         .style(move |_, _| iced::widget::svg::Style {
             color: Some(tokens.text_secondary),
         });
@@ -77,28 +77,26 @@ fn library_switcher_sidebar_button(app: &PDFolioApp, tokens: ThemeTokens) -> Ele
     let button = button(
         row![
             container(icon)
-                .width(30.0)
-                .height(30.0)
+                .width(tokens.primitives.library_switcher_sidebar_icon_slot)
+                .height(tokens.primitives.library_switcher_sidebar_icon_slot)
                 .center(Length::Fill),
-            text(truncate_for_width(&active_name, 170.0, 0.0))
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::MEDIUM))
-                .color(tokens.text_secondary)
-                .wrapping(Wrapping::None),
+            text(truncate_for_width(
+                &active_name,
+                tokens.primitives.library_switcher_sidebar_text_width,
+                0.0
+            ))
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary)
+            .wrapping(Wrapping::None),
         ]
         .spacing(Spacing::XS)
         .align_y(iced::Alignment::Center),
     )
     .width(Length::Shrink)
-    .height(34.0)
+    .height(tokens.primitives.library_switcher_sidebar_button_height)
     .padding([0.0, Spacing::XS])
-    .style(move |_, status| {
-        let mut style = button_style(tokens, Class::SidebarToggleButton, status);
-        style.background = None;
-        style.border.width = 0.0;
-        style.shadow = iced::Shadow::default();
-        style
-    })
+    .style(move |_, status| button_style(tokens, Class::SidebarToggleButton, status))
     .on_press(Message::OpenLibrarySwitcher);
 
     container(
@@ -148,10 +146,6 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
 
     let sidebar_tab_component = tokens.class_styles[Class::SidebarTab.index()];
     let sidebar_tab_layout = sidebar_tab_component.layout;
-    let sidebar_tab_style = sidebar_tab_component.resolve(ComponentState::Normal);
-    let tab_area_background = sidebar_tab_style
-        .background
-        .unwrap_or_else(|| sidebar_tab_area_background(tokens));
     let file_tree_component = tokens.class_styles[Class::FileTree.index()];
     let file_tree_layout = file_tree_component.layout;
     let file_tree_style = file_tree_component.resolve(ComponentState::Normal);
@@ -162,7 +156,7 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
                 .resolve(ComponentState::Active)
                 .background
         })
-        .unwrap_or_else(|| sidebar_tab_content_background(tokens));
+        .unwrap_or(tokens.surface);
     let tabs = container(
         row![
             sidebar_tab_button(
@@ -188,12 +182,7 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
         bottom: sidebar_tab_layout.margin_bottom(Spacing::XS),
         left: sidebar_tab_layout.margin_left(Spacing::SM),
     })
-    .style(move |_| {
-        let mut style = container_style(tokens, Class::Sidebar);
-        style.background = Some(iced::Background::Color(tab_area_background));
-        style.border.width = 0.0;
-        style
-    });
+    .style(move |_| container_style(tokens, Class::SidebarSection));
 
     let body = match app.library.library_sidebar_tab {
         LibrarySidebarTab::Files => view_file_tree_sidebar(app, sidebar_width, tokens),
@@ -201,7 +190,7 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
     };
 
     let body_scroll = scrollable(body)
-        .direction(sidebar_scroll_direction())
+        .direction(sidebar_scroll_direction(tokens))
         .height(Length::Fill)
         .style(move |_, status| sidebar_scrollable_style(tokens, status));
 
@@ -277,26 +266,6 @@ pub(crate) fn sidebar_tab_button<'a>(
         style.with_visual_override(state_style)
     })
     .on_press(Message::LibrarySidebarTabChanged(tab))
-}
-
-pub(crate) fn sidebar_tab_area_background(tokens: ThemeTokens) -> Color {
-    if is_dark_surface(tokens.surface) {
-        mix_color(tokens.surface, Color::BLACK, 0.34)
-    } else {
-        mix_color(tokens.surface_raised, Color::BLACK, 0.09)
-    }
-}
-
-pub(crate) fn sidebar_tab_content_background(tokens: ThemeTokens) -> Color {
-    if is_dark_surface(tokens.surface) {
-        mix_color(tokens.surface, tokens.surface_raised, 0.62)
-    } else {
-        tokens.surface
-    }
-}
-
-pub(crate) fn is_dark_surface(color: Color) -> bool {
-    color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722 < 0.5
 }
 
 pub(crate) fn view_file_tree_sidebar<'a>(
@@ -471,7 +440,7 @@ pub(crate) fn view_selected_folder_sidebar<'a>(
 
     container(
         scrollable(content)
-            .direction(sidebar_scroll_direction())
+            .direction(sidebar_scroll_direction(tokens))
             .height(Length::Fill)
             .style(move |_, status| sidebar_scrollable_style(tokens, status)),
     )
@@ -630,7 +599,7 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
 
     container(
         scrollable(content)
-            .direction(sidebar_scroll_direction())
+            .direction(sidebar_scroll_direction(tokens))
             .height(Length::Fill)
             .style(move |_, status| sidebar_scrollable_style(tokens, status)),
     )
@@ -640,11 +609,11 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
     .into()
 }
 
-pub(crate) fn sidebar_scroll_direction() -> Direction {
+pub(crate) fn sidebar_scroll_direction(tokens: ThemeTokens) -> Direction {
     Direction::Vertical(
         Scrollbar::new()
-            .width(4.0)
-            .scroller_width(2.0)
+            .width(tokens.primitives.sidebar_scrollbar_width)
+            .scroller_width(tokens.primitives.sidebar_scrollbar_scroller_width)
             .anchor(Anchor::End),
     )
 }
@@ -739,11 +708,17 @@ pub(crate) fn sidebar_detail_row<'a>(
 }
 
 pub(crate) fn sidebar_detail_primary_color(tokens: ThemeTokens) -> Color {
-    mix_color(tokens.text_secondary, tokens.text_primary, 0.52)
+    tokens.class_styles[Class::SidebarDetailRow.index()]
+        .resolve(ComponentState::Normal)
+        .text_color
+        .unwrap_or(tokens.text_primary)
 }
 
 pub(crate) fn sidebar_detail_secondary_color(tokens: ThemeTokens) -> Color {
-    with_alpha(tokens.text_secondary, 0.88)
+    tokens.class_styles[Class::SidebarSection.index()]
+        .resolve(ComponentState::Normal)
+        .text_color
+        .unwrap_or(tokens.text_secondary)
 }
 
 pub(crate) fn sidebar_folder_card_title_color(tokens: ThemeTokens) -> Color {
@@ -882,14 +857,16 @@ pub(crate) fn file_tree_row<'a>(
     let fold_button_hovered_style = fold_button_component.resolve(ComponentState::Hovered);
     let normal_style = file_tree_style.resolve(ComponentState::Normal);
     let active_style = file_tree_style.resolve(ComponentState::Active);
-    let content_background = normal_style
-        .background
-        .unwrap_or_else(|| sidebar_tab_content_background(tokens));
-    let indent = (depth as f32 * 12.0).min(72.0);
+    let content_background = normal_style.background.unwrap_or(tokens.surface);
+    let indent = (depth as f32 * tokens.primitives.file_tree_indent_width)
+        .min(tokens.primitives.file_tree_max_indent);
     let fold_width = fold_button_layout.width.unwrap_or(16.0);
-    let meta_width = meta
-        .as_ref()
-        .map_or(0.0, |value| (value.len() as f32 * 6.0).clamp(52.0, 128.0));
+    let meta_width = meta.as_ref().map_or(0.0, |value| {
+        (value.len() as f32 * tokens.primitives.file_tree_meta_char_width).clamp(
+            tokens.primitives.file_tree_meta_min_width,
+            tokens.primitives.file_tree_meta_max_width,
+        )
+    });
     let row_padding = Spacing::SM * 2.0;
     let row_spacing = Spacing::XS * if meta.is_some() { 3.0 } else { 2.0 };
     let label_width =
@@ -906,8 +883,8 @@ pub(crate) fn file_tree_row<'a>(
         } else {
             FILE_TREE_CHEVRON_RIGHT_SVG
         }))
-        .width(14.0)
-        .height(14.0)
+        .width(tokens.primitives.sidebar_chevron_icon_size)
+        .height(tokens.primitives.sidebar_chevron_icon_size)
         .style(move |_, status| iced::widget::svg::Style {
             color: Some(match status {
                 iced::widget::svg::Status::Hovered => fold_button_hovered_style
@@ -934,14 +911,19 @@ pub(crate) fn file_tree_row<'a>(
         .on_press(toggle_message)
         .into()
     } else {
-        container("").width(16.0).height(20.0).into()
+        container("")
+            .width(fold_button_layout.width.unwrap_or(16.0))
+            .height(fold_button_layout.height.unwrap_or(20.0))
+            .into()
     };
+    let label_size = file_tree_style.text.size.unwrap_or(FontSize::MD);
+    let row_height = file_tree_style.layout.height.unwrap_or(26.0);
 
     let mut content = row![
         container("").width(indent),
         chevron,
-        text(file_tree_label(&label, label_width))
-            .size(FILE_TREE_LABEL_SIZE)
+        text(file_tree_label(&label, label_width, label_size))
+            .size(label_size)
             .line_height(1.12)
             .font(file_tree_font(if active {
                 FontWeight::SEMIBOLD
@@ -968,9 +950,9 @@ pub(crate) fn file_tree_row<'a>(
     }
 
     let row_button = button(content)
-        .height(FILE_TREE_ROW_HEIGHT)
+        .height(row_height)
         .width(Length::Fill)
-        .padding([3.0, Spacing::SM])
+        .padding([tokens.primitives.file_tree_row_padding_y, Spacing::SM])
         .style(move |_, status| {
             let hovered = matches!(
                 status,
@@ -1042,8 +1024,8 @@ pub(crate) fn chevron_button<'a>(
     transparent: bool,
 ) -> Element<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
-        .width(18.0)
-        .height(18.0)
+        .width(tokens.primitives.sidebar_chevron_icon_size)
+        .height(tokens.primitives.sidebar_chevron_icon_size)
         .style(move |_, _| iced::widget::svg::Style {
             color: Some(tokens.text_secondary),
         });
@@ -1052,17 +1034,12 @@ pub(crate) fn chevron_button<'a>(
             .center_x(Length::Fill)
             .center_y(Length::Fill),
     )
-    .width(28.0)
-    .height(28.0)
+    .width(tokens.primitives.sidebar_chevron_button_size)
+    .height(tokens.primitives.sidebar_chevron_button_size)
     .padding(0)
     .style(move |_, status| {
-        let mut style = crate::style::button_style(tokens, Class::SidebarToggleButton, status);
-        if transparent {
-            style.background = None;
-            style.border.width = 0.0;
-            style.shadow = iced::Shadow::default();
-        }
-        style
+        let _ = transparent;
+        crate::style::button_style(tokens, Class::SidebarToggleButton, status)
     })
     .on_press(message);
 
@@ -1145,6 +1122,6 @@ pub(crate) fn sidebar_folder_action_text_color(tokens: ThemeTokens, enabled: boo
         tokens.class_styles[Class::SidebarFolderActionButton.index()]
             .resolve(ComponentState::Disabled)
             .text_color
-            .unwrap_or_else(|| with_alpha(tokens.text_secondary, 0.42))
+            .unwrap_or(tokens.text_secondary)
     }
 }

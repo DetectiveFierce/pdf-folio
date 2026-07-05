@@ -1,8 +1,6 @@
 use super::*;
 use iced::widget::column;
 
-const LIBRARY_CARD_TAG_ROW_LEFT_SHIFT: f32 = -4.0;
-
 pub(crate) fn library_entry_card<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -38,8 +36,8 @@ pub(crate) fn library_entry_card<'a>(
     } else {
         0.0
     };
-    let top_lift_space = LIBRARY_CARD_HOVER_LIFT * (1.0 - hover_progress);
-    let bottom_lift_space = LIBRARY_CARD_HOVER_LIFT * hover_progress;
+    let top_lift_space = app.library_card_hover_lift() * (1.0 - hover_progress);
+    let bottom_lift_space = app.library_card_hover_lift() * hover_progress;
     let mut info = column![truncated_title(
         title,
         text_width,
@@ -52,13 +50,17 @@ pub(crate) fn library_entry_card<'a>(
     .height(app.library_card_info_height())
     .width(Length::Fill);
     if !tags.is_empty() {
+        let tag_row_left_shift =
+            app.layout()
+                .metric("LibraryEntry", "card_tag_row_left_shift", -4.0);
         info = info.push(if mode != LibraryEntryRenderMode::Normal {
-            compact_tags_row(tags, tokens, content_alpha, None)
+            compact_tags_row(tags, tokens, content_alpha, tag_row_left_shift, None)
         } else {
             compact_tags_row(
                 tags,
                 tokens,
                 content_alpha,
+                tag_row_left_shift,
                 Some(|tag| Message::TagPillClicked(tag)),
             )
         });
@@ -178,8 +180,8 @@ pub(crate) fn library_entry_row<'a>(
     } else {
         0.0
     };
-    let top_lift_space = LIBRARY_ROW_HOVER_LIFT * (1.0 - hover_progress);
-    let bottom_lift_space = LIBRARY_ROW_HOVER_LIFT * hover_progress;
+    let top_lift_space = app.library_row_hover_lift() * (1.0 - hover_progress);
+    let bottom_lift_space = app.library_row_hover_lift() * hover_progress;
     let text_secondary = with_alpha(tokens.text_secondary, content_alpha);
     let accent = with_alpha(tokens.accent, content_alpha);
     let mut detail_column = column![
@@ -227,7 +229,13 @@ pub(crate) fn library_entry_row<'a>(
         )
         .into()
     } else {
-        container("").width(Length::Fixed(24.0)).into()
+        container("")
+            .width(Length::Fixed(app.layout().metric(
+                "LibraryEntry",
+                "row_checkbox_lane_width",
+                24.0,
+            )))
+            .into()
     };
     let row_content = row![
         checkbox_lane,
@@ -248,7 +256,10 @@ pub(crate) fn library_entry_row<'a>(
     .align_y(iced::Alignment::Center);
 
     let width = if mode == LibraryEntryRenderMode::Floating {
-        Length::Fixed(720.0)
+        Length::Fixed(
+            app.layout()
+                .metric("LibraryEntry", "row_floating_width", 720.0),
+        )
     } else {
         Length::Fill
     };
@@ -291,6 +302,7 @@ fn compact_tags_row<'a>(
     tags: Vec<String>,
     tokens: ThemeTokens,
     alpha: f32,
+    left_shift: f32,
     on_tag: Option<fn(String) -> Message>,
 ) -> Element<'a, Message> {
     let mut row = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
@@ -320,7 +332,7 @@ fn compact_tags_row<'a>(
     }
     container(row)
         .padding(iced::Padding {
-            left: LIBRARY_CARD_TAG_ROW_LEFT_SHIFT,
+            left: left_shift,
             ..iced::Padding::ZERO
         })
         .into()
@@ -365,11 +377,11 @@ pub(crate) fn library_entry_container_style(
                 style.border.color = mix_color(normal_border, hovered_border, hover_progress);
             }
 
-            style.shadow = iced::Shadow {
-                color: with_alpha(tokens.shadow, 0.20 + 0.10 * hover_progress),
-                offset: iced::Vector::new(0.0, 1.0 + 4.0 * hover_progress),
-                blur_radius: 7.0 + 7.0 * hover_progress,
-            };
+            if let Some(shadow) =
+                interpolate_shadow(normal_style.shadow, hovered_style.shadow, hover_progress)
+            {
+                style.shadow = shadow;
+            }
             if selected {
                 let selected_style =
                     tokens.class_styles[class.index()].resolve(ComponentState::Selected);
@@ -382,11 +394,11 @@ pub(crate) fn library_entry_container_style(
                 if let Some(border_width) = selected_style.border_width {
                     style.border.width = border_width;
                 }
-                style.shadow = iced::Shadow {
-                    color: with_alpha(tokens.shadow, 0.24 + 0.10 * hover_progress),
-                    offset: iced::Vector::new(0.0, 2.0 + 4.0 * hover_progress),
-                    blur_radius: 9.0 + 7.0 * hover_progress,
-                };
+                if let Some(shadow) =
+                    interpolate_shadow(selected_style.shadow, hovered_style.shadow, hover_progress)
+                {
+                    style.shadow = shadow;
+                }
             }
         }
         LibraryEntryRenderMode::Placeholder => {
@@ -397,14 +409,27 @@ pub(crate) fn library_entry_container_style(
         LibraryEntryRenderMode::Floating => {
             let floating_style = tokens.class_styles[class.index()].resolve(ComponentState::Active);
             style = style.with_visual_override(floating_style);
-            style.shadow = iced::Shadow {
-                color: tokens.shadow,
-                offset: iced::Vector::new(0.0, 10.0),
-                blur_radius: 18.0,
-            };
         }
     }
     style
+}
+
+fn interpolate_shadow(
+    from: Option<crate::style::BoxShadow>,
+    to: Option<crate::style::BoxShadow>,
+    progress: f32,
+) -> Option<iced::Shadow> {
+    let from = from?;
+    let to = to.unwrap_or(from);
+    let progress = progress.clamp(0.0, 1.0);
+    Some(iced::Shadow {
+        color: mix_color(from.color, to.color, progress),
+        offset: iced::Vector::new(
+            from.offset_x + (to.offset_x - from.offset_x) * progress,
+            from.offset_y + (to.offset_y - from.offset_y) * progress,
+        ),
+        blur_radius: from.blur_radius + (to.blur_radius - from.blur_radius) * progress,
+    })
 }
 
 pub(crate) fn library_entry_content_alpha(app: &PDFolioApp, mode: LibraryEntryRenderMode) -> f32 {
@@ -459,7 +484,10 @@ pub(crate) fn thumbnail_element<'a>(
     width: f32,
     alpha: f32,
 ) -> Element<'a, Message> {
-    let max_height = width * 1.32;
+    let max_height = width
+        * app
+            .layout()
+            .metric("LibraryEntry", "thumbnail_max_height_ratio", 1.32);
     if let Some(thumbnail) = app.thumbnail_for_entry(entry_id, ThumbnailSize::Default) {
         let height = width * f32::from(thumbnail.height) / f32::from(thumbnail.width.max(1));
         let display_height = height.min(max_height);
@@ -472,23 +500,7 @@ pub(crate) fn thumbnail_element<'a>(
         .width(width)
         .height(display_height)
         .clip(true)
-        .style(move |_| {
-            let mut style = container_style(tokens, Class::PagePlaceholder);
-            style.background = Some(iced::Background::Color(mix_color(
-                tokens.background,
-                tokens.surface_raised,
-                0.42,
-            )));
-            style.border.color = mix_color(tokens.border, tokens.background, 0.28);
-            if alpha < 1.0 {
-                if let Some(iced::Background::Color(mut background)) = style.background {
-                    background.a *= alpha;
-                    style.background = Some(iced::Background::Color(background));
-                }
-                style.border.color = with_alpha(style.border.color, alpha);
-            }
-            style
-        })
+        .style(move |_| flush_media_style(tokens, alpha))
         .into()
     } else {
         container(

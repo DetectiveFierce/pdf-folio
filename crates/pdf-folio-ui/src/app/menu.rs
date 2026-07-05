@@ -19,10 +19,6 @@ const APP_MENU_LABELS: [AppMenu; 7] = [
     AppMenu::Tools,
     AppMenu::Help,
 ];
-const APP_MENU_BUTTON_SPACING: f32 = 2.0;
-const APP_MENU_PANEL_SPACING: f32 = 2.0;
-const APP_MENU_SEPARATOR_HEIGHT: f32 = 1.0;
-
 pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -> Option<Message> {
     if matches!(
         action,
@@ -80,15 +76,19 @@ pub(crate) fn app_menu_action_message(app: &PDFolioApp, action: AppMenuAction) -
 pub(crate) fn view_app_menu_bar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let labels = app.labels();
+    let menu_bar_layout = tokens.class_styles[Class::MenuBar.index()].layout;
     let mut menus = row![]
-        .spacing(APP_MENU_BUTTON_SPACING)
-        .padding([0.0, Spacing::MD])
+        .spacing(menu_bar_layout.spacing.unwrap_or(2.0))
+        .padding([
+            menu_bar_layout.padding_y(0.0),
+            menu_bar_layout.padding_x(Spacing::MD),
+        ])
         .height(app.layout().app_menu_bar_height)
         .align_y(iced::Alignment::Center);
 
     for menu in APP_MENU_LABELS {
         let active = app.chrome.open_app_menu == Some(menu);
-        menus = menus.push(app_menu_button(menu, active, tokens, labels));
+        menus = menus.push(app_menu_button(menu, active, tokens, labels, app.layout()));
     }
 
     let content: Element<'_, Message> =
@@ -119,6 +119,7 @@ pub(crate) fn app_menu_button<'a>(
     active: bool,
     tokens: ThemeTokens,
     labels: &'a crate::style::AppLabelTokens,
+    layout: &crate::style::AppLayoutTokens,
 ) -> Element<'a, Message> {
     let menu_text_color = tokens.class_styles[Class::LibraryControlBar.index()]
         .resolve(ComponentState::Normal)
@@ -136,8 +137,13 @@ pub(crate) fn app_menu_button<'a>(
         .center_y(Length::Shrink),
     )
     .padding([0.0, Spacing::MD])
-    .width(app_menu_button_width(menu))
-    .height(24.0)
+    .width(app_menu_button_width(menu, layout))
+    .height(
+        tokens.class_styles[Class::MenuButton.index()]
+            .layout
+            .height
+            .unwrap_or(24.0),
+    )
     .on_press(Message::AppMenuOpened(menu))
     .style(move |_, status| {
         if active {
@@ -183,7 +189,7 @@ pub(crate) fn view_app_menu_dropdown(
     let Some(menu) = app.chrome.open_app_menu else {
         return container("").into();
     };
-    let menu_x = app_menu_x(menu);
+    let menu_x = app_menu_x(menu, app.layout(), tokens);
     let menu_y = app.layout().app_menu_bar_height;
     let mut dropdown = stack![pin(app_menu_panel(app, menu, tokens)).x(menu_x).y(menu_y)]
         .width(Length::Fill)
@@ -194,7 +200,7 @@ pub(crate) fn view_app_menu_dropdown(
             dropdown = dropdown.push(
                 pin(view_menu_flyout_panel(app, flyout, tokens))
                     .x(menu_x + app.layout().app_menu_panel_width)
-                    .y(menu_y + view_menu_flyout_y_offset(app, flyout)),
+                    .y(menu_y + view_menu_flyout_y_offset(app, flyout, tokens)),
             );
         }
     }
@@ -202,26 +208,32 @@ pub(crate) fn view_app_menu_dropdown(
     dropdown.into()
 }
 
-pub(crate) fn app_menu_x(menu: AppMenu) -> f32 {
-    let mut x = Spacing::MD;
+pub(crate) fn app_menu_x(
+    menu: AppMenu,
+    layout: &crate::style::AppLayoutTokens,
+    tokens: ThemeTokens,
+) -> f32 {
+    let menu_bar_layout = tokens.class_styles[Class::MenuBar.index()].layout;
+    let spacing = menu_bar_layout.spacing.unwrap_or(2.0);
+    let mut x = menu_bar_layout.padding_x(Spacing::MD);
     for candidate in APP_MENU_LABELS {
         if candidate == menu {
             break;
         }
-        x += app_menu_button_width(candidate) + APP_MENU_BUTTON_SPACING;
+        x += app_menu_button_width(candidate, layout) + spacing;
     }
     x
 }
 
-pub(crate) fn app_menu_button_width(menu: AppMenu) -> f32 {
+pub(crate) fn app_menu_button_width(menu: AppMenu, layout: &crate::style::AppLayoutTokens) -> f32 {
     match menu {
-        AppMenu::File => 48.0,
-        AppMenu::Edit => 48.0,
-        AppMenu::View => 56.0,
-        AppMenu::Document => 88.0,
-        AppMenu::Library => 68.0,
-        AppMenu::Tools => 58.0,
-        AppMenu::Help => 56.0,
+        AppMenu::File => layout.app_menu_file_width,
+        AppMenu::Edit => layout.app_menu_edit_width,
+        AppMenu::View => layout.app_menu_view_width,
+        AppMenu::Document => layout.app_menu_document_width,
+        AppMenu::Library => layout.app_menu_library_width,
+        AppMenu::Tools => layout.app_menu_tools_width,
+        AppMenu::Help => layout.app_menu_help_width,
     }
 }
 
@@ -231,7 +243,10 @@ pub(crate) fn app_menu_panel<'a>(
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     let labels = app.labels();
-    let mut panel = column![].spacing(2.0).padding(Spacing::XS);
+    let menu_panel_layout = tokens.class_styles[Class::MenuPanel.index()].layout;
+    let mut panel = column![]
+        .spacing(menu_panel_layout.spacing.unwrap_or(2.0))
+        .padding(menu_panel_layout.padding_x(Spacing::XS));
     match menu {
         AppMenu::File => {
             panel = panel
@@ -656,27 +671,22 @@ pub(crate) fn app_menu_panel<'a>(
 
     container(panel)
         .width(app.layout().app_menu_panel_width)
-        .style(move |_| {
-            let mut style = container_style(tokens, Class::MenuPanel);
-            style.shadow = iced::Shadow {
-                color: tokens.shadow,
-                offset: iced::Vector::new(0.0, 8.0),
-                blur_radius: 18.0,
-            };
-            style
-        })
+        .style(move |_| container_style(tokens, Class::MenuPanel))
         .into()
 }
 
-fn view_menu_flyout_y_offset(app: &PDFolioApp, flyout: ViewMenuFlyout) -> f32 {
+fn view_menu_flyout_y_offset(app: &PDFolioApp, flyout: ViewMenuFlyout, tokens: ThemeTokens) -> f32 {
     let item_height = app.layout().app_menu_item_height;
-    let scrolling_y = Spacing::XS
-        + item_height * 4.0
-        + APP_MENU_SEPARATOR_HEIGHT * 2.0
-        + APP_MENU_PANEL_SPACING * 6.0;
+    let panel_spacing = tokens.class_styles[Class::MenuPanel.index()]
+        .layout
+        .spacing
+        .unwrap_or(2.0);
+    let separator_height = tokens.primitives.menu_separator_height;
+    let scrolling_y =
+        Spacing::XS + item_height * 4.0 + separator_height * 2.0 + panel_spacing * 6.0;
     match flyout {
         ViewMenuFlyout::Scrolling => scrolling_y,
-        ViewMenuFlyout::Spreads => scrolling_y + item_height + APP_MENU_PANEL_SPACING,
+        ViewMenuFlyout::Spreads => scrolling_y + item_height + panel_spacing,
     }
 }
 
@@ -685,7 +695,10 @@ fn view_menu_flyout_panel<'a>(
     flyout: ViewMenuFlyout,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let mut panel = column![].spacing(2.0).padding(Spacing::XS);
+    let menu_panel_layout = tokens.class_styles[Class::MenuPanel.index()].layout;
+    let mut panel = column![]
+        .spacing(menu_panel_layout.spacing.unwrap_or(2.0))
+        .padding(menu_panel_layout.padding_x(Spacing::XS));
 
     match flyout {
         ViewMenuFlyout::Scrolling => {
@@ -724,15 +737,7 @@ fn view_menu_flyout_panel<'a>(
 
     container(panel)
         .width(app.layout().app_menu_panel_width)
-        .style(move |_| {
-            let mut style = container_style(tokens, Class::MenuPanel);
-            style.shadow = iced::Shadow {
-                color: tokens.shadow,
-                offset: iced::Vector::new(0.0, 8.0),
-                blur_radius: 18.0,
-            };
-            style
-        })
+        .style(move |_| container_style(tokens, Class::MenuPanel))
         .into()
 }
 
