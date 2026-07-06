@@ -446,7 +446,7 @@ fn default_sync_device_id() -> String {
         .unwrap_or_else(|| String::from("local-device"))
 }
 
-fn start_auto_sync_now(app: &mut PDFolioApp) -> Task<Message> {
+pub(super) fn start_auto_sync_now(app: &mut PDFolioApp) -> Task<Message> {
     if !app.sync_auth.is_signed_in() || app.sync_in_progress {
         return Task::none();
     }
