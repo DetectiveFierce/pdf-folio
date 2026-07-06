@@ -244,16 +244,20 @@ async fn run_sync_command(args: SyncArgs) -> Result<()> {
             }
         }
         SyncCommand::UploadBlobs => {
+            let client = sync_client()?;
             let profiles = sync_profiles(args.db, args.library_id.as_deref(), false).await?;
-            let session =
-                cached_session().context("No cached sync session. Run `pdf-folio sync auth`.")?;
-            let r2 = R2Client::new(session);
+            let cache = BlobCache::open_default()?;
             for profile in profiles {
                 let db = Db::open(&profile.db_path)?;
-                let (uploaded, skipped) = upload_blobs(&db, &r2).await?;
+                let upload = client.upload_local_blobs(&db, &cache).await?;
                 println!(
-                    "Blob upload for `{}` complete: {uploaded} uploaded, {skipped} skipped.",
-                    profile.name
+                    "Blob upload for `{}` complete: {} uploaded, {} already remote, {} skipped, {} failed. Cache: {}",
+                    profile.name,
+                    upload.uploaded_blobs,
+                    upload.already_remote_blobs,
+                    upload.skipped_blobs,
+                    upload.failed_blobs,
+                    cache.root().display()
                 );
             }
         }
@@ -286,7 +290,7 @@ async fn run_sync_command(args: SyncArgs) -> Result<()> {
             let cache = BlobCache::open_default()?;
             for profile in profiles {
                 let db = Db::open(&profile.db_path)?;
-                let (uploaded, upload_skipped) = upload_blobs(&db, &client.r2).await?;
+                let upload = client.upload_local_blobs(&db, &cache).await?;
                 let report = client
                     .sync_crdt_metadata(&db, &profile.id, &device_id)
                     .await?;
@@ -294,8 +298,12 @@ async fn run_sync_command(args: SyncArgs) -> Result<()> {
                     .hydrate_remote_library(&db, &profile.id, &cache)
                     .await?;
                 println!(
-                    "`{}`: uploaded {uploaded} blobs, skipped {upload_skipped}.",
-                    profile.name
+                    "`{}`: uploaded {} blobs, {} already remote, {} skipped, {} failed.",
+                    profile.name,
+                    upload.uploaded_blobs,
+                    upload.already_remote_blobs,
+                    upload.skipped_blobs,
+                    upload.failed_blobs
                 );
                 println!(
                     "`{}`: CRDT metadata sync generated {}, pushed {}, pulled {} operations.",
@@ -326,27 +334,6 @@ async fn run_sync_command(args: SyncArgs) -> Result<()> {
         }
     }
     Ok(())
-}
-
-async fn upload_blobs(db: &Db, r2: &R2Client) -> Result<(usize, usize)> {
-    let entries = db.get_all_entries()?;
-    let mut uploaded = 0_usize;
-    let mut skipped = 0_usize;
-    for entry in entries {
-        if !entry.path.is_file() {
-            skipped += 1;
-            continue;
-        }
-        let response = r2
-            .upload_pdf_if_missing(entry.id.as_str(), &entry.path)
-            .await?;
-        if response.upload_url.is_some() {
-            uploaded += 1;
-        } else {
-            skipped += 1;
-        }
-    }
-    Ok((uploaded, skipped))
 }
 
 async fn download_blobs(

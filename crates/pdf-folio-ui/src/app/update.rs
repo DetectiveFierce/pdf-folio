@@ -421,11 +421,11 @@ fn auto_sync_task(db: Arc<Db>, library_id: String) -> Task<Message> {
                 pdf_folio_sync::cached_session().context("No cached sync session is available.")?;
             let client = pdf_folio_sync::SyncClient::new(session);
             client.ensure_remote_schema().await?;
-            let uploads = client.upload_local_blobs(&db).await?;
+            let cache = pdf_folio_sync::BlobCache::open_default()?;
+            let uploads = client.upload_local_blobs(&db, &cache).await?;
             let crdt = client
                 .sync_crdt_metadata(&db, &library_id, &default_sync_device_id())
                 .await?;
-            let cache = pdf_folio_sync::BlobCache::open_default()?;
             let hydration = client
                 .hydrate_remote_library(&db, &library_id, &cache)
                 .await?;

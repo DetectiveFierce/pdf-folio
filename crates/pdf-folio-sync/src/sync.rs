@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use pdf_folio_db::{
-    Db, SyncCrdtOperation, SyncCrdtPrepareSummary, SyncEntryFolderRow, SyncEntryRow, SyncFolderRow,
+    hash_file, Db, LibraryEntry, SyncCrdtOperation, SyncCrdtPrepareSummary, SyncEntryFolderRow,
+    SyncEntryRow, SyncFolderRow,
 };
 use serde::{Deserialize, Serialize};
 
@@ -189,21 +191,34 @@ impl SyncClient {
         Ok(())
     }
 
-    /// Uploads local content-addressed PDF files to remote object storage.
+    /// Ingests local content-addressed PDF files into the managed blob cache and uploads them.
     ///
-    /// Individual blob upload failures are counted instead of aborting the
-    /// whole pass. Metadata sync can still converge, and receiving devices can
-    /// hydrate entries as missing until a later automatic sync uploads the blob.
+    /// PDF bytes are always uploaded from PDF-Folio's content-addressed cache,
+    /// not from an arbitrary user-selected path. When a source PDF is first
+    /// seen, this pass copies it into the cache and relinks the local library
+    /// entry to that managed path. Individual failures are counted instead of
+    /// aborting the whole pass.
     ///
     /// # Errors
     ///
     /// Returns an error when local entries cannot be read.
-    pub async fn upload_local_blobs(&self, db: &Db) -> Result<SyncBlobUploadReport> {
+    pub async fn upload_local_blobs(
+        &self,
+        db: &Db,
+        cache: &BlobCache,
+    ) -> Result<SyncBlobUploadReport> {
         let mut report = SyncBlobUploadReport::default();
         for entry in db.get_all_entries()? {
-            if !is_blob_hash(entry.id.as_str()) || !entry.path.is_file() {
+            if !is_blob_hash(entry.id.as_str()) {
                 report.skipped_blobs += 1;
                 continue;
+            }
+            let Some(upload_path) = managed_blob_path_for_entry(cache, &entry).await? else {
+                report.skipped_blobs += 1;
+                continue;
+            };
+            if entry.path != upload_path {
+                db.relink_entry_path(&entry.id, &upload_path)?;
             }
             if db.sync_blob_uploaded_at(entry.id.as_str())?.is_some() {
                 report.already_remote_blobs += 1;
@@ -211,7 +226,7 @@ impl SyncClient {
             }
             match self
                 .r2
-                .upload_pdf_if_missing(entry.id.as_str(), &entry.path)
+                .upload_pdf_if_missing(entry.id.as_str(), &upload_path)
                 .await
             {
                 Ok(response) => {
@@ -457,6 +472,63 @@ impl SyncClient {
 struct PreparedCrdtOperations {
     summary: SyncCrdtPrepareSummary,
     pending_operations: Vec<SyncCrdtOperation>,
+}
+
+async fn managed_blob_path_for_entry(
+    cache: &BlobCache,
+    entry: &LibraryEntry,
+) -> Result<Option<PathBuf>> {
+    let hash = entry.id.as_str();
+    let path = cache.path_for_hash(hash);
+    if path.is_file() {
+        return Ok(Some(path));
+    }
+    if !entry.path.is_file() {
+        return Ok(None);
+    }
+
+    let source_path = entry.path.clone();
+    let expected_hash = hash.to_owned();
+    let source_hash = tokio::task::spawn_blocking(move || hash_file(&source_path)).await??;
+    if source_hash != expected_hash {
+        return Ok(None);
+    }
+
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let temp_path = path.with_file_name(format!(
+        "{}.{}.tmp",
+        hash,
+        Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    tokio::fs::copy(&entry.path, &temp_path)
+        .await
+        .with_context(|| {
+            format!(
+                "Could not copy {} into sync blob cache.",
+                entry.path.display()
+            )
+        })?;
+
+    let copied_path = temp_path.clone();
+    let copied_hash = tokio::task::spawn_blocking(move || hash_file(&copied_path)).await??;
+    if copied_hash != hash {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Ok(None);
+    }
+
+    match tokio::fs::rename(&temp_path, &path).await {
+        Ok(()) => {}
+        Err(_error) if path.is_file() => {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("Could not install sync blob at {}.", path.display()))
+        }
+    }
+    Ok(Some(path))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
