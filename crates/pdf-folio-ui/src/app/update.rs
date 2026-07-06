@@ -415,6 +415,35 @@ pub(super) fn pending_raindrop_rollback_check_task() -> Task<Message> {
 
 pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
     match message {
+        Message::SyncSignInRequested => {
+            app.sync_auth.state = SyncAuthState::SigningIn;
+            app.sync_auth.error = None;
+            return app_sync_auth::sync_sign_in_task(
+                app.sync_auth.expected_email.clone(),
+                app.sync_auth.server_base_url.clone(),
+            );
+        }
+        Message::SyncSignInFinished(result) => match result {
+            Ok(session) => match app.sync_auth.apply_signed_in_session(session) {
+                Ok(()) => {
+                    app.mode = AppMode::Library;
+                    app.library.library_startup_loading = true;
+                    return Task::batch([
+                        app.refresh_folders(),
+                        app.refresh_library(),
+                        attribute_pending_metadata_task(Arc::clone(&app.db)),
+                        pending_raindrop_rollback_check_task(),
+                    ]);
+                }
+                Err(error) => {
+                    app.sync_auth.error = Some(error.to_string());
+                }
+            },
+            Err(error) => {
+                app.sync_auth.state = SyncAuthState::SignedOut;
+                app.sync_auth.error = Some(error);
+            }
+        },
         Message::AppMenuOpened(menu) => {
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();

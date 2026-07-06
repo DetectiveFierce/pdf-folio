@@ -67,8 +67,14 @@ impl PDFolioApp {
             }
         };
         let layout = style_book.layout();
+        let sync_auth = SyncAuthRuntime::load();
+        let auth_ready = sync_auth.is_signed_in();
         Ok(Self {
-            mode: AppMode::Library,
+            mode: if auth_ready {
+                AppMode::Library
+            } else {
+                AppMode::SignedOut
+            },
             viewer: ViewerRuntime {
                 doc: None,
                 current_entry_id: None,
@@ -175,7 +181,7 @@ impl PDFolioApp {
                 details_author_input: String::new(),
                 library_status: None,
                 library_error: None,
-                library_startup_loading: true,
+                library_startup_loading: auth_ready,
                 library_history_restore_started_at: None,
                 raindrop_connect_dialog_open: false,
                 raindrop_callback_copied: false,
@@ -227,6 +233,7 @@ impl PDFolioApp {
                 style_load_error,
             },
             settings,
+            sync_auth,
             db,
             pending_session_restore: None,
         })
@@ -258,11 +265,13 @@ impl PDFolioApp {
             return Ok(app);
         };
 
-        app.mode = AppMode::Viewer;
-        app.pending_session_restore = None;
-        app.viewer.document_error = Some(format!("Opening {}...", path.display()));
-        app.viewer.pending_document_open = true;
-        app.viewer.document_open_started_at = Some(Instant::now());
+        if app.sync_auth.is_signed_in() {
+            app.mode = AppMode::Viewer;
+            app.pending_session_restore = None;
+            app.viewer.document_error = Some(format!("Opening {}...", path.display()));
+            app.viewer.pending_document_open = true;
+            app.viewer.document_open_started_at = Some(Instant::now());
+        }
 
         Ok(app)
     }

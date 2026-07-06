@@ -24,7 +24,9 @@ const OVERFLOW_VERTICAL_SVG: &[u8] = include_bytes!("../../assets/icons/overflow
 
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
-    let base_content: Element<'_, Message> = if app.mode == AppMode::LibrarySwitcher {
+    let base_content: Element<'_, Message> = if app.mode == AppMode::SignedOut {
+        view_signed_out(app, tokens)
+    } else if app.mode == AppMode::LibrarySwitcher {
         view_library_switcher(app, tokens)
     } else if app.mode == AppMode::Viewer && app.viewer.doc.is_some() {
         let sidebar: Element<'_, Message> = if app.viewer.toc_open {
@@ -229,6 +231,65 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     } else {
         shell
     }
+}
+
+fn view_signed_out(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let signing_in = matches!(app.sync_auth.state, SyncAuthState::SigningIn);
+    let button_label = if signing_in {
+        "Signing in..."
+    } else {
+        "Sign in with Google"
+    };
+    let mut action = button(text(button_label).size(FontSize::MD))
+        .padding([10, 16])
+        .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status));
+    if !signing_in {
+        action = action.on_press(Message::SyncSignInRequested);
+    }
+
+    let status_text = match &app.sync_auth.state {
+        SyncAuthState::WrongAccount { email: Some(email) } => format!(
+            "Signed in as {email}. This library is locked to {}.",
+            app.sync_auth.expected_email
+        ),
+        SyncAuthState::WrongAccount { email: None } => {
+            format!(
+                "This library is locked to {}.",
+                app.sync_auth.expected_email
+            )
+        }
+        SyncAuthState::SigningIn => String::from("Waiting for Google sign-in to finish..."),
+        _ => format!(
+            "Sign in as {} to open your library.",
+            app.sync_auth.expected_email
+        ),
+    };
+
+    let mut panel = column![
+        text("PDF-Folio")
+            .size(FontSize::HEADING)
+            .wrapping(Wrapping::None),
+        text(status_text)
+            .size(FontSize::MD)
+            .wrapping(Wrapping::Word),
+        action
+    ]
+    .spacing(Spacing::MD)
+    .align_x(iced::Alignment::Center)
+    .width(Length::Fixed(420.0));
+
+    if let Some(error) = app.sync_auth.error.as_deref() {
+        panel = panel.push(text(error).size(FontSize::SM).wrapping(Wrapping::Word));
+    }
+
+    container(panel)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .padding(Spacing::LG)
+        .style(move |_| container_style(tokens, Class::AppShell))
+        .into()
 }
 
 fn view_library_switcher(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {

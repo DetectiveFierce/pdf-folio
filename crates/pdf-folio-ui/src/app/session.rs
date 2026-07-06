@@ -97,6 +97,7 @@ impl PDFolioApp {
             version: SESSION_SCHEMA_VERSION,
             active_library_id: self.libraries.active_library_id.clone(),
             mode: match self.mode {
+                AppMode::SignedOut => SessionMode::Library,
                 AppMode::Library => SessionMode::Library,
                 AppMode::Viewer => SessionMode::Viewer,
                 AppMode::LibrarySwitcher => SessionMode::Library,

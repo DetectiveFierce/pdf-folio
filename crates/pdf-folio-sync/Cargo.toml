@@ -1,25 +1,22 @@
 [package]
-name = "pdf-folio-main"
+name = "pdf-folio-sync"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[[bin]]
-name = "pdf-folio"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
+blake3.workspace = true
 chrono.workspace = true
-clap.workspace = true
 directories.workspace = true
 pdf-folio-db = { path = "../pdf-folio-db" }
-pdf-folio-sync = { path = "../pdf-folio-sync" }
-pdf-folio-ui = { path = "../pdf-folio-ui" }
+rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
+url.workspace = true
+webbrowser.workspace = true

@@ -1,0 +1,11 @@
+services:
+  folio-sync-server:
+    build:
+      context: ..
+      dockerfile: packaging/folio-sync-server.Dockerfile
+    image: pdf-folio-sync-server:latest
+    env_file:
+      - ../.env
+    ports:
+      - "${PDF_FOLIO_TAILSCALE_IP:-127.0.0.1}:53148:53148"
+    restart: unless-stopped

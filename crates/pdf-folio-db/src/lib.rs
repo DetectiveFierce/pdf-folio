@@ -23,7 +23,7 @@ pub use db::{
     Db, EntryFolderMembership, EntryId, EntryTrashState, Folder, FolderId, ImportSource,
     LibraryEntry, LibraryFolderSnapshot, LibraryLayoutMode, LibraryOrganizationSnapshot,
     LibraryPreferences, LibrarySortMode, NewLibraryEntry, RaindropCollectionMapping,
-    RaindropEntryMapping,
+    RaindropEntryMapping, SyncEntryFolderRow, SyncEntryRow, SyncFolderRow, SyncSeedSummary,
 };
 pub use importer::{
     hash_file, import_folder, import_pdf, scan_pdf_files, thumbnail_cache_dir, thumbnail_path,

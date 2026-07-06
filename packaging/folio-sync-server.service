@@ -1,0 +1,16 @@
+[Unit]
+Description=PDF-Folio sync server
+Requires=docker.service tailscaled.service
+After=docker.service tailscaled.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/mind-palace/services/folio-sync-server/app
+ExecStart=/usr/bin/docker compose --env-file .env -f packaging/folio-sync-server.compose.yml up -d --force-recreate
+ExecStop=/usr/bin/docker compose --env-file .env -f packaging/folio-sync-server.compose.yml stop
+RemainAfterExit=yes
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

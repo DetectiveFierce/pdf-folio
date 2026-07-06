@@ -4,6 +4,8 @@ members = [
     "crates/pdf-folio-core",
     "crates/pdf-folio-db",
     "crates/pdf-folio-raindrop",
+    "crates/pdf-folio-sync",
+    "crates/pdf-folio-sync-server",
     "crates/pdf-folio-style",
     "crates/pdf-folio-viewer",
     "crates/pdf-folio-ui-components",
@@ -20,24 +22,31 @@ repository = "https://github.com/pdf-folio/pdf-folio"
 
 [workspace.dependencies]
 anyhow = "1.0.103"
+axum = "0.8.7"
+base64 = "0.22.1"
 blake3 = "1.8.5"
 chrono = { version = "0.4.45", features = ["serde"] }
-clap = { version = "4.6.1", features = ["derive"] }
+clap = { version = "4.6.1", features = ["derive", "env"] }
 directories = "6.0.0"
 fontdb = "0.23.0"
+hex = "0.4.3"
+hmac = "0.12.1"
 iced = { version = "0.14.0", features = ["advanced", "canvas", "tokio", "image", "svg"] }
 image = "0.25.10"
+jsonwebtoken = { version = "10.4.0", features = ["rust_crypto"] }
 kdl = "6.7.1"
 lru = "0.18.0"
 notify = "9.0.0-rc.4"
 pdf-writer = "0.15.0"
 pdfium-render = { version = "0.9.2", features = ["thread_safe"] }
 rayon = "1.12.0"
+rand = "0.9.2"
 reqwest = { version = "0.12.26", default-features = false, features = ["brotli", "deflate", "gzip", "json", "rustls-tls", "zstd"] }
 rfd = "0.17.2"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+sha2 = "0.10.9"
 tantivy = "0.26.1"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }

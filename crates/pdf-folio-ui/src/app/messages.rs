@@ -345,6 +345,10 @@ impl ViewerSidebarTab {
 pub enum Message {
     /// Open the native file picker.
     OpenFileDialog,
+    /// Start Google sync sign-in.
+    SyncSignInRequested,
+    /// Google sync sign-in finished.
+    SyncSignInFinished(Result<pdf_folio_sync::Session, String>),
     /// The native file picker was dismissed without choosing a file.
     FileDialogCanceled,
     /// A file was selected.

@@ -45,6 +45,8 @@ mod app_library_selection;
 mod app_library_view_state;
 #[path = "app/session.rs"]
 mod app_session;
+#[path = "app/sync_auth.rs"]
+mod app_sync_auth;
 #[path = "app/update.rs"]
 mod app_update;
 #[path = "app/view.rs"]
@@ -198,6 +200,7 @@ use app_libraries::{
     load_library_registry, LibraryNameDialog, LibraryProfile, LibraryRegistryRuntime,
 };
 use app_session::{load_app_session, save_app_session, AppSession};
+use app_sync_auth::{SyncAuthRuntime, SyncAuthState};
 use app_update::{pending_raindrop_rollback_check_task, update};
 use app_view::view;
 use app_viewer_layout::*;
@@ -270,6 +273,8 @@ const SINGLE_MORE_ACTIONS: [SelectionToolbarAction; 2] = [
 /// Primary app mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
+    /// Sync sign-in gate.
+    SignedOut,
     /// Library manager view.
     Library,
     /// PDF viewer view.
@@ -316,6 +321,8 @@ pub struct PDFolioApp {
     pub appearance: AppearanceRuntime,
     /// User settings.
     pub settings: Settings,
+    /// Sync sign-in state that gates access to the library.
+    pub sync_auth: SyncAuthRuntime,
     /// Library database handle.
     pub db: Arc<Db>,
     /// Last-run state that is waiting for library/document prerequisites.
@@ -649,15 +656,21 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
 
     let mut application = iced::application(
         move || {
-            let open_task = startup_file
-                .clone()
-                .or_else(|| startup_session.as_ref()?.viewer.document_path.clone())
-                .map(open_document_task)
-                .unwrap_or_else(Task::none);
-            (
-                app.clone(),
-                Task::batch([open_task, pending_raindrop_rollback_check_task()]),
-            )
+            let open_task = if app.sync_auth.is_signed_in() {
+                startup_file
+                    .clone()
+                    .or_else(|| startup_session.as_ref()?.viewer.document_path.clone())
+                    .map(open_document_task)
+                    .unwrap_or_else(Task::none)
+            } else {
+                Task::none()
+            };
+            let rollback_task = if app.sync_auth.is_signed_in() {
+                pending_raindrop_rollback_check_task()
+            } else {
+                Task::none()
+            };
+            (app.clone(), Task::batch([open_task, rollback_task]))
         },
         update,
         view,

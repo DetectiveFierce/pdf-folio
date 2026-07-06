@@ -532,3 +532,81 @@ fn library_preferences_round_trip() {
     assert!(!loaded.library_tree_root_expanded);
     assert_eq!(loaded.collapsed_folder_ids, vec![collapsed_folder]);
 }
+
+#[test]
+fn sync_metadata_tracks_updated_rows_and_checkpoints() {
+    let db = test_db();
+    db.upsert_sync_entry(&SyncEntryRow {
+        id: EntryId::new("entry-old"),
+        library_id: String::from("main"),
+        title: Some(String::from("Old")),
+        author: None,
+        updated_at: 10,
+        deleted_at: None,
+    })
+    .unwrap();
+    db.upsert_sync_entry(&SyncEntryRow {
+        id: EntryId::new("entry-new"),
+        library_id: String::from("main"),
+        title: Some(String::from("New")),
+        author: Some(String::from("Ada")),
+        updated_at: 20,
+        deleted_at: None,
+    })
+    .unwrap();
+    db.upsert_sync_folder(&SyncFolderRow {
+        id: FolderId::new("folder-new"),
+        library_id: String::from("main"),
+        name: String::from("Reading"),
+        parent_id: None,
+        updated_at: 30,
+        deleted_at: None,
+    })
+    .unwrap();
+    db.upsert_sync_entry_folder(&SyncEntryFolderRow {
+        entry_id: EntryId::new("entry-new"),
+        folder_id: FolderId::new("folder-new"),
+        updated_at: 40,
+        deleted_at: None,
+    })
+    .unwrap();
+
+    let entries = db.sync_entries_updated_since("main", 10).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id.as_str(), "entry-new");
+    let folders = db.sync_folders_updated_since("main", 20).unwrap();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].name, "Reading");
+    let memberships = db.sync_entry_folders_updated_since("main", 20).unwrap();
+    assert_eq!(memberships.len(), 1);
+    assert_eq!(memberships[0].folder_id.as_str(), "folder-new");
+
+    assert_eq!(db.sync_checkpoint("main", "laptop").unwrap(), None);
+    db.set_sync_checkpoint("main", "laptop", 40).unwrap();
+    assert_eq!(db.sync_checkpoint("main", "laptop").unwrap(), Some(40));
+}
+
+#[test]
+fn seed_sync_metadata_captures_current_library_state() {
+    let db = test_db();
+    let entry_id = EntryId::new("paper");
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+    let folder_id = db.create_folder("Research", None).unwrap();
+    db.add_entry_to_folder(&entry_id, &folder_id).unwrap();
+
+    let summary = db.seed_sync_metadata("default").unwrap();
+    assert_eq!(summary.entries, 1);
+    assert_eq!(summary.folders, 1);
+    assert_eq!(summary.entry_folders, 1);
+
+    let entries = db.sync_entries_updated_since("default", 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, entry_id);
+    assert_eq!(entries[0].title.as_deref(), Some("Paper"));
+    let folders = db.sync_folders_updated_since("default", 0).unwrap();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].id, folder_id);
+    let memberships = db.sync_entry_folders_updated_since("default", 0).unwrap();
+    assert_eq!(memberships.len(), 1);
+    assert_eq!(memberships[0].entry_id.as_str(), "paper");
+}

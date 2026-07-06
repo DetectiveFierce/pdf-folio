@@ -378,6 +378,64 @@ pub struct EntryTagSnapshot {
     pub tag: String,
 }
 
+/// Sync-visible metadata for an entry row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncEntryRow {
+    /// BLAKE3/content-addressed entry id.
+    pub id: EntryId,
+    /// Local library id used by the remote Turso schema.
+    pub library_id: String,
+    /// User-visible title, when known.
+    pub title: Option<String>,
+    /// User-visible author, when known.
+    pub author: Option<String>,
+    /// Last local update timestamp as a Unix timestamp.
+    pub updated_at: i64,
+    /// Tombstone timestamp, when deleted.
+    pub deleted_at: Option<i64>,
+}
+
+/// Sync-visible metadata for a folder row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncFolderRow {
+    /// Stable folder id.
+    pub id: FolderId,
+    /// Local library id used by the remote Turso schema.
+    pub library_id: String,
+    /// User-visible folder name.
+    pub name: String,
+    /// Optional parent folder id.
+    pub parent_id: Option<FolderId>,
+    /// Last local update timestamp as a Unix timestamp.
+    pub updated_at: i64,
+    /// Tombstone timestamp, when deleted.
+    pub deleted_at: Option<i64>,
+}
+
+/// Sync-visible metadata for an entry-folder membership row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncEntryFolderRow {
+    /// Entry id.
+    pub entry_id: EntryId,
+    /// Folder id.
+    pub folder_id: FolderId,
+    /// Last local update timestamp as a Unix timestamp.
+    pub updated_at: i64,
+    /// Tombstone timestamp, when deleted.
+    pub deleted_at: Option<i64>,
+}
+
+/// Counts returned after seeding local library data into sync metadata tables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SyncSeedSummary {
+    /// Entry metadata rows written.
+    pub entries: usize,
+    /// Folder metadata rows written.
+    pub folders: usize,
+    /// Entry-folder membership rows written.
+    pub entry_folders: usize,
+}
+
 /// Reversible snapshot of library organization and user-editable entry state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryOrganizationSnapshot {
@@ -512,6 +570,298 @@ impl Db {
     /// Returns the database path.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Records sync metadata for a local entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the sync row.
+    pub fn upsert_sync_entry(&self, row: &SyncEntryRow) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO sync_entries
+                (id, library_id, title, author, updated_at, deleted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id, library_id) DO UPDATE SET
+                title = excluded.title,
+                author = excluded.author,
+                updated_at = excluded.updated_at,
+                deleted_at = excluded.deleted_at",
+            params![
+                row.id.as_str(),
+                row.library_id,
+                row.title,
+                row.author,
+                row.updated_at,
+                row.deleted_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Records sync metadata for a local folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the sync row.
+    pub fn upsert_sync_folder(&self, row: &SyncFolderRow) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO sync_folders
+                (id, library_id, name, parent_id, updated_at, deleted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id, library_id) DO UPDATE SET
+                name = excluded.name,
+                parent_id = excluded.parent_id,
+                updated_at = excluded.updated_at,
+                deleted_at = excluded.deleted_at",
+            params![
+                row.id.as_str(),
+                row.library_id,
+                row.name,
+                row.parent_id.as_ref().map(FolderId::as_str),
+                row.updated_at,
+                row.deleted_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Records sync metadata for a local entry-folder membership.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the sync row.
+    pub fn upsert_sync_entry_folder(&self, row: &SyncEntryFolderRow) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO sync_entry_folders
+                (entry_id, folder_id, updated_at, deleted_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(entry_id, folder_id) DO UPDATE SET
+                updated_at = excluded.updated_at,
+                deleted_at = excluded.deleted_at",
+            params![
+                row.entry_id.as_str(),
+                row.folder_id.as_str(),
+                row.updated_at,
+                row.deleted_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Returns sync entry rows newer than `since`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query sync rows.
+    pub fn sync_entries_updated_since(
+        &self,
+        library_id: &str,
+        since: i64,
+    ) -> Result<Vec<SyncEntryRow>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, library_id, title, author, updated_at, deleted_at
+             FROM sync_entries
+             WHERE library_id = ?1 AND updated_at > ?2
+             ORDER BY updated_at ASC, id ASC",
+        )?;
+        let rows = statement.query_map(params![library_id, since], |row| {
+            Ok(SyncEntryRow {
+                id: EntryId::new(row.get::<_, String>(0)?),
+                library_id: row.get(1)?,
+                title: row.get(2)?,
+                author: row.get(3)?,
+                updated_at: row.get(4)?,
+                deleted_at: row.get(5)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load sync entry rows.")
+    }
+
+    /// Returns sync folder rows newer than `since`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query sync rows.
+    pub fn sync_folders_updated_since(
+        &self,
+        library_id: &str,
+        since: i64,
+    ) -> Result<Vec<SyncFolderRow>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, library_id, name, parent_id, updated_at, deleted_at
+             FROM sync_folders
+             WHERE library_id = ?1 AND updated_at > ?2
+             ORDER BY updated_at ASC, id ASC",
+        )?;
+        let rows = statement.query_map(params![library_id, since], |row| {
+            Ok(SyncFolderRow {
+                id: FolderId::new(row.get::<_, String>(0)?),
+                library_id: row.get(1)?,
+                name: row.get(2)?,
+                parent_id: row.get::<_, Option<String>>(3)?.map(FolderId::new),
+                updated_at: row.get(4)?,
+                deleted_at: row.get(5)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load sync folder rows.")
+    }
+
+    /// Returns sync membership rows newer than `since`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query sync rows.
+    pub fn sync_entry_folders_updated_since(
+        &self,
+        library_id: &str,
+        since: i64,
+    ) -> Result<Vec<SyncEntryFolderRow>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT ef.entry_id, ef.folder_id, ef.updated_at, ef.deleted_at
+             FROM sync_entry_folders ef
+             INNER JOIN sync_entries e ON e.id = ef.entry_id
+             WHERE e.library_id = ?1 AND ef.updated_at > ?2
+             ORDER BY ef.updated_at ASC, ef.entry_id ASC, ef.folder_id ASC",
+        )?;
+        let rows = statement.query_map(params![library_id, since], |row| {
+            Ok(SyncEntryFolderRow {
+                entry_id: EntryId::new(row.get::<_, String>(0)?),
+                folder_id: FolderId::new(row.get::<_, String>(1)?),
+                updated_at: row.get(2)?,
+                deleted_at: row.get(3)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load sync entry-folder rows.")
+    }
+
+    /// Returns the last completed sync timestamp for a library/device pair.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query the checkpoint.
+    pub fn sync_checkpoint(&self, library_id: &str, device_id: &str) -> Result<Option<i64>> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT last_synced_at FROM sync_checkpoints
+                 WHERE library_id = ?1 AND device_id = ?2",
+                params![library_id, device_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Could not load sync checkpoint.")
+    }
+
+    /// Updates the last completed sync timestamp for a library/device pair.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the checkpoint.
+    pub fn set_sync_checkpoint(
+        &self,
+        library_id: &str,
+        device_id: &str,
+        last_synced_at: i64,
+    ) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO sync_checkpoints (library_id, device_id, last_synced_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(library_id, device_id) DO UPDATE SET
+                last_synced_at = excluded.last_synced_at",
+            params![library_id, device_id, last_synced_at],
+        )?;
+        Ok(())
+    }
+
+    /// Seeds sync metadata from the current local library state.
+    ///
+    /// This is primarily used for the first sync on an existing library. It is
+    /// idempotent and does not change sync checkpoints.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when local library state cannot be read or sync metadata
+    /// cannot be written.
+    pub fn seed_sync_metadata(&self, library_id: &str) -> Result<SyncSeedSummary> {
+        let now = Utc::now().timestamp();
+        let entries = self
+            .get_all_entries()?
+            .into_iter()
+            .chain(self.get_trashed_entries()?)
+            .collect::<Vec<_>>();
+        let snapshot = self.library_organization_snapshot()?;
+
+        for entry in &entries {
+            let updated_at = entry
+                .opened_at
+                .unwrap_or(entry.added_at)
+                .timestamp()
+                .max(entry.added_at.timestamp());
+            self.upsert_sync_entry(&SyncEntryRow {
+                id: entry.id.clone(),
+                library_id: library_id.to_owned(),
+                title: entry
+                    .display_title
+                    .clone()
+                    .or_else(|| entry.title.clone())
+                    .or_else(|| {
+                        entry
+                            .path
+                            .file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .map(str::to_owned)
+                    }),
+                author: entry
+                    .display_author
+                    .clone()
+                    .or_else(|| entry.author.clone()),
+                updated_at,
+                deleted_at: snapshot
+                    .entry_trash_states
+                    .iter()
+                    .find(|state| state.entry_id == entry.id)
+                    .and_then(|state| state.trashed_at)
+                    .map(|timestamp| timestamp.timestamp()),
+            })?;
+        }
+
+        for folder in &snapshot.folders {
+            let deleted_at = folder.trashed_at.map(|timestamp| timestamp.timestamp());
+            self.upsert_sync_folder(&SyncFolderRow {
+                id: folder.id.clone(),
+                library_id: library_id.to_owned(),
+                name: folder.name.clone(),
+                parent_id: folder.parent_id.clone(),
+                updated_at: folder.updated_at.timestamp(),
+                deleted_at,
+            })?;
+        }
+
+        for membership in &snapshot.entry_folders {
+            self.upsert_sync_entry_folder(&SyncEntryFolderRow {
+                entry_id: membership.entry_id.clone(),
+                folder_id: membership.folder_id.clone(),
+                updated_at: now,
+                deleted_at: None,
+            })?;
+        }
+
+        Ok(SyncSeedSummary {
+            entries: entries.len(),
+            folders: snapshot.folders.len(),
+            entry_folders: snapshot.entry_folders.len(),
+        })
     }
 
     /// Inserts or replaces a library entry.
@@ -2399,6 +2749,41 @@ impl Db {
                 file_name   TEXT,
                 file_size   INTEGER,
                 PRIMARY KEY (source_id, raindrop_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS sync_entries (
+                id          TEXT NOT NULL,
+                library_id  TEXT NOT NULL,
+                title       TEXT,
+                author      TEXT,
+                updated_at  INTEGER NOT NULL,
+                deleted_at  INTEGER,
+                PRIMARY KEY (id, library_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS sync_folders (
+                id          TEXT NOT NULL,
+                library_id  TEXT NOT NULL,
+                name        TEXT NOT NULL,
+                parent_id   TEXT,
+                updated_at  INTEGER NOT NULL,
+                deleted_at  INTEGER,
+                PRIMARY KEY (id, library_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS sync_entry_folders (
+                entry_id    TEXT NOT NULL,
+                folder_id   TEXT NOT NULL,
+                updated_at  INTEGER NOT NULL,
+                deleted_at  INTEGER,
+                PRIMARY KEY (entry_id, folder_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS sync_checkpoints (
+                library_id      TEXT NOT NULL,
+                device_id       TEXT NOT NULL,
+                last_synced_at  INTEGER NOT NULL,
+                PRIMARY KEY (library_id, device_id)
             );
 
             INSERT OR IGNORE INTO schema_version (version) VALUES (1);

@@ -24,9 +24,12 @@ The project is currently organized as a Rust workspace with separate crates for 
 
 ### Library Manager
 
+- Create, rename, delete, preview, and switch between multiple named local libraries.
 - Import a folder recursively and add all discovered PDF files.
+- Import selected PDFs from Raindrop.io, including uploaded PDF files, tags, and optional folder/collection mirroring.
 - Content-based PDF IDs using BLAKE3 hashes.
 - SQLite-backed library metadata store.
+- Last-session restore for the active library, theme, window size, library filters/selection, and open viewer state.
 - Persisted library preferences for sort mode, layout mode, selected folder, and sidebar width.
 - Grid and list library layouts.
 - Masonry-style grid cards with cached cover thumbnails.
@@ -47,6 +50,9 @@ The project is currently organized as a Rust workspace with separate crates for 
   - Missing
 - Manual reorder support when the library is unfiltered and sorted manually.
 - Drag-and-drop visual reorder support with autoscroll.
+- Cut/copy/paste support for selected PDFs and folders within the library.
+- Undo/redo support for library organization edits.
+- Virtual Trash Can for PDFs and folder subtrees, with restore and permanent-delete flows.
 - Missing-file tracking when watched files disappear from disk.
 - Cached thumbnails stored under the XDG cache directory.
 
@@ -65,6 +71,7 @@ The project is currently organized as a Rust workspace with separate crates for 
 - `Tags` tab lists all known tags with PDF counts.
 - Tag filters can be applied from the sidebar or tag pills on PDF cards/rows.
 - Inline `+ tag` entry on PDFs.
+- Sidebar tags can be renamed inline or deleted from every PDF that uses them.
 - Bulk add/remove tag actions for selected PDFs.
 - Bulk add/remove selected PDFs to/from the active folder.
 
@@ -96,7 +103,7 @@ The project is currently organized as a Rust workspace with separate crates for 
   - Refresh extracted PDF metadata
   - Rebuild thumbnails
   - Reindex full text
-  - Delete selected PDFs from library metadata
+  - Move selected PDFs to trash
 - Confirmation dialogs for destructive or overwriting actions.
 
 ### Menus, Keyboard, And UI
@@ -104,17 +111,22 @@ The project is currently organized as a Rust workspace with separate crates for 
 - Application menu bar with File, Edit, View, Document, Library, Tools, and Help menus.
 - Contextual selection toolbar for selected PDFs.
 - Dark and light themes.
+- Runtime KDL style reload support.
 - Resizable library sidebar.
 - Collapsible library/sidebar panels.
 - Bundled IBM Plex Sans font family for consistent UI typography.
+- Bundled Vollkorn font family for document- and book-like display typography.
 - Native file and folder dialogs through `rfd`.
 - Keyboard shortcuts for common actions including:
+  - Undo/redo
+  - Cut/copy/paste
   - Zoom in/out/reset
   - Toggle theme
+  - Reload styles
   - Jump to page
   - Select all visible PDFs
   - Open selected PDF
-  - Delete selected PDF metadata
+  - Move selected PDFs to trash
   - Page up/down
   - Fine scroll
   - Horizontal pan
@@ -129,6 +141,7 @@ crates/
   iced-widget-patch/        Local patched iced_widget scrollable implementation
   pdf-folio-core/           PDF loading, rendering, text extraction, tile cache, annotations
   pdf-folio-db/             SQLite persistence, imports, folders/tags, search index, watcher
+  pdf-folio-raindrop/       Raindrop.io OAuth/API/download/import integration
   pdf-folio-style/          KDL style book, tokens, classes, fonts, styled widget helpers
   pdf-folio-viewer/         Viewer domain state such as find/search and text selection
   pdf-folio-ui-components/  Reusable library UI logic and rendered component helpers
@@ -151,9 +164,18 @@ crates/
 - Recursive folder import.
 - BLAKE3 content hashes for stable entry IDs.
 - Folder and tag membership.
+- Trash state for entries and folder subtrees.
+- Library snapshots used by undo/redo and rollback flows.
 - Sort, layout, sidebar, and tree preferences.
 - Tantivy full-text page index.
 - Filesystem watcher events for PDF create/modify/remove flows.
+
+`pdf-folio-raindrop` owns Raindrop.io integration:
+
+- OAuth browser sign-in and token caching.
+- Optional `PDF_FOLIO_RAINDROP_TOKEN` bearer-token auth for testing or local use.
+- Remote PDF preview loading, thumbnail fetching, and selective imports.
+- Folder/collection mirroring, tag mirroring, rollback support for cancelled imports, and local downloaded-file storage.
 
 `pdf-folio-style` owns the shared style system:
 
@@ -204,9 +226,12 @@ crates/pdf-folio-ui/src/
     shortcuts.rs            Keyboard event to Message mapping
     subscriptions.rs        Window, style-watch, watcher, and animation subscriptions
     platform.rs             File-manager commands and file URI helpers
+    libraries.rs            Named-library registry, switching, previews, create/rename/delete
+    session.rs              Last-session load/save and restore adapters
     viewer_state.rs         Viewer document lifecycle, render/text tasks, find/selection state
     viewer_navigation.rs    Scrolling, paging, panning, and zoom navigation
     viewer_layout.rs        Viewer page grouping and layout math
+    library_clipboard.rs    Library cut/copy/paste and undo/redo history helpers
     library_data.rs         Library refresh and thumbnail request coordination
     library_drag.rs         Library/folder drag lifecycle and autoscroll
     library_folders.rs      Folder tree helpers and breadcrumbs
@@ -222,6 +247,8 @@ PDFolioApp
   mode: AppMode
   viewer: ViewerRuntime       Open document, render cache, zoom, scroll, find, outline
   library: LibraryRuntime     Entries, folders, filters, selection, thumbnails, drag state
+  libraries: LibraryRegistryRuntime
+                              Named library profiles, active library, previews, switcher state
   chrome: ChromeRuntime       Menus, flyouts, selection menu, confirmation modal
   appearance: AppearanceRuntime
                               Theme, loaded StyleBook, style load errors
@@ -298,11 +325,13 @@ pdf-folio-main
   -> pdf-folio-ui
       -> pdf-folio-ui-components
       -> pdf-folio-viewer
+      -> pdf-folio-raindrop
       -> pdf-folio-style
       -> pdf-folio-core
       -> pdf-folio-db
 
 pdf-folio-ui-components -> pdf-folio-style, pdf-folio-core, pdf-folio-db, iced
+pdf-folio-raindrop     -> pdf-folio-core, pdf-folio-db, reqwest, tokio
 pdf-folio-viewer       -> pdf-folio-core, iced
 pdf-folio-style        -> iced, kdl
 pdf-folio-db           -> no UI crates
@@ -315,9 +344,15 @@ Feature/component crates should not depend on `pdf-folio-ui`. Cross-domain workf
 
 PDF-Folio uses XDG project directories with the application identity `dev/pdf-folio/PDF-Folio`.
 
-- Library database: XDG data directory, `library.db`
+- Library registry: XDG data directory, `libraries.json`
+- Default library database: XDG data directory, `library.db`
+- Additional library databases: XDG data directory, `libraries/<library-id>/library.db`
+- Last app session: XDG data directory, `session.json`
 - Tantivy search index: XDG data directory, `search-index/`
+- Raindrop token cache: XDG data directory, `raindrop/token.json`
+- Raindrop downloaded files: XDG data directory, `raindrop/<source-id>/files/`
 - Thumbnail cache: XDG cache directory, `thumbs/`
+- User KDL style overrides: XDG config directory, `pdf-folio/styles/`
 
 Exact paths depend on the user's Linux environment.
 
@@ -361,10 +396,32 @@ cargo check
 cargo test
 ```
 
+### Experimental Sync Checks
+
+PDF-Folio has an experimental single-user sync path that is currently driven by
+CLI commands. The sync server runs on `mind-palace`, verifies Google sign-in for
+the configured account, mints short-lived Turso/R2 credentials, and stores the
+desktop session locally.
+
+```sh
+cargo run -p pdf-folio-main --bin pdf-folio -- sync health
+cargo run -p pdf-folio-main --bin pdf-folio -- sync auth
+cargo run -p pdf-folio-main --bin pdf-folio -- sync status
+cargo run -p pdf-folio-main --bin pdf-folio -- sync ensure-schema
+cargo run -p pdf-folio-main --bin pdf-folio -- sync sync-once
+```
+
+For a second-machine smoke test, `sync-once` runs the manual sequence:
+seed local sync metadata, upload local PDF blobs, push metadata to Turso, pull
+remote metadata, and download pulled PDF blobs into the local sync blob cache.
+That validates the auth flow, control plane, Turso access, and R2 blob transfer.
+Full automatic UI library hydration from remote metadata is still in progress.
+
 ## Project Notes
 
-- The app is local-first. There is no cloud sync or remote account system.
-- Library delete actions remove PDF-Folio metadata only; they do not delete source PDF files.
+- The app is local-first. Experimental single-user sync exists, but it is still
+  CLI-driven and not yet a complete automatic multi-device UI workflow.
+- Library trash and permanent-delete actions affect PDF-Folio metadata only; they do not delete source PDF files.
 - Imported PDFs remain at their original paths.
 - Folder membership is app metadata, separate from filesystem folders.
 - Tags are stored per library entry.
