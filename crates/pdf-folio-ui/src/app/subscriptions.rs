@@ -14,6 +14,8 @@ use super::{shortcuts, AppMode, PDFolioApp, LIBRARY_CARD_HOVER_TICK_MS, VIEWER_A
 use crate::library::drag::LIBRARY_DRAG_AUTOSCROLL_TICK_MS;
 use crate::messages::Message;
 
+const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(10);
+
 pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
     let keyboard = event::listen_with(|event, status, _window| {
         shortcuts::keyboard_event_message(event, status)
@@ -114,6 +116,12 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         Subscription::none()
     };
 
+    let auto_sync = if app.sync_auth.is_signed_in() && !app.sync_in_progress {
+        time::every(AUTO_SYNC_INTERVAL).map(Message::AutoSyncTick)
+    } else {
+        Subscription::none()
+    };
+
     Subscription::batch([
         keyboard,
         cursor,
@@ -123,6 +131,7 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         library_drag,
         folder_drag,
         animations,
+        auto_sync,
     ])
 }
 

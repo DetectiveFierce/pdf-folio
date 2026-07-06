@@ -51,6 +51,18 @@ CREATE TABLE IF NOT EXISTS reading_progress (
     PRIMARY KEY (entry_id, library_id)
 );
 
+CREATE TABLE IF NOT EXISTS sync_operations (
+    remote_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    op_id           TEXT NOT NULL UNIQUE,
+    library_id      TEXT NOT NULL,
+    device_id       TEXT NOT NULL,
+    logical_time    INTEGER NOT NULL,
+    entity_kind     TEXT NOT NULL,
+    entity_id       TEXT NOT NULL,
+    payload         TEXT NOT NULL,
+    created_at      INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_libraries_updated
     ON libraries(updated_at);
 
@@ -62,3 +74,9 @@ CREATE INDEX IF NOT EXISTS idx_library_folders_updated
 
 CREATE INDEX IF NOT EXISTS idx_library_entry_folders_updated
     ON library_entry_folders(library_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_sync_operations_library_sequence
+    ON sync_operations(library_id, remote_sequence);
+
+CREATE INDEX IF NOT EXISTS idx_sync_operations_entity
+    ON sync_operations(library_id, entity_kind, entity_id);

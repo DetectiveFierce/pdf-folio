@@ -101,14 +101,15 @@ enum SyncCommand {
     SyncOnce,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let args = Args::parse();
     match args.command {
-        Some(Command::Sync(sync)) => run_sync_command(sync).await,
+        Some(Command::Sync(sync)) => {
+            tokio::runtime::Runtime::new()?.block_on(run_sync_command(sync))
+        }
         None => pdf_folio_ui::run(args.file),
     }
 }
@@ -285,41 +286,40 @@ async fn run_sync_command(args: SyncArgs) -> Result<()> {
             let cache = BlobCache::open_default()?;
             for profile in profiles {
                 let db = Db::open(&profile.db_path)?;
-                let seed = db.seed_sync_metadata(&profile.id)?;
                 let (uploaded, upload_skipped) = upload_blobs(&db, &client.r2).await?;
-                let pushed = client
-                    .push_local_metadata(&db, &profile.id, &device_id)
+                let report = client
+                    .sync_crdt_metadata(&db, &profile.id, &device_id)
                     .await?;
-                let pulled = client
-                    .pull_remote_metadata(&db, &profile.id, &device_id)
+                let hydration = client
+                    .hydrate_remote_library(&db, &profile.id, &cache)
                     .await?;
-                let (downloaded, cached, download_skipped) =
-                    download_blobs(&db, &client.r2, &cache, &profile.id).await?;
-                println!(
-                    "`{}`: seeded {} entries, {} folders, {} memberships.",
-                    profile.name, seed.entries, seed.folders, seed.entry_folders
-                );
                 println!(
                     "`{}`: uploaded {uploaded} blobs, skipped {upload_skipped}.",
                     profile.name
                 );
                 println!(
-                    "`{}`: pushed {} entries, {} folders, {} memberships.",
+                    "`{}`: CRDT metadata sync generated {}, pushed {}, pulled {} operations.",
                     profile.name,
-                    pushed.entries_to_push,
-                    pushed.folders_to_push,
-                    pushed.memberships_to_push
+                    report.generated_operations,
+                    report.pushed_operations,
+                    report.pulled_operations
                 );
                 println!(
-                    "`{}`: pulled {} entries, {} folders, {} memberships.",
+                    "`{}`: materialized {} entries, {} folders, {} memberships.",
                     profile.name,
-                    pulled.entries_to_push,
-                    pulled.folders_to_push,
-                    pulled.memberships_to_push
+                    report.materialized_entries,
+                    report.materialized_folders,
+                    report.materialized_memberships
                 );
                 println!(
-                    "`{}`: downloaded {downloaded} blobs, {cached} already cached, {download_skipped} skipped. Cache: {}",
+                    "`{}`: hydrated {} entries, {} folders, {} memberships; downloaded {} blobs, {} already cached, {} skipped. Cache: {}",
                     profile.name,
+                    hydration.hydrated_entries,
+                    hydration.hydrated_folders,
+                    hydration.hydrated_memberships,
+                    hydration.downloaded_blobs,
+                    hydration.cached_blobs,
+                    hydration.skipped_entries,
                     cache.root().display()
                 );
             }

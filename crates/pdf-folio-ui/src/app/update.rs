@@ -2,6 +2,7 @@ use super::*;
 use crate::app_libraries::{
     create_library_profile, delete_library_profile, rename_library_profile,
 };
+use anyhow::Context;
 use directories::ProjectDirs;
 use iced::futures::SinkExt;
 
@@ -413,6 +414,46 @@ pub(super) fn pending_raindrop_rollback_check_task() -> Task<Message> {
     )
 }
 
+fn auto_sync_task(db: Arc<Db>, library_id: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            let session =
+                pdf_folio_sync::cached_session().context("No cached sync session is available.")?;
+            let client = pdf_folio_sync::SyncClient::new(session);
+            client.ensure_remote_schema().await?;
+            let crdt = client
+                .sync_crdt_metadata(&db, &library_id, &default_sync_device_id())
+                .await?;
+            let cache = pdf_folio_sync::BlobCache::open_default()?;
+            let hydration = client
+                .hydrate_remote_library(&db, &library_id, &cache)
+                .await?;
+            Ok::<_, anyhow::Error>((crdt, hydration))
+        },
+        |result| match result {
+            Ok(reports) => Message::AutoSyncFinished(Ok(reports)),
+            Err(error) => Message::AutoSyncFinished(Err(error.to_string())),
+        },
+    )
+}
+
+fn default_sync_device_id() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| String::from("local-device"))
+}
+
+fn start_auto_sync_now(app: &mut PDFolioApp) -> Task<Message> {
+    if !app.sync_auth.is_signed_in() || app.sync_in_progress {
+        return Task::none();
+    }
+    app.sync_in_progress = true;
+    app.last_sync_started_at = Some(Instant::now());
+    auto_sync_task(Arc::clone(&app.db), app.libraries.active_library_id.clone())
+}
+
 pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
     match message {
         Message::SyncSignInRequested => {
@@ -428,11 +469,17 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 Ok(()) => {
                     app.mode = AppMode::Library;
                     app.library.library_startup_loading = true;
+                    app.sync_in_progress = true;
+                    app.last_sync_started_at = Some(Instant::now());
                     return Task::batch([
                         app.refresh_folders(),
                         app.refresh_library(),
                         attribute_pending_metadata_task(Arc::clone(&app.db)),
                         pending_raindrop_rollback_check_task(),
+                        auto_sync_task(
+                            Arc::clone(&app.db),
+                            app.libraries.active_library_id.clone(),
+                        ),
                     ]);
                 }
                 Err(error) => {
@@ -444,6 +491,49 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.sync_auth.error = Some(error);
             }
         },
+        Message::AutoSyncTick(tick) => {
+            if !app.sync_auth.is_signed_in() || app.sync_in_progress {
+                return Task::none();
+            }
+            app.sync_in_progress = true;
+            app.last_sync_started_at = Some(tick);
+            return auto_sync_task(Arc::clone(&app.db), app.libraries.active_library_id.clone());
+        }
+        Message::AutoSyncFinished(result) => {
+            app.sync_in_progress = false;
+            match result {
+                Ok((crdt, hydration)) => {
+                    if crdt.generated_operations > 0
+                        || crdt.pushed_operations > 0
+                        || crdt.pulled_operations > 0
+                        || hydration.hydrated_entries > 0
+                        || hydration.hydrated_folders > 0
+                        || hydration.hydrated_memberships > 0
+                    {
+                        app.library.library_status = Some(format!(
+                            "Synced {} new, {} pushed, {} pulled, {} entries, {} folders, {} memberships hydrated.",
+                            crdt.generated_operations,
+                            crdt.pushed_operations,
+                            crdt.pulled_operations,
+                            hydration.hydrated_entries,
+                            hydration.hydrated_folders,
+                            hydration.hydrated_memberships
+                        ));
+                    }
+                    if crdt.pulled_operations > 0
+                        || hydration.hydrated_entries > 0
+                        || hydration.hydrated_folders > 0
+                        || hydration.hydrated_memberships > 0
+                    {
+                        return Task::batch([app.refresh_folders(), app.refresh_library()]);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Automatic PDF-Folio sync failed");
+                    app.library.library_status = Some(format!("Sync paused: {error}"));
+                }
+            }
+        }
         Message::AppMenuOpened(menu) => {
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();
@@ -1443,7 +1533,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if !summary.import.errors.is_empty() {
                 app.library.library_error = Some(summary.import.errors.join("\n"));
             }
-            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                start_auto_sync_now(app),
+            ]);
         }
         Message::ImportFinished(summary) => {
             app.library.library_status = Some(format!(
@@ -1455,7 +1549,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     format!(" ({} skipped)", summary.errors.len())
                 }
             ));
-            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                start_auto_sync_now(app),
+            ]);
         }
         Message::AuthorAttributionFinished => return app.refresh_library(),
         Message::OpenLibraryEntry(entry_id) => {
@@ -1682,7 +1780,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             });
             app.clear_library_selection();
             app.library.pending_thumbnails.clear();
-            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                start_auto_sync_now(app),
+            ]);
         }
         Message::LibraryHistoryActionFinished {
             action,
@@ -1710,7 +1812,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             });
             app.clear_library_selection();
             app.library.pending_thumbnails.clear();
-            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                start_auto_sync_now(app),
+            ]);
         }
         Message::UndoLibraryAction => {
             if app.library.library_history_restore_started_at.is_some() {
@@ -1758,7 +1864,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_status = Some(status);
             app.clear_library_selection();
             app.library.pending_thumbnails.clear();
-            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                start_auto_sync_now(app),
+            ]);
         }
         Message::LibraryEntryDragMoved(position) => {
             app.update_library_drag_target(position);
@@ -1786,6 +1896,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return Task::batch([
                 app.refresh_library(),
                 scroll_library_to_offset_task(app.library.library_scroll_offset),
+                start_auto_sync_now(app),
             ]);
         }
         Message::SearchQueryChanged(query) => {
@@ -2244,7 +2355,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::FolderUpdated => {
             app.library.library_status = Some(String::from("Folder updated."));
-            return Task::batch([app.refresh_folders(), app.refresh_library()]);
+            return Task::batch([
+                app.refresh_folders(),
+                app.refresh_library(),
+                start_auto_sync_now(app),
+            ]);
         }
         Message::FolderCreated { folder_id, action } => {
             if action.before != action.after {
@@ -2260,6 +2375,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.refresh_folders(),
                 app.refresh_library(),
                 scroll_library_to_offset_task(0.0),
+                start_auto_sync_now(app),
             ]);
         }
         Message::StartTagEntry(entry_id) => {
@@ -2341,7 +2457,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return delete_tag_task(Arc::clone(&app.db), tag);
         }
         Message::EntryTagged { .. } | Message::EntryUntagged { .. } | Message::EntryDeleted(_) => {
-            return app.refresh_library();
+            return Task::batch([app.refresh_library(), start_auto_sync_now(app)]);
         }
         Message::RequestConfirmation(action) => {
             if let ConfirmationAction::DeleteFolder(folder_id) = &action {
@@ -2510,7 +2626,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_status = Some(format!("Relinked PDF to {}.", path.display()));
             app.library.library_error = None;
             app.library.pending_thumbnails.clear();
-            return Task::batch([app.refresh_library(), app.request_visible_thumbnails()]);
+            return Task::batch([
+                app.refresh_library(),
+                app.request_visible_thumbnails(),
+                start_auto_sync_now(app),
+            ]);
         }
         Message::MetadataEditFinished {
             entry_id: _,
@@ -2751,6 +2871,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.refresh_folders(),
                 app.refresh_library(),
                 app.request_visible_thumbnails(),
+                start_auto_sync_now(app),
             ]);
         }
         Message::BulkOperationFinished {
@@ -2772,6 +2893,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.refresh_folders(),
                 app.refresh_library(),
                 app.request_visible_thumbnails(),
+                start_auto_sync_now(app),
             ]);
         }
         Message::FolderAssignmentFinished {
@@ -2794,7 +2916,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             });
             app.clear_library_selection();
             app.library.pending_thumbnails.clear();
-            return Task::batch([app.refresh_library(), app.request_visible_thumbnails()]);
+            return Task::batch([
+                app.refresh_library(),
+                app.request_visible_thumbnails(),
+                start_auto_sync_now(app),
+            ]);
         }
         Message::ThumbnailReady {
             entry_id,
@@ -2832,7 +2958,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 },
             );
         }
-        Message::ProgressSaved | Message::LibraryPreferencesSaved | Message::SessionSaved => {}
+        Message::ProgressSaved => return start_auto_sync_now(app),
+        Message::LibraryPreferencesSaved | Message::SessionSaved => {}
         Message::OpenJumpDialog => {
             app.viewer.page_input_editing = false;
             app.viewer.jump_dialog_open = true;

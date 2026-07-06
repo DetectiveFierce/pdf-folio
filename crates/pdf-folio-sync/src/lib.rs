@@ -14,5 +14,7 @@ pub use blob_cache::BlobCache;
 pub use google_auth::{sign_in_with_google, GoogleAuthConfig};
 pub use r2_client::{R2Client, R2DownloadResponse, R2UploadResponse};
 pub use session::{cached_session, save_session, Session};
-pub use sync::{SyncCheckpoint, SyncClient, SyncLibraryRow, SyncPlan};
+pub use sync::{
+    SyncCheckpoint, SyncClient, SyncCrdtReport, SyncHydrationReport, SyncLibraryRow, SyncPlan,
+};
 pub use turso_client::{TursoClient, TursoToken};

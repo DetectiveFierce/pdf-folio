@@ -1,10 +1,20 @@
+use std::collections::BTreeMap;
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use pdf_folio_db::{Db, SyncEntryFolderRow, SyncEntryRow, SyncFolderRow};
+use pdf_folio_db::{
+    Db, SyncCrdtOperation, SyncCrdtPrepareSummary, SyncEntryFolderRow, SyncEntryRow, SyncFolderRow,
+};
+use serde::{Deserialize, Serialize};
 
+use crate::blob_cache::BlobCache;
 use crate::r2_client::R2Client;
 use crate::session::Session;
 use crate::turso_client::{TursoClient, TursoRemote, TursoValue};
+
+const ENTITY_ENTRY: &str = "entry";
+const ENTITY_FOLDER: &str = "folder";
+const ENTITY_ENTRY_FOLDER: &str = "entry_folder";
 
 /// Sync-visible app library profile.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +49,40 @@ pub struct SyncPlan {
     pub folders_to_push: usize,
     /// Entry-folder memberships newer than the checkpoint.
     pub memberships_to_push: usize,
+}
+
+/// Summary for one CRDT-based metadata sync pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SyncCrdtReport {
+    /// Local snapshot operations created before pushing.
+    pub generated_operations: usize,
+    /// Locally-originated operations uploaded to the remote log.
+    pub pushed_operations: usize,
+    /// Remote log operations pulled into the local operation store.
+    pub pulled_operations: usize,
+    /// Entry metadata rows materialized after CRDT replay.
+    pub materialized_entries: usize,
+    /// Folder metadata rows materialized after CRDT replay.
+    pub materialized_folders: usize,
+    /// Entry-folder membership rows materialized after CRDT replay.
+    pub materialized_memberships: usize,
+}
+
+/// Summary for hydrating local library rows from remote sync metadata and blobs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SyncHydrationReport {
+    /// Remote entries inserted into the local library.
+    pub hydrated_entries: usize,
+    /// Remote folders inserted into the local library.
+    pub hydrated_folders: usize,
+    /// Remote folder memberships inserted into the local library.
+    pub hydrated_memberships: usize,
+    /// PDF blobs downloaded into the local sync cache.
+    pub downloaded_blobs: usize,
+    /// Entries whose blob was already cached locally.
+    pub cached_blobs: usize,
+    /// Remote rows skipped because they are deleted, invalid, already local, or unavailable.
+    pub skipped_entries: usize,
 }
 
 /// High-level sync coordinator.
@@ -115,6 +159,125 @@ impl SyncClient {
             .await
             .context("Could not create PDF-Folio sync schema in Turso.")?;
         Ok(())
+    }
+
+    /// Runs one CRDT-based metadata sync pass for a library.
+    ///
+    /// The pass is idempotent: local state is snapshotted into immutable
+    /// operations only when entity payloads change, pending local operations are
+    /// inserted into Turso with `ON CONFLICT DO NOTHING`, remote operations are
+    /// pulled by append sequence, and the local sync metadata tables are
+    /// materialized from deterministic latest-writer-wins registers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when local metadata cannot be read/written or remote
+    /// operations cannot be pushed/pulled.
+    pub async fn sync_crdt_metadata(
+        &self,
+        db: &Db,
+        library_id: &str,
+        device_id: &str,
+    ) -> Result<SyncCrdtReport> {
+        db.seed_sync_metadata(library_id)?;
+        let prepared = prepare_local_crdt_operations(db, library_id, device_id)?;
+        let remote = self.turso.remote().await?;
+        upsert_remote_sync_operations(&remote, &prepared.pending_operations).await?;
+        db.mark_sync_crdt_operations_pushed(
+            prepared
+                .pending_operations
+                .iter()
+                .map(|operation| operation.op_id.as_str()),
+        )?;
+
+        let cursor = db.sync_crdt_remote_cursor(library_id, device_id)?;
+        let pulled = remote_sync_operations_since(&remote, library_id, cursor).await?;
+        let max_remote_sequence = pulled.iter().filter_map(|op| op.remote_sequence).max();
+        for operation in &pulled {
+            db.upsert_sync_crdt_operation(operation)?;
+        }
+        if let Some(sequence) = max_remote_sequence {
+            db.set_sync_crdt_remote_cursor(library_id, device_id, sequence)?;
+        }
+
+        let materialized = materialize_crdt_operations(db, library_id)?;
+        Ok(SyncCrdtReport {
+            generated_operations: prepared.summary.generated,
+            pushed_operations: prepared.pending_operations.len(),
+            pulled_operations: pulled.len(),
+            materialized_entries: materialized.entries_to_push,
+            materialized_folders: materialized.folders_to_push,
+            materialized_memberships: materialized.memberships_to_push,
+        })
+    }
+
+    /// Downloads missing remote blobs and creates local library rows for pulled entries.
+    ///
+    /// Hydration is intentionally separate from CRDT metadata replay: the CRDT
+    /// pass updates sync-visible state, then this step turns non-deleted remote
+    /// entry rows into normal local library entries when the content-addressed
+    /// PDF blob is available from R2.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when local metadata cannot be read/written or a required
+    /// remote blob download fails.
+    pub async fn hydrate_remote_library(
+        &self,
+        db: &Db,
+        library_id: &str,
+        cache: &BlobCache,
+    ) -> Result<SyncHydrationReport> {
+        let rows = db.sync_entries_updated_since(library_id, 0)?;
+        let mut report = SyncHydrationReport::default();
+        for row in rows {
+            if row.deleted_at.is_some() || !is_blob_hash(row.id.as_str()) {
+                report.skipped_entries += 1;
+                continue;
+            }
+            if db.entry_by_id(&row.id)?.is_some() {
+                report.skipped_entries += 1;
+                continue;
+            }
+
+            let path = cache.path_for_hash(row.id.as_str());
+            if cache.contains(row.id.as_str()) {
+                report.cached_blobs += 1;
+            } else {
+                self.r2.download_pdf(row.id.as_str(), &path).await?;
+                report.downloaded_blobs += 1;
+            }
+
+            if db.hydrate_sync_entry(
+                &row,
+                &path,
+                std::fs::metadata(&path).ok().map(|metadata| metadata.len()),
+            )? {
+                report.hydrated_entries += 1;
+            }
+            if let Some(payload) = winning_entry_payload(db, library_id, row.id.as_str())? {
+                apply_entry_payload_to_local(db, &payload)?;
+            }
+        }
+
+        let folders = db.sync_folders_updated_since(library_id, 0)?;
+        for row in &folders {
+            if db.hydrate_sync_folder(row)? {
+                report.hydrated_folders += 1;
+            }
+        }
+        for row in &folders {
+            if row.parent_id.is_some() && db.hydrate_sync_folder(row)? {
+                report.hydrated_folders += 1;
+            }
+        }
+
+        for row in db.sync_entry_folders_updated_since(library_id, 0)? {
+            if db.hydrate_sync_entry_folder(&row)? {
+                report.hydrated_memberships += 1;
+            }
+        }
+        Ok(report)
     }
 
     /// Pushes local metadata rows newer than the current checkpoint to Turso.
@@ -202,6 +365,470 @@ impl SyncClient {
             memberships_to_push: memberships.len(),
         })
     }
+}
+
+#[derive(Debug)]
+struct PreparedCrdtOperations {
+    summary: SyncCrdtPrepareSummary,
+    pending_operations: Vec<SyncCrdtOperation>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct EntryPayload {
+    id: String,
+    library_id: String,
+    title: Option<String>,
+    author: Option<String>,
+    #[serde(default)]
+    display_title: Option<String>,
+    #[serde(default)]
+    display_author: Option<String>,
+    #[serde(default)]
+    metadata_locked: bool,
+    #[serde(default)]
+    page_count: Option<u16>,
+    #[serde(default)]
+    last_page: u16,
+    #[serde(default)]
+    opened_at: Option<i64>,
+    #[serde(default)]
+    tags: Vec<String>,
+    updated_at: i64,
+    deleted_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FolderPayload {
+    id: String,
+    library_id: String,
+    name: String,
+    parent_id: Option<String>,
+    updated_at: i64,
+    deleted_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct EntryFolderPayload {
+    entry_id: String,
+    folder_id: String,
+    updated_at: i64,
+    deleted_at: Option<i64>,
+}
+
+fn prepare_local_crdt_operations(
+    db: &Db,
+    library_id: &str,
+    device_id: &str,
+) -> Result<PreparedCrdtOperations> {
+    let mut logical_time = db
+        .sync_crdt_operations_for_library(library_id)?
+        .into_iter()
+        .map(|operation| operation.logical_time)
+        .max()
+        .map_or_else(
+            || Utc::now().timestamp_millis(),
+            |time| Utc::now().timestamp_millis().max(time + 1),
+        );
+    let mut generated = 0;
+
+    let sync_entry_deleted_at = db
+        .sync_entries_updated_since(library_id, i64::MIN)?
+        .into_iter()
+        .map(|row| (row.id.as_str().to_owned(), row.deleted_at))
+        .collect::<BTreeMap<_, _>>();
+    let local_entries = db
+        .get_all_entries()?
+        .into_iter()
+        .chain(db.get_trashed_entries()?);
+    for entry in local_entries {
+        let mut tags = entry.tags.clone();
+        tags.sort();
+        tags.dedup();
+        let updated_at = entry
+            .opened_at
+            .unwrap_or(entry.added_at)
+            .timestamp()
+            .max(entry.added_at.timestamp());
+        let payload = EntryPayload {
+            id: entry.id.as_str().to_owned(),
+            library_id: library_id.to_owned(),
+            title: entry.title.clone(),
+            author: entry.author.clone(),
+            display_title: entry.display_title.clone(),
+            display_author: entry.display_author.clone(),
+            metadata_locked: entry.metadata_locked,
+            page_count: entry.page_count,
+            last_page: entry.last_page,
+            opened_at: entry.opened_at.map(|timestamp| timestamp.timestamp()),
+            tags,
+            updated_at,
+            deleted_at: sync_entry_deleted_at
+                .get(entry.id.as_str())
+                .copied()
+                .flatten(),
+        };
+        if record_payload_operation(
+            db,
+            library_id,
+            device_id,
+            ENTITY_ENTRY,
+            entry.id.as_str(),
+            &payload,
+            logical_time,
+        )? {
+            generated += 1;
+            logical_time += 1;
+        }
+    }
+
+    for row in db.sync_folders_updated_since(library_id, i64::MIN)? {
+        let payload = FolderPayload {
+            id: row.id.as_str().to_owned(),
+            library_id: row.library_id.clone(),
+            name: row.name.clone(),
+            parent_id: row.parent_id.as_ref().map(|id| id.as_str().to_owned()),
+            updated_at: row.updated_at,
+            deleted_at: row.deleted_at,
+        };
+        if record_payload_operation(
+            db,
+            library_id,
+            device_id,
+            ENTITY_FOLDER,
+            row.id.as_str(),
+            &payload,
+            logical_time,
+        )? {
+            generated += 1;
+            logical_time += 1;
+        }
+    }
+
+    for row in db.sync_entry_folders_updated_since(library_id, i64::MIN)? {
+        let entity_id = entry_folder_entity_id(&row.entry_id, &row.folder_id);
+        let payload = EntryFolderPayload {
+            entry_id: row.entry_id.as_str().to_owned(),
+            folder_id: row.folder_id.as_str().to_owned(),
+            updated_at: row.updated_at,
+            deleted_at: row.deleted_at,
+        };
+        if record_payload_operation(
+            db,
+            library_id,
+            device_id,
+            ENTITY_ENTRY_FOLDER,
+            &entity_id,
+            &payload,
+            logical_time,
+        )? {
+            generated += 1;
+            logical_time += 1;
+        }
+    }
+
+    let pending_operations = db.pending_sync_crdt_operations(library_id, device_id)?;
+    Ok(PreparedCrdtOperations {
+        summary: SyncCrdtPrepareSummary {
+            generated,
+            pending_push: pending_operations.len(),
+        },
+        pending_operations,
+    })
+}
+
+fn record_payload_operation<T: Serialize>(
+    db: &Db,
+    library_id: &str,
+    device_id: &str,
+    entity_kind: &str,
+    entity_id: &str,
+    payload: &T,
+    logical_time: i64,
+) -> Result<bool> {
+    let payload = serde_json::to_string(payload).context("Could not encode CRDT payload.")?;
+    let payload_hash = blake3::hash(payload.as_bytes()).to_hex().to_string();
+    let op_id = crdt_operation_id(
+        device_id,
+        entity_kind,
+        entity_id,
+        &payload_hash,
+        logical_time,
+    );
+    let operation = SyncCrdtOperation {
+        op_id,
+        library_id: library_id.to_owned(),
+        device_id: device_id.to_owned(),
+        logical_time,
+        entity_kind: entity_kind.to_owned(),
+        entity_id: entity_id.to_owned(),
+        payload,
+        created_at: Utc::now().timestamp(),
+        remote_sequence: None,
+        pushed_at: None,
+    };
+    db.record_sync_crdt_operation_if_changed(&operation, &payload_hash)
+}
+
+fn crdt_operation_id(
+    device_id: &str,
+    entity_kind: &str,
+    entity_id: &str,
+    payload_hash: &str,
+    logical_time: i64,
+) -> String {
+    let hash = blake3::Hasher::new()
+        .update(device_id.as_bytes())
+        .update(b"\0")
+        .update(entity_kind.as_bytes())
+        .update(b"\0")
+        .update(entity_id.as_bytes())
+        .update(b"\0")
+        .update(payload_hash.as_bytes())
+        .update(b"\0")
+        .update(logical_time.to_string().as_bytes())
+        .finalize()
+        .to_hex()
+        .to_string();
+    format!("crdt-{hash}")
+}
+
+fn entry_folder_entity_id(
+    entry_id: &pdf_folio_db::EntryId,
+    folder_id: &pdf_folio_db::FolderId,
+) -> String {
+    format!("{}\x1f{}", entry_id.as_str(), folder_id.as_str())
+}
+
+fn is_blob_hash(value: &str) -> bool {
+    value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn winning_entry_payload(
+    db: &Db,
+    library_id: &str,
+    entry_id: &str,
+) -> Result<Option<EntryPayload>> {
+    let mut winner: Option<SyncCrdtOperation> = None;
+    for operation in db.sync_crdt_operations_for_library(library_id)? {
+        if operation.entity_kind != ENTITY_ENTRY || operation.entity_id != entry_id {
+            continue;
+        }
+        match winner.as_ref() {
+            Some(current) if !operation_wins(&operation, current) => {}
+            _ => winner = Some(operation),
+        }
+    }
+    winner
+        .map(|operation| {
+            serde_json::from_str::<EntryPayload>(&operation.payload)
+                .context("Could not decode winning entry CRDT payload.")
+        })
+        .transpose()
+}
+
+fn apply_entry_payload_to_local(db: &Db, payload: &EntryPayload) -> Result<()> {
+    let entry_id = pdf_folio_db::EntryId::new(payload.id.clone());
+    if payload.deleted_at.is_some() || db.entry_by_id(&entry_id)?.is_none() {
+        return Ok(());
+    }
+    db.apply_synced_entry_state(
+        &entry_id,
+        payload.title.as_deref(),
+        payload.author.as_deref(),
+        payload.display_title.as_deref(),
+        payload.display_author.as_deref(),
+        payload.metadata_locked,
+        payload.page_count,
+        payload.last_page,
+        payload.opened_at,
+        &payload.tags,
+    )
+}
+
+fn materialize_crdt_operations(db: &Db, library_id: &str) -> Result<SyncPlan> {
+    let operations = db.sync_crdt_operations_for_library(library_id)?;
+    let mut winners: BTreeMap<(String, String), SyncCrdtOperation> = BTreeMap::new();
+    for operation in operations {
+        let key = (operation.entity_kind.clone(), operation.entity_id.clone());
+        match winners.get(&key) {
+            Some(current) if !operation_wins(&operation, current) => {}
+            _ => {
+                winners.insert(key, operation);
+            }
+        }
+    }
+
+    let mut plan = SyncPlan::default();
+    for ((entity_kind, entity_id), operation) in winners {
+        match entity_kind.as_str() {
+            ENTITY_ENTRY => {
+                let payload = serde_json::from_str::<EntryPayload>(&operation.payload)
+                    .context("Could not decode entry CRDT payload.")?;
+                db.upsert_sync_entry(&SyncEntryRow {
+                    id: pdf_folio_db::EntryId::new(payload.id.clone()),
+                    library_id: payload.library_id.clone(),
+                    title: payload
+                        .display_title
+                        .clone()
+                        .or_else(|| payload.title.clone()),
+                    author: payload
+                        .display_author
+                        .clone()
+                        .or_else(|| payload.author.clone()),
+                    updated_at: payload.updated_at,
+                    deleted_at: payload.deleted_at,
+                })?;
+                apply_entry_payload_to_local(db, &payload)?;
+                remember_materialized_payload(
+                    db,
+                    library_id,
+                    &operation,
+                    &entity_kind,
+                    &entity_id,
+                )?;
+                plan.entries_to_push += 1;
+            }
+            ENTITY_FOLDER => {
+                let payload = serde_json::from_str::<FolderPayload>(&operation.payload)
+                    .context("Could not decode folder CRDT payload.")?;
+                db.upsert_sync_folder(&SyncFolderRow {
+                    id: pdf_folio_db::FolderId::new(payload.id),
+                    library_id: payload.library_id,
+                    name: payload.name,
+                    parent_id: payload.parent_id.map(pdf_folio_db::FolderId::new),
+                    updated_at: payload.updated_at,
+                    deleted_at: payload.deleted_at,
+                })?;
+                remember_materialized_payload(
+                    db,
+                    library_id,
+                    &operation,
+                    &entity_kind,
+                    &entity_id,
+                )?;
+                plan.folders_to_push += 1;
+            }
+            ENTITY_ENTRY_FOLDER => {
+                let payload = serde_json::from_str::<EntryFolderPayload>(&operation.payload)
+                    .context("Could not decode entry-folder CRDT payload.")?;
+                db.upsert_sync_entry_folder(&SyncEntryFolderRow {
+                    entry_id: pdf_folio_db::EntryId::new(payload.entry_id),
+                    folder_id: pdf_folio_db::FolderId::new(payload.folder_id),
+                    updated_at: payload.updated_at,
+                    deleted_at: payload.deleted_at,
+                })?;
+                remember_materialized_payload(
+                    db,
+                    library_id,
+                    &operation,
+                    &entity_kind,
+                    &entity_id,
+                )?;
+                plan.memberships_to_push += 1;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(plan)
+}
+
+fn operation_wins(candidate: &SyncCrdtOperation, current: &SyncCrdtOperation) -> bool {
+    (
+        candidate.logical_time,
+        candidate.device_id.as_str(),
+        candidate.op_id.as_str(),
+    ) > (
+        current.logical_time,
+        current.device_id.as_str(),
+        current.op_id.as_str(),
+    )
+}
+
+fn remember_materialized_payload(
+    db: &Db,
+    library_id: &str,
+    operation: &SyncCrdtOperation,
+    entity_kind: &str,
+    entity_id: &str,
+) -> Result<()> {
+    let payload_hash = blake3::hash(operation.payload.as_bytes())
+        .to_hex()
+        .to_string();
+    db.remember_sync_crdt_entity_payload(
+        library_id,
+        entity_kind,
+        entity_id,
+        &payload_hash,
+        operation.logical_time,
+        &operation.device_id,
+    )
+}
+
+async fn upsert_remote_sync_operations(
+    remote: &TursoRemote,
+    operations: &[SyncCrdtOperation],
+) -> Result<()> {
+    for operation in operations {
+        remote
+            .execute(
+                "INSERT INTO sync_operations
+                    (op_id, library_id, device_id, logical_time, entity_kind, entity_id,
+                     payload, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(op_id) DO NOTHING",
+                vec![
+                    TursoValue::text(operation.op_id.as_str()),
+                    TursoValue::text(operation.library_id.as_str()),
+                    TursoValue::text(operation.device_id.as_str()),
+                    TursoValue::integer(operation.logical_time),
+                    TursoValue::text(operation.entity_kind.as_str()),
+                    TursoValue::text(operation.entity_id.as_str()),
+                    TursoValue::text(operation.payload.as_str()),
+                    TursoValue::integer(operation.created_at),
+                ],
+            )
+            .await
+            .context("Could not append remote CRDT sync operation.")?;
+    }
+    Ok(())
+}
+
+async fn remote_sync_operations_since(
+    remote: &TursoRemote,
+    library_id: &str,
+    since_sequence: i64,
+) -> Result<Vec<SyncCrdtOperation>> {
+    let rows = remote
+        .query(
+            "SELECT remote_sequence, op_id, library_id, device_id, logical_time,
+                    entity_kind, entity_id, payload, created_at
+             FROM sync_operations
+             WHERE library_id = ?1 AND remote_sequence > ?2
+             ORDER BY remote_sequence ASC",
+            vec![
+                TursoValue::text(library_id),
+                TursoValue::integer(since_sequence),
+            ],
+        )
+        .await
+        .context("Could not query remote CRDT sync operations.")?;
+    let mut output = Vec::new();
+    for row in rows {
+        output.push(SyncCrdtOperation {
+            remote_sequence: Some(row[0].as_i64()?),
+            op_id: row[1].as_string()?,
+            library_id: row[2].as_string()?,
+            device_id: row[3].as_string()?,
+            logical_time: row[4].as_i64()?,
+            entity_kind: row[5].as_string()?,
+            entity_id: row[6].as_string()?,
+            payload: row[7].as_string()?,
+            created_at: row[8].as_i64()?,
+            pushed_at: Some(Utc::now().timestamp()),
+        });
+    }
+    Ok(output)
 }
 
 async fn upsert_remote_libraries(remote: &TursoRemote, rows: &[SyncLibraryRow]) -> Result<()> {

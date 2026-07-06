@@ -436,6 +436,40 @@ pub struct SyncSeedSummary {
     pub entry_folders: usize,
 }
 
+/// One immutable sync CRDT operation stored locally and mirrored remotely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncCrdtOperation {
+    /// Globally stable operation id.
+    pub op_id: String,
+    /// Library this operation belongs to.
+    pub library_id: String,
+    /// Device that originally created this operation.
+    pub device_id: String,
+    /// Hybrid logical timestamp used for deterministic LWW conflict resolution.
+    pub logical_time: i64,
+    /// CRDT entity kind, for example `entry`, `folder`, or `entry_folder`.
+    pub entity_kind: String,
+    /// Stable entity id within the kind.
+    pub entity_id: String,
+    /// JSON payload for the entity state carried by this operation.
+    pub payload: String,
+    /// Local creation timestamp as a Unix timestamp.
+    pub created_at: i64,
+    /// Remote append-only sequence, once this op has been seen in Turso.
+    pub remote_sequence: Option<i64>,
+    /// Local timestamp when this op was pushed, if it originated locally.
+    pub pushed_at: Option<i64>,
+}
+
+/// Counts produced while preparing CRDT operations from local metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SyncCrdtPrepareSummary {
+    /// Newly generated local operations.
+    pub generated: usize,
+    /// Locally-originated operations still waiting to be pushed.
+    pub pending_push: usize,
+}
+
 /// Reversible snapshot of library organization and user-editable entry state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryOrganizationSnapshot {
@@ -744,6 +778,23 @@ impl Db {
             .context("Could not load sync entry-folder rows.")
     }
 
+    fn sync_entry_folder_updated_at(
+        &self,
+        entry_id: &EntryId,
+        folder_id: &FolderId,
+    ) -> Result<Option<i64>> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT updated_at FROM sync_entry_folders
+                 WHERE entry_id = ?1 AND folder_id = ?2",
+                params![entry_id.as_str(), folder_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Could not load sync entry-folder timestamp.")
+    }
+
     /// Returns the last completed sync timestamp for a library/device pair.
     ///
     /// # Errors
@@ -782,6 +833,488 @@ impl Db {
             params![library_id, device_id, last_synced_at],
         )?;
         Ok(())
+    }
+
+    /// Records a local CRDT operation when an entity payload changed.
+    ///
+    /// The `(library_id, entity_kind, entity_id)` payload hash table keeps the
+    /// snapshot-driven sync loop from emitting duplicate operations for
+    /// unchanged local state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot read or write CRDT sync state.
+    pub fn record_sync_crdt_operation_if_changed(
+        &self,
+        operation: &SyncCrdtOperation,
+        payload_hash: &str,
+    ) -> Result<bool> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let existing_hash: Option<String> = transaction
+            .query_row(
+                "SELECT payload_hash FROM sync_crdt_entity_versions
+                 WHERE library_id = ?1 AND entity_kind = ?2 AND entity_id = ?3",
+                params![
+                    operation.library_id,
+                    operation.entity_kind,
+                    operation.entity_id
+                ],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if existing_hash.as_deref() == Some(payload_hash) {
+            transaction.commit()?;
+            return Ok(false);
+        }
+
+        transaction.execute(
+            "INSERT OR IGNORE INTO sync_crdt_operations
+                (op_id, library_id, device_id, logical_time, entity_kind, entity_id,
+                 payload, created_at, remote_sequence, pushed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                operation.op_id,
+                operation.library_id,
+                operation.device_id,
+                operation.logical_time,
+                operation.entity_kind,
+                operation.entity_id,
+                operation.payload,
+                operation.created_at,
+                operation.remote_sequence,
+                operation.pushed_at,
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO sync_crdt_entity_versions
+                (library_id, entity_kind, entity_id, payload_hash, logical_time, device_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(library_id, entity_kind, entity_id) DO UPDATE SET
+                payload_hash = excluded.payload_hash,
+                logical_time = excluded.logical_time,
+                device_id = excluded.device_id",
+            params![
+                operation.library_id,
+                operation.entity_kind,
+                operation.entity_id,
+                payload_hash,
+                operation.logical_time,
+                operation.device_id,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    /// Remembers the payload hash currently materialized for a CRDT entity.
+    ///
+    /// This is used after replaying remote operations so the next local
+    /// snapshot pass does not echo a remotely-originated winning state as a new
+    /// local operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the entity version.
+    pub fn remember_sync_crdt_entity_payload(
+        &self,
+        library_id: &str,
+        entity_kind: &str,
+        entity_id: &str,
+        payload_hash: &str,
+        logical_time: i64,
+        device_id: &str,
+    ) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO sync_crdt_entity_versions
+                (library_id, entity_kind, entity_id, payload_hash, logical_time, device_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(library_id, entity_kind, entity_id) DO UPDATE SET
+                payload_hash = excluded.payload_hash,
+                logical_time = excluded.logical_time,
+                device_id = excluded.device_id",
+            params![
+                library_id,
+                entity_kind,
+                entity_id,
+                payload_hash,
+                logical_time,
+                device_id,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Stores a CRDT operation received from the remote log.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the operation.
+    pub fn upsert_sync_crdt_operation(&self, operation: &SyncCrdtOperation) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO sync_crdt_operations
+                (op_id, library_id, device_id, logical_time, entity_kind, entity_id,
+                 payload, created_at, remote_sequence, pushed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(op_id) DO UPDATE SET
+                remote_sequence = COALESCE(excluded.remote_sequence, remote_sequence),
+                pushed_at = COALESCE(sync_crdt_operations.pushed_at, excluded.pushed_at)",
+            params![
+                operation.op_id,
+                operation.library_id,
+                operation.device_id,
+                operation.logical_time,
+                operation.entity_kind,
+                operation.entity_id,
+                operation.payload,
+                operation.created_at,
+                operation.remote_sequence,
+                operation.pushed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Returns local CRDT operations that still need to be pushed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query operations.
+    pub fn pending_sync_crdt_operations(
+        &self,
+        library_id: &str,
+        device_id: &str,
+    ) -> Result<Vec<SyncCrdtOperation>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT op_id, library_id, device_id, logical_time, entity_kind, entity_id,
+                    payload, created_at, remote_sequence, pushed_at
+             FROM sync_crdt_operations
+             WHERE library_id = ?1 AND device_id = ?2 AND pushed_at IS NULL
+             ORDER BY logical_time ASC, op_id ASC",
+        )?;
+        let rows =
+            statement.query_map(params![library_id, device_id], row_to_sync_crdt_operation)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load pending CRDT sync operations.")
+    }
+
+    /// Marks local CRDT operations as pushed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot update operations.
+    pub fn mark_sync_crdt_operations_pushed<'a>(
+        &self,
+        op_ids: impl IntoIterator<Item = &'a str>,
+    ) -> Result<usize> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let now = Utc::now().timestamp();
+        let mut updated = 0;
+        for op_id in op_ids {
+            updated += transaction.execute(
+                "UPDATE sync_crdt_operations
+                 SET pushed_at = COALESCE(pushed_at, ?1)
+                 WHERE op_id = ?2",
+                params![now, op_id],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(updated)
+    }
+
+    /// Returns all CRDT operations for one library.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query operations.
+    pub fn sync_crdt_operations_for_library(
+        &self,
+        library_id: &str,
+    ) -> Result<Vec<SyncCrdtOperation>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT op_id, library_id, device_id, logical_time, entity_kind, entity_id,
+                    payload, created_at, remote_sequence, pushed_at
+             FROM sync_crdt_operations
+             WHERE library_id = ?1
+             ORDER BY logical_time ASC, device_id ASC, op_id ASC",
+        )?;
+        let rows = statement.query_map(params![library_id], row_to_sync_crdt_operation)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load CRDT sync operations.")
+    }
+
+    /// Returns the remote sequence cursor for a library/device pair.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query the cursor.
+    pub fn sync_crdt_remote_cursor(&self, library_id: &str, device_id: &str) -> Result<i64> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT last_remote_sequence FROM sync_crdt_checkpoints
+                 WHERE library_id = ?1 AND device_id = ?2",
+                params![library_id, device_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(|value| value.unwrap_or(0))
+            .context("Could not load CRDT sync cursor.")
+    }
+
+    /// Updates the remote sequence cursor for a library/device pair.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the cursor.
+    pub fn set_sync_crdt_remote_cursor(
+        &self,
+        library_id: &str,
+        device_id: &str,
+        last_remote_sequence: i64,
+    ) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO sync_crdt_checkpoints
+                (library_id, device_id, last_remote_sequence)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(library_id, device_id) DO UPDATE SET
+                last_remote_sequence = excluded.last_remote_sequence",
+            params![library_id, device_id, last_remote_sequence],
+        )?;
+        Ok(())
+    }
+
+    /// Materializes a sync entry row into the local entries table.
+    ///
+    /// The local `added_at` timestamp is set from the sync row so a later
+    /// snapshot pass does not echo a hydrated remote entry as a new local
+    /// operation merely because it was inserted locally later.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the entry.
+    pub fn hydrate_sync_entry(
+        &self,
+        row: &SyncEntryRow,
+        path: &Path,
+        file_size: Option<u64>,
+    ) -> Result<bool> {
+        let connection = self.connection()?;
+        let exists = connection
+            .query_row(
+                "SELECT 1 FROM entries WHERE id = ?1",
+                params![row.id.as_str()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if exists {
+            return Ok(false);
+        }
+
+        let manual_order = self.next_entry_manual_order_with_connection(&connection)?;
+        connection.execute(
+            "INSERT INTO entries
+                (id, path, title, author, sort_title, sort_author, manual_order,
+                 author_attributed, page_count_attributed, added_at, page_count,
+                 file_size, cover_hash, missing, trashed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, NULL, ?10, NULL, 0, ?11)",
+            params![
+                row.id.as_str(),
+                path.to_string_lossy(),
+                row.title,
+                row.author,
+                sort_key(row.title.as_deref()),
+                sort_key(row.author.as_deref()),
+                manual_order,
+                i64::from(row.author.is_some()),
+                row.updated_at,
+                file_size.map(|value| value as i64),
+                row.deleted_at,
+            ],
+        )?;
+        Ok(true)
+    }
+
+    /// Applies user-facing synced metadata to an existing local entry.
+    ///
+    /// This intentionally preserves the local PDF path and source-file status
+    /// while updating the cross-device reading and organization metadata that
+    /// lets a user continue on another device.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot update the entry or its tags.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_synced_entry_state(
+        &self,
+        entry_id: &EntryId,
+        title: Option<&str>,
+        author: Option<&str>,
+        display_title: Option<&str>,
+        display_author: Option<&str>,
+        metadata_locked: bool,
+        page_count: Option<u16>,
+        last_page: u16,
+        opened_at: Option<i64>,
+        tags: &[String],
+    ) -> Result<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let title = title.map(str::to_owned);
+        let author = author.map(str::to_owned);
+        let display_title = display_title.map(str::to_owned);
+        let display_author = display_author.map(str::to_owned);
+        let sort_title = sort_key(display_title.as_deref().or(title.as_deref()));
+        let sort_author = sort_key(display_author.as_deref().or(author.as_deref()));
+        transaction.execute(
+            "UPDATE entries
+             SET title = ?1,
+                 author = ?2,
+                 display_title = ?3,
+                 display_author = ?4,
+                 sort_title = ?5,
+                 sort_author = ?6,
+                 metadata_locked = ?7,
+                 page_count = COALESCE(?8, page_count),
+                 page_count_attributed = CASE WHEN ?8 IS NULL THEN page_count_attributed ELSE 1 END,
+                 last_page = ?9,
+                 opened_at = ?10
+             WHERE id = ?11",
+            params![
+                title,
+                author,
+                display_title,
+                display_author,
+                sort_title,
+                sort_author,
+                i64::from(metadata_locked),
+                page_count.map(i64::from),
+                i64::from(last_page),
+                opened_at,
+                entry_id.as_str(),
+            ],
+        )?;
+        transaction.execute(
+            "DELETE FROM tags WHERE entry_id = ?1",
+            params![entry_id.as_str()],
+        )?;
+        for tag in tags {
+            transaction.execute(
+                "INSERT OR IGNORE INTO tags (entry_id, tag) VALUES (?1, ?2)",
+                params![entry_id.as_str(), tag],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Materializes a sync folder row into the local folder table.
+    ///
+    /// Parent links are applied only when the parent folder already exists,
+    /// which keeps hydration robust when remote rows arrive out of hierarchy
+    /// order. A later hydration pass can fill the parent once both rows exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the folder.
+    pub fn hydrate_sync_folder(&self, row: &SyncFolderRow) -> Result<bool> {
+        let connection = self.connection()?;
+        let exists = connection
+            .query_row(
+                "SELECT 1 FROM folders WHERE id = ?1",
+                params![row.id.as_str()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        let parent_id = match &row.parent_id {
+            Some(parent_id)
+                if connection
+                    .query_row(
+                        "SELECT 1 FROM folders WHERE id = ?1",
+                        params![parent_id.as_str()],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some() =>
+            {
+                Some(parent_id.as_str())
+            }
+            _ => None,
+        };
+        let manual_order = self.next_folder_manual_order_with_connection(
+            &connection,
+            row.parent_id.as_ref().filter(|_| parent_id.is_some()),
+        )?;
+        connection.execute(
+            "INSERT INTO folders
+                (id, name, parent_id, manual_order, created_at, updated_at, trashed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                parent_id = excluded.parent_id,
+                updated_at = excluded.updated_at,
+                trashed_at = excluded.trashed_at",
+            params![
+                row.id.as_str(),
+                row.name,
+                parent_id,
+                manual_order,
+                row.updated_at,
+                row.deleted_at,
+            ],
+        )?;
+        Ok(!exists)
+    }
+
+    /// Materializes a sync entry-folder membership into the local library.
+    ///
+    /// Returns `false` when the entry/folder does not exist yet, the remote row
+    /// is deleted, or the membership already exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the membership.
+    pub fn hydrate_sync_entry_folder(&self, row: &SyncEntryFolderRow) -> Result<bool> {
+        if row.deleted_at.is_some() {
+            return Ok(false);
+        }
+        let connection = self.connection()?;
+        let entry_exists = connection
+            .query_row(
+                "SELECT 1 FROM entries WHERE id = ?1",
+                params![row.entry_id.as_str()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        let folder_exists = connection
+            .query_row(
+                "SELECT 1 FROM folders WHERE id = ?1",
+                params![row.folder_id.as_str()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !entry_exists || !folder_exists {
+            return Ok(false);
+        }
+        let manual_order =
+            self.next_folder_entry_manual_order_with_connection(&connection, &row.folder_id)?;
+        let inserted = connection.execute(
+            "INSERT INTO entry_folders (entry_id, folder_id, manual_order)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(entry_id, folder_id) DO NOTHING",
+            params![row.entry_id.as_str(), row.folder_id.as_str(), manual_order],
+        )?;
+        Ok(inserted > 0)
     }
 
     /// Seeds sync metadata from the current local library state.
@@ -849,10 +1382,13 @@ impl Db {
         }
 
         for membership in &snapshot.entry_folders {
+            let updated_at = self
+                .sync_entry_folder_updated_at(&membership.entry_id, &membership.folder_id)?
+                .unwrap_or(now);
             self.upsert_sync_entry_folder(&SyncEntryFolderRow {
                 entry_id: membership.entry_id.clone(),
                 folder_id: membership.folder_id.clone(),
-                updated_at: now,
+                updated_at,
                 deleted_at: None,
             })?;
         }
@@ -922,6 +1458,31 @@ impl Db {
     /// Returns an error when SQLite cannot query entries.
     pub fn get_all_entries(&self) -> Result<Vec<LibraryEntry>> {
         self.get_entries_sorted(LibrarySortMode::RecentlyAdded)
+    }
+
+    /// Returns the entry with the given id, if it exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query entries.
+    pub fn entry_by_id(&self, entry_id: &EntryId) -> Result<Option<LibraryEntry>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, path, title, author, display_title, display_author, sort_title, sort_author, metadata_locked, manual_order, author_attributed, page_count_attributed, added_at, opened_at, page_count, file_size, last_page, rating, cover_hash, missing
+             FROM entries
+             WHERE id = ?1",
+        )?;
+        let mut entry = statement
+            .query_row(params![entry_id.as_str()], row_to_entry)
+            .optional()
+            .context("Could not load library entry by id.")?;
+
+        if let Some(entry) = &mut entry {
+            entry.tags = self.tags_for_entry_with_connection(&connection, &entry.id)?;
+            entry.folders = self.folders_for_entry_with_connection(&connection, &entry.id, true)?;
+        }
+
+        Ok(entry)
     }
 
     /// Returns all library entries ordered for a selected library sort mode.
@@ -2786,6 +3347,42 @@ impl Db {
                 PRIMARY KEY (library_id, device_id)
             );
 
+            CREATE TABLE IF NOT EXISTS sync_crdt_operations (
+                op_id           TEXT PRIMARY KEY,
+                library_id      TEXT NOT NULL,
+                device_id       TEXT NOT NULL,
+                logical_time    INTEGER NOT NULL,
+                entity_kind     TEXT NOT NULL,
+                entity_id       TEXT NOT NULL,
+                payload         TEXT NOT NULL,
+                created_at      INTEGER NOT NULL,
+                remote_sequence INTEGER,
+                pushed_at       INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS sync_crdt_entity_versions (
+                library_id      TEXT NOT NULL,
+                entity_kind     TEXT NOT NULL,
+                entity_id       TEXT NOT NULL,
+                payload_hash    TEXT NOT NULL,
+                logical_time    INTEGER NOT NULL,
+                device_id       TEXT NOT NULL,
+                PRIMARY KEY (library_id, entity_kind, entity_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS sync_crdt_checkpoints (
+                library_id            TEXT NOT NULL,
+                device_id             TEXT NOT NULL,
+                last_remote_sequence  INTEGER NOT NULL,
+                PRIMARY KEY (library_id, device_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_sync_crdt_operations_library_entity
+                ON sync_crdt_operations(library_id, entity_kind, entity_id);
+
+            CREATE INDEX IF NOT EXISTS idx_sync_crdt_operations_pending
+                ON sync_crdt_operations(library_id, device_id, pushed_at);
+
             INSERT OR IGNORE INTO schema_version (version) VALUES (1);
             "#,
         )?;
@@ -2903,6 +3500,21 @@ fn row_to_folder(row: &rusqlite::Row<'_>) -> rusqlite::Result<Folder> {
         manual_order: row.get(3)?,
         created_at: DateTime::from_timestamp(created_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
         updated_at: DateTime::from_timestamp(updated_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+    })
+}
+
+fn row_to_sync_crdt_operation(row: &rusqlite::Row<'_>) -> rusqlite::Result<SyncCrdtOperation> {
+    Ok(SyncCrdtOperation {
+        op_id: row.get(0)?,
+        library_id: row.get(1)?,
+        device_id: row.get(2)?,
+        logical_time: row.get(3)?,
+        entity_kind: row.get(4)?,
+        entity_id: row.get(5)?,
+        payload: row.get(6)?,
+        created_at: row.get(7)?,
+        remote_sequence: row.get(8)?,
+        pushed_at: row.get(9)?,
     })
 }
 

@@ -349,6 +349,18 @@ pub enum Message {
     SyncSignInRequested,
     /// Google sync sign-in finished.
     SyncSignInFinished(Result<pdf_folio_sync::Session, String>),
+    /// Periodic automatic sync timer fired.
+    AutoSyncTick(Instant),
+    /// One automatic CRDT sync pass completed.
+    AutoSyncFinished(
+        Result<
+            (
+                pdf_folio_sync::SyncCrdtReport,
+                pdf_folio_sync::SyncHydrationReport,
+            ),
+            String,
+        >,
+    ),
     /// The native file picker was dismissed without choosing a file.
     FileDialogCanceled,
     /// A file was selected.

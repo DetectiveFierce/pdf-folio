@@ -396,11 +396,13 @@ cargo check
 cargo test
 ```
 
-### Experimental Sync Checks
+### Experimental Sync
 
-PDF-Folio has an experimental single-user sync path that is currently driven by
-CLI commands. The sync server runs on `mind-palace`, verifies Google sign-in for
-the configured account, mints short-lived Turso/R2 credentials, and stores the
+PDF-Folio has an experimental single-user sync path. The desktop app now runs
+automatic CRDT metadata sync after Google sign-in, immediately starts a sync
+after local library/progress edits, and keeps a short periodic sync as a safety
+net. The sync server runs on `mind-palace`, verifies Google sign-in for the
+configured account, mints short-lived Turso/R2 credentials, and stores the
 desktop session locally.
 
 ```sh
@@ -411,16 +413,19 @@ cargo run -p pdf-folio-main --bin pdf-folio -- sync ensure-schema
 cargo run -p pdf-folio-main --bin pdf-folio -- sync sync-once
 ```
 
-For a second-machine smoke test, `sync-once` runs the manual sequence:
-seed local sync metadata, upload local PDF blobs, push metadata to Turso, pull
-remote metadata, and download pulled PDF blobs into the local sync blob cache.
-That validates the auth flow, control plane, Turso access, and R2 blob transfer.
-Full automatic UI library hydration from remote metadata is still in progress.
+For a second-machine smoke test, `sync-once` uploads local PDF blobs, runs the
+same CRDT metadata pass used by the UI auto-sync loop, and downloads pulled PDF
+blobs into the local sync blob cache. That validates the auth flow, control
+plane, Turso access, CRDT operation exchange, R2 blob transfer, and remote
+library hydration. Synced library state includes PDFs, folders, folder
+membership, user-edited display metadata, page count, reading position,
+opened-at state, and tags.
 
 ## Project Notes
 
-- The app is local-first. Experimental single-user sync exists, but it is still
-  CLI-driven and not yet a complete automatic multi-device UI workflow.
+- The app is local-first. Experimental single-user CRDT sync hydrates remote
+  libraries across devices; annotations/bookmarks are still evolving beyond the
+  current persisted library metadata surface.
 - Library trash and permanent-delete actions affect PDF-Folio metadata only; they do not delete source PDF files.
 - Imported PDFs remain at their original paths.
 - Folder membership is app metadata, separate from filesystem folders.

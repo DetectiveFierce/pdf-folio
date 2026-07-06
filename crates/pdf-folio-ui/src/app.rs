@@ -325,6 +325,10 @@ pub struct PDFolioApp {
     pub sync_auth: SyncAuthRuntime,
     /// Library database handle.
     pub db: Arc<Db>,
+    /// True while an automatic sync task is running.
+    pub sync_in_progress: bool,
+    /// Last automatic sync start time.
+    pub last_sync_started_at: Option<Instant>,
     /// Last-run state that is waiting for library/document prerequisites.
     pending_session_restore: Option<AppSession>,
 }
