@@ -327,6 +327,8 @@ pub struct PDFolioApp {
     pub db: Arc<Db>,
     /// True while an automatic sync task is running.
     pub sync_in_progress: bool,
+    /// True when a local or remote change asked for another sync while one was already running.
+    pub sync_queued: bool,
     /// Last automatic sync start time.
     pub last_sync_started_at: Option<Instant>,
     /// Last-run state that is waiting for library/document prerequisites.

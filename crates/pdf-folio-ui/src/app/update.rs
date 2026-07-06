@@ -447,9 +447,14 @@ fn default_sync_device_id() -> String {
 }
 
 pub(super) fn start_auto_sync_now(app: &mut PDFolioApp) -> Task<Message> {
-    if !app.sync_auth.is_signed_in() || app.sync_in_progress {
+    if !app.sync_auth.is_signed_in() {
         return Task::none();
     }
+    if app.sync_in_progress {
+        app.sync_queued = true;
+        return Task::none();
+    }
+    app.sync_queued = false;
     app.sync_in_progress = true;
     app.last_sync_started_at = Some(Instant::now());
     auto_sync_task(Arc::clone(&app.db), app.libraries.active_library_id.clone())
@@ -494,6 +499,9 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         },
         Message::AutoSyncTick(tick) => {
             if !app.sync_auth.is_signed_in() || app.sync_in_progress {
+                if app.sync_in_progress {
+                    app.sync_queued = true;
+                }
                 return Task::none();
             }
             app.sync_in_progress = true;
@@ -505,6 +513,9 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             remote_sequence,
         } => {
             if !app.sync_auth.is_signed_in() || app.sync_in_progress {
+                if app.sync_in_progress {
+                    app.sync_queued = true;
+                }
                 return Task::none();
             }
             tracing::debug!(
@@ -520,6 +531,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::AutoSyncFinished(result) => {
             app.sync_in_progress = false;
+            let mut follow_up_tasks = Vec::new();
             match result {
                 Ok((uploads, crdt, hydration)) => {
                     if uploads.uploaded_blobs > 0
@@ -553,17 +565,23 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                         || hydration.hydrated_memberships > 0
                         || hydration.missing_blobs > 0
                     {
-                        return Task::batch([
+                        follow_up_tasks.push(Task::batch([
                             app.refresh_folders(),
                             app.refresh_library(),
                             app.request_visible_thumbnails(),
-                        ]);
+                        ]));
                     }
                 }
                 Err(error) => {
                     tracing::warn!(%error, "Automatic PDF-Folio sync failed");
                     app.library.library_status = Some(format!("Sync paused: {error}"));
                 }
+            }
+            if app.sync_queued {
+                follow_up_tasks.push(start_auto_sync_now(app));
+            }
+            if !follow_up_tasks.is_empty() {
+                return Task::batch(follow_up_tasks);
             }
         }
         Message::AppMenuOpened(menu) => {

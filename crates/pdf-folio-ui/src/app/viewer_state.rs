@@ -236,6 +236,7 @@ impl PDFolioApp {
             sync_auth,
             db,
             sync_in_progress: false,
+            sync_queued: false,
             last_sync_started_at: None,
             pending_session_restore: None,
         })
