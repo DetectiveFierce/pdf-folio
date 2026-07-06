@@ -2,6 +2,7 @@ use super::*;
 use anyhow::Context;
 use directories::ProjectDirs;
 use pdf_folio_db::thumbnail_path;
+use pdf_folio_sync::SyncLibraryRow;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,6 +23,7 @@ pub struct LibraryProfile {
 pub struct LibraryRegistryRuntime {
     pub profiles: Vec<LibraryProfile>,
     pub active_library_id: String,
+    pub deleted_library_ids: HashSet<String>,
     pub previews: HashMap<String, LibraryPreview>,
     pub new_library_name: String,
     pub rename_inputs: HashMap<String, String>,
@@ -56,6 +58,8 @@ pub enum LibraryNameDialog {
 struct StoredLibraryRegistry {
     active_library_id: String,
     libraries: Vec<LibraryProfile>,
+    #[serde(default)]
+    deleted_library_ids: Vec<String>,
 }
 
 impl LibraryRegistryRuntime {
@@ -87,6 +91,7 @@ impl LibraryRegistryRuntime {
         Self {
             profiles: stored.libraries,
             active_library_id,
+            deleted_library_ids: stored.deleted_library_ids.into_iter().collect(),
             previews: HashMap::new(),
             new_library_name: String::new(),
             rename_inputs,
@@ -232,6 +237,20 @@ impl PDFolioApp {
     }
 }
 
+pub(super) fn load_library_preview(profile: &LibraryProfile) -> LibraryPreview {
+    Db::open(profile.db_path.clone())
+        .and_then(|db| db.get_entries_sorted(LibrarySortMode::RecentlyAdded))
+        .map(|entries| LibraryPreview {
+            total_entries: entries.len(),
+            thumbnails: entries
+                .iter()
+                .take(LIBRARY_SWITCHER_PREVIEW_LIMIT)
+                .filter_map(library_preview_thumbnail)
+                .collect(),
+        })
+        .unwrap_or_default()
+}
+
 pub(super) fn load_library_registry(
     preferred_active_id: Option<&str>,
 ) -> anyhow::Result<LibraryRegistryRuntime> {
@@ -274,10 +293,7 @@ pub(super) fn create_library_profile(
     let mut registry = registry;
     let name = clean_library_name(&name)?;
     let id = unique_library_id(&registry);
-    let db_path = app_data_dir()?
-        .join("libraries")
-        .join(&id)
-        .join("library.db");
+    let db_path = library_db_path(&app_data_dir()?, &id);
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Could not create {}.", parent.display()))?;
@@ -337,6 +353,7 @@ pub(super) fn delete_library_profile(
         anyhow::bail!("Library was not found.");
     };
     let removed = registry.profiles.remove(index);
+    registry.deleted_library_ids.insert(library_id.clone());
     registry.rename_inputs.remove(&library_id);
     if registry.active_library_id == library_id {
         registry.active_library_id = registry
@@ -353,6 +370,106 @@ pub(super) fn delete_library_profile(
     Ok(registry)
 }
 
+pub(super) fn sync_library_registry_profiles(
+    registry: LibraryRegistryRuntime,
+    remote_libraries: Vec<SyncLibraryRow>,
+) -> anyhow::Result<(LibraryRegistryRuntime, Vec<String>)> {
+    let mut registry = registry;
+    let data_dir = app_data_dir()?;
+    let mut added_library_ids = Vec::new();
+
+    for remote in remote_libraries {
+        if remote.deleted_at.is_some() {
+            registry.deleted_library_ids.insert(remote.id.clone());
+            if let Some(index) = registry
+                .profiles
+                .iter()
+                .position(|profile| profile.id == remote.id)
+            {
+                let removed = registry.profiles.remove(index);
+                registry.rename_inputs.remove(&remote.id);
+                let _ = remove_library_storage(&removed.db_path);
+                if registry.active_library_id == remote.id {
+                    registry.active_library_id = registry
+                        .profiles
+                        .first()
+                        .map(|profile| profile.id.clone())
+                        .unwrap_or_else(|| DEFAULT_LIBRARY_ID.to_owned());
+                }
+            }
+            continue;
+        }
+
+        registry.deleted_library_ids.remove(&remote.id);
+
+        if let Some(profile) = registry
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.id == remote.id)
+        {
+            if profile.name != remote.name {
+                profile.name = remote.name.clone();
+            }
+            registry
+                .rename_inputs
+                .insert(profile.id.clone(), profile.name.clone());
+            continue;
+        }
+
+        let db_path = library_db_path(&data_dir, &remote.id);
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Could not create {}.", parent.display()))?;
+        }
+        Db::open(&db_path)?;
+        registry.profiles.push(LibraryProfile {
+            id: remote.id.clone(),
+            name: remote.name.clone(),
+            db_path,
+        });
+        registry
+            .rename_inputs
+            .insert(remote.id.clone(), remote.name);
+        added_library_ids.push(remote.id);
+    }
+
+    registry.profiles.sort_by(|left, right| {
+        (left.id != DEFAULT_LIBRARY_ID)
+            .cmp(&(right.id != DEFAULT_LIBRARY_ID))
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+    registry.previews = load_library_previews(&registry.profiles);
+    save_library_registry(&registry)?;
+    Ok((registry, added_library_ids))
+}
+
+pub(super) fn sync_library_rows_for_registry(
+    registry: &LibraryRegistryRuntime,
+) -> Vec<SyncLibraryRow> {
+    let updated_at = current_unix_timestamp();
+    registry
+        .profiles
+        .iter()
+        .map(|profile| SyncLibraryRow {
+            id: profile.id.clone(),
+            name: profile.name.clone(),
+            updated_at,
+            deleted_at: None,
+        })
+        .chain(
+            registry
+                .deleted_library_ids
+                .iter()
+                .map(|library_id| SyncLibraryRow {
+                    id: library_id.clone(),
+                    name: library_id.clone(),
+                    updated_at,
+                    deleted_at: Some(updated_at),
+                }),
+        )
+        .collect()
+}
+
 fn save_library_registry(registry: &LibraryRegistryRuntime) -> anyhow::Result<()> {
     let path = registry_path()?;
     if let Some(parent) = path.parent() {
@@ -362,6 +479,7 @@ fn save_library_registry(registry: &LibraryRegistryRuntime) -> anyhow::Result<()
     let stored = StoredLibraryRegistry {
         active_library_id: registry.active_library_id.clone(),
         libraries: registry.profiles.clone(),
+        deleted_library_ids: registry.deleted_library_ids.iter().cloned().collect(),
     };
     std::fs::write(&path, serde_json::to_vec_pretty(&stored)?)
         .with_context(|| format!("Could not write {}.", path.display()))?;
@@ -372,6 +490,7 @@ fn default_registry(data_dir: &Path) -> StoredLibraryRegistry {
     StoredLibraryRegistry {
         active_library_id: DEFAULT_LIBRARY_ID.to_owned(),
         libraries: vec![default_profile(data_dir)],
+        deleted_library_ids: Vec::new(),
     }
 }
 
@@ -379,7 +498,25 @@ fn default_profile(data_dir: &Path) -> LibraryProfile {
     LibraryProfile {
         id: DEFAULT_LIBRARY_ID.to_owned(),
         name: DEFAULT_LIBRARY_NAME.to_owned(),
-        db_path: data_dir.join("library.db"),
+        db_path: library_db_path(data_dir, DEFAULT_LIBRARY_ID),
+    }
+}
+
+fn current_unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default()
+}
+
+fn library_db_path(data_dir: &Path, library_id: &str) -> PathBuf {
+    if library_id == DEFAULT_LIBRARY_ID {
+        data_dir.join("library.db")
+    } else {
+        data_dir
+            .join("libraries")
+            .join(library_id)
+            .join("library.db")
     }
 }
 
@@ -441,20 +578,7 @@ fn remove_library_storage(db_path: &Path) -> anyhow::Result<()> {
 fn load_library_previews(profiles: &[LibraryProfile]) -> HashMap<String, LibraryPreview> {
     profiles
         .iter()
-        .map(|profile| {
-            let preview = Db::open(profile.db_path.clone())
-                .and_then(|db| db.get_entries_sorted(LibrarySortMode::RecentlyAdded))
-                .map(|entries| LibraryPreview {
-                    total_entries: entries.len(),
-                    thumbnails: entries
-                        .iter()
-                        .take(LIBRARY_SWITCHER_PREVIEW_LIMIT)
-                        .filter_map(library_preview_thumbnail)
-                        .collect(),
-                })
-                .unwrap_or_default();
-            (profile.id.clone(), preview)
-        })
+        .map(|profile| (profile.id.clone(), load_library_preview(profile)))
         .collect()
 }
 

@@ -376,6 +376,8 @@ fn sync_client() -> Result<SyncClient> {
 struct StoredLibraryRegistry {
     active_library_id: String,
     libraries: Vec<SyncLibraryProfile>,
+    #[serde(default)]
+    deleted_library_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -462,17 +464,32 @@ fn merge_remote_libraries_into_registry(remote_libraries: &[SyncLibraryRow]) -> 
         .find(|row| row.deleted_at.is_none() && row.id != "default")
         .or_else(|| remote_libraries.iter().find(|row| row.deleted_at.is_none()))
         .map(|row| row.id.clone());
-    for row in remote_libraries
-        .iter()
-        .filter(|row| row.deleted_at.is_none())
-    {
+    for row in remote_libraries {
+        if row.deleted_at.is_some() {
+            if !registry.deleted_library_ids.iter().any(|id| id == &row.id) {
+                registry.deleted_library_ids.push(row.id.clone());
+            }
+            if let Some(index) = registry
+                .libraries
+                .iter()
+                .position(|profile| profile.id == row.id)
+            {
+                let removed = registry.libraries.remove(index);
+                let _ = remove_library_storage(&removed.db_path);
+            }
+            continue;
+        }
+
+        if registry.deleted_library_ids.iter().any(|id| id == &row.id) {
+            continue;
+        }
+
         let db_path = local_library_db_path(&data_dir, &row.id);
         if let Some(profile) = registry
             .libraries
             .iter_mut()
             .find(|profile| profile.id == row.id)
         {
-            profile.name = row.name.clone();
             profile.db_path = db_path;
         } else {
             registry.libraries.push(SyncLibraryProfile {
@@ -531,6 +548,7 @@ fn load_stored_library_registry(data_dir: &Path) -> Result<StoredLibraryRegistry
             .map(|profile| profile.id.clone())
             .unwrap_or_else(|| String::from("default")),
         libraries,
+        deleted_library_ids: Vec::new(),
     })
 }
 
@@ -546,13 +564,13 @@ fn save_stored_library_registry(registry: &StoredLibraryRegistry) -> Result<()> 
 }
 
 fn library_rows(profiles: &[SyncLibraryProfile]) -> Vec<SyncLibraryRow> {
-    let now = Utc::now().timestamp();
+    let updated_at = Utc::now().timestamp();
     profiles
         .iter()
         .map(|profile| SyncLibraryRow {
             id: profile.id.clone(),
             name: profile.name.clone(),
-            updated_at: now,
+            updated_at,
             deleted_at: None,
         })
         .collect()
@@ -577,6 +595,31 @@ fn local_library_db_path(data_dir: &Path, library_id: &str) -> PathBuf {
             .join(library_id)
             .join("library.db")
     }
+}
+
+fn remove_library_storage(db_path: &Path) -> Result<()> {
+    match std::fs::remove_file(db_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("Could not remove {}.", db_path.display()));
+        }
+    }
+    if let Some(parent) = db_path.parent() {
+        match std::fs::remove_dir(parent) {
+            Ok(()) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                ) => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Could not remove {}.", parent.display()));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn is_blob_hash(value: &str) -> bool {

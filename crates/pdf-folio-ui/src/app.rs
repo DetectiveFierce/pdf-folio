@@ -201,7 +201,9 @@ use app_libraries::{
 };
 use app_session::{load_app_session, save_app_session, AppSession};
 use app_sync_auth::{SyncAuthRuntime, SyncAuthState};
-use app_update::{pending_raindrop_rollback_check_task, start_auto_sync_now, update};
+use app_update::{
+    pending_raindrop_rollback_check_task, sync_library_registry_for_app_task, update,
+};
 use app_view::view;
 use app_viewer_layout::*;
 use pdf_folio_ui_components::library::view::with_alpha;
@@ -325,10 +327,10 @@ pub struct PDFolioApp {
     pub sync_auth: SyncAuthRuntime,
     /// Library database handle.
     pub db: Arc<Db>,
-    /// True while an automatic sync task is running.
-    pub sync_in_progress: bool,
-    /// True when a local or remote change asked for another sync while one was already running.
-    pub sync_queued: bool,
+    /// Library currently being synchronized.
+    pub sync_in_progress: Option<String>,
+    /// Libraries that should sync after the current pass finishes.
+    pub sync_queued_libraries: HashSet<String>,
     /// Last automatic sync start time.
     pub last_sync_started_at: Option<Instant>,
     /// Last-run state that is waiting for library/document prerequisites.
@@ -662,7 +664,7 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
 
     let mut application = iced::application(
         move || {
-            let mut app = app.clone();
+            let app = app.clone();
             let open_task = if app.sync_auth.is_signed_in() {
                 startup_file
                     .clone()
@@ -677,7 +679,7 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
             } else {
                 Task::none()
             };
-            let sync_task = start_auto_sync_now(&mut app);
+            let sync_task = sync_library_registry_for_app_task(&app, true, true);
             (app, Task::batch([open_task, rollback_task, sync_task]))
         },
         update,

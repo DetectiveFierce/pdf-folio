@@ -16,6 +16,6 @@ pub use r2_client::{R2Client, R2DownloadResponse, R2UploadResponse};
 pub use session::{cached_session, save_session, Session};
 pub use sync::{
     SyncBlobUploadReport, SyncCheckpoint, SyncClient, SyncCrdtReport, SyncHydrationReport,
-    SyncLibraryRow, SyncPlan,
+    SyncLibraryRow, SyncPlan, REGISTRY_LIBRARY_ID,
 };
 pub use turso_client::{TursoClient, TursoToken};

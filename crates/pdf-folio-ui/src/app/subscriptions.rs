@@ -1,7 +1,7 @@
 //! Application subscriptions and filesystem watcher streams.
 
 use std::path::PathBuf;
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -117,25 +117,41 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         Subscription::none()
     };
 
-    let auto_sync = if app.sync_auth.is_signed_in() && !app.sync_in_progress {
+    let auto_sync = if app.sync_auth.is_signed_in() && app.sync_in_progress.is_none() {
         time::every(AUTO_SYNC_INTERVAL).map(Message::AutoSyncTick)
     } else {
         Subscription::none()
     };
 
-    let live_sync = if app.sync_auth.is_signed_in() && !app.sync_in_progress {
+    let live_sync = if app.sync_auth.is_signed_in() {
+        let device_id = default_sync_device_id();
+        Subscription::batch(app.libraries.profiles.iter().map(|profile| {
+            Subscription::run_with(
+                LiveSyncWatch {
+                    db_path: profile.db_path.clone(),
+                    library_id: profile.id.clone(),
+                    device_id: device_id.clone(),
+                },
+                live_sync_stream,
+            )
+        }))
+    } else {
+        Subscription::none()
+    };
+
+    let registry_live_sync = if app.sync_auth.is_signed_in() {
         app.libraries
             .active_profile()
-            .map_or_else(Subscription::none, |profile| {
+            .map(|profile| {
                 Subscription::run_with(
-                    LiveSyncWatch {
+                    RegistryLiveSyncWatch {
                         db_path: profile.db_path.clone(),
-                        library_id: profile.id.clone(),
                         device_id: default_sync_device_id(),
                     },
-                    live_sync_stream,
+                    registry_live_sync_stream,
                 )
             })
+            .unwrap_or_else(Subscription::none)
     } else {
         Subscription::none()
     };
@@ -151,6 +167,7 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         animations,
         auto_sync,
         live_sync,
+        registry_live_sync,
     ])
 }
 
@@ -159,6 +176,53 @@ struct LiveSyncWatch {
     db_path: PathBuf,
     library_id: String,
     device_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RegistryLiveSyncWatch {
+    db_path: PathBuf,
+    device_id: String,
+}
+
+fn registry_live_sync_stream(
+    watch: &RegistryLiveSyncWatch,
+) -> impl iced::futures::Stream<Item = Message> {
+    let watch = watch.clone();
+    stream::channel(10, async move |mut output| {
+        let Ok(db) = Db::open(&watch.db_path) else {
+            return;
+        };
+        let Ok(session) = pdf_folio_sync::cached_session() else {
+            return;
+        };
+        let client = pdf_folio_sync::SyncClient::new(session);
+        loop {
+            tokio::time::sleep(LIVE_SYNC_INTERVAL).await;
+            let Ok(cursor) =
+                db.sync_crdt_remote_cursor(pdf_folio_sync::REGISTRY_LIBRARY_ID, &watch.device_id)
+            else {
+                continue;
+            };
+            let Ok(remote_sequence) = client
+                .remote_crdt_head_sequence(pdf_folio_sync::REGISTRY_LIBRARY_ID)
+                .await
+            else {
+                continue;
+            };
+            if remote_sequence > cursor {
+                if output
+                    .send(Message::LibraryRegistryRemoteAvailable {
+                        noticed_at: Instant::now(),
+                        remote_sequence,
+                    })
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+    })
 }
 
 fn live_sync_stream(watch: &LiveSyncWatch) -> impl iced::futures::Stream<Item = Message> {
@@ -180,16 +244,18 @@ fn live_sync_stream(watch: &LiveSyncWatch) -> impl iced::futures::Stream<Item = 
             else {
                 continue;
             };
-            if remote_sequence > cursor
-                && output
+            if remote_sequence > cursor {
+                if output
                     .send(Message::RemoteSyncAvailable {
+                        library_id: watch.library_id.clone(),
                         noticed_at: Instant::now(),
                         remote_sequence,
                     })
                     .await
                     .is_err()
-            {
-                break;
+                {
+                    return;
+                }
             }
         }
     })
@@ -355,28 +421,57 @@ fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<
 
         let receiver = Arc::new(std::sync::Mutex::new(receiver));
         loop {
-            let receiver = Arc::clone(&receiver);
+            let blocking_receiver = Arc::clone(&receiver);
             let event = tokio::task::spawn_blocking(move || {
-                receiver
+                blocking_receiver
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .recv()
+                    .recv_timeout(Duration::from_millis(500))
             })
             .await;
 
-            let Ok(Ok(event)) = event else {
-                break;
-            };
-
-            if output
-                .send(Message::LibraryWatchEvent(event))
-                .await
-                .is_err()
-            {
-                break;
+            match event {
+                Ok(Ok(event)) => {
+                    if output
+                        .send(Message::LibraryWatchEvent(event))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                    drain_pending_library_watch_events(&receiver, &mut output).await;
+                }
+                Ok(Err(RecvTimeoutError::Timeout)) => {}
+                Ok(Err(RecvTimeoutError::Disconnected)) | Err(_) => break,
             }
         }
 
         drop(watcher);
     })
+}
+
+async fn drain_pending_library_watch_events(
+    receiver: &Arc<std::sync::Mutex<std::sync::mpsc::Receiver<pdf_folio_db::LibraryWatchEvent>>>,
+    output: &mut iced::futures::channel::mpsc::Sender<Message>,
+) {
+    loop {
+        let event = {
+            let receiver = receiver
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            receiver.try_recv()
+        };
+        match event {
+            Ok(event) => {
+                if output
+                    .send(Message::LibraryWatchEvent(event))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+        }
+    }
 }

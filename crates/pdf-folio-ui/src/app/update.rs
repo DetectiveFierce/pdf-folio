@@ -1,6 +1,7 @@
 use super::*;
 use crate::app_libraries::{
-    create_library_profile, delete_library_profile, rename_library_profile,
+    create_library_profile, delete_library_profile, load_library_preview, rename_library_profile,
+    sync_library_registry_profiles, sync_library_rows_for_registry, LibraryProfile,
 };
 use anyhow::Context;
 use directories::ProjectDirs;
@@ -394,6 +395,56 @@ fn rollback_pending_raindrop_import_task(
     )
 }
 
+fn sync_library_registry_task(
+    registry: LibraryRegistryRuntime,
+    db_path: PathBuf,
+    sync_all_after: bool,
+    push_local: bool,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let session =
+                pdf_folio_sync::cached_session().context("No cached sync session is available.")?;
+            let client = pdf_folio_sync::SyncClient::new(session);
+            client.ensure_remote_schema().await?;
+            let db = Db::open(&db_path)?;
+            let rows = push_local
+                .then(|| sync_library_rows_for_registry(&registry))
+                .unwrap_or_default();
+            let remote_libraries = client
+                .sync_library_registry(&db, &rows, &default_sync_device_id())
+                .await?;
+            let (registry, added_library_ids) = tokio::task::spawn_blocking(move || {
+                sync_library_registry_profiles(registry, remote_libraries)
+            })
+            .await??;
+            Ok::<_, anyhow::Error>((registry, added_library_ids))
+        },
+        move |result| Message::LibraryRegistrySyncFinished {
+            sync_all_after,
+            result: result.map_err(|error| error.to_string()),
+        },
+    )
+}
+
+pub(super) fn sync_library_registry_for_app_task(
+    app: &PDFolioApp,
+    sync_all_after: bool,
+    push_local: bool,
+) -> Task<Message> {
+    app.libraries
+        .active_profile()
+        .map(|profile| {
+            sync_library_registry_task(
+                app.libraries.clone(),
+                profile.db_path.clone(),
+                sync_all_after,
+                push_local,
+            )
+        })
+        .unwrap_or_else(Task::none)
+}
+
 pub(super) fn pending_raindrop_rollback_check_task() -> Task<Message> {
     Task::perform(
         async {
@@ -414,7 +465,8 @@ pub(super) fn pending_raindrop_rollback_check_task() -> Task<Message> {
     )
 }
 
-fn auto_sync_task(db: Arc<Db>, library_id: String) -> Task<Message> {
+fn auto_sync_task(library: LibraryProfile) -> Task<Message> {
+    let library_id = library.id.clone();
     Task::perform(
         async move {
             let session =
@@ -422,20 +474,56 @@ fn auto_sync_task(db: Arc<Db>, library_id: String) -> Task<Message> {
             let client = pdf_folio_sync::SyncClient::new(session);
             client.ensure_remote_schema().await?;
             let cache = pdf_folio_sync::BlobCache::open_default()?;
-            let uploads = client.upload_local_blobs(&db, &cache).await?;
+            let device_id = default_sync_device_id();
+            let db = Db::open(&library.db_path)
+                .with_context(|| format!("Could not open {} for sync.", library.name))?;
+            let uploads = client
+                .upload_local_blobs(&db, &cache)
+                .await
+                .with_context(|| format!("Could not upload PDF blobs for {}.", library.name))?;
             let crdt = client
-                .sync_crdt_metadata(&db, &library_id, &default_sync_device_id())
-                .await?;
+                .sync_crdt_metadata(&db, &library.id, &device_id)
+                .await
+                .with_context(|| format!("Could not sync metadata for {}.", library.name))?;
             let hydration = client
-                .hydrate_remote_library(&db, &library_id, &cache)
-                .await?;
+                .hydrate_remote_library(&db, &library.id, &cache)
+                .await
+                .with_context(|| format!("Could not hydrate {}.", library.name))?;
             Ok::<_, anyhow::Error>((uploads, crdt, hydration))
         },
-        |result| match result {
-            Ok(reports) => Message::AutoSyncFinished(Ok(reports)),
-            Err(error) => Message::AutoSyncFinished(Err(error.to_string())),
+        move |result| Message::AutoSyncFinished {
+            library_id: library_id.clone(),
+            result: result.map_err(|error| error.to_string()),
         },
     )
+}
+
+fn refresh_library_preview_task(profile: LibraryProfile) -> Task<Message> {
+    Task::perform(
+        async move {
+            let library_id = profile.id.clone();
+            let preview =
+                tokio::task::spawn_blocking(move || load_library_preview(&profile)).await?;
+            Ok::<_, tokio::task::JoinError>((library_id, preview))
+        },
+        |result| match result {
+            Ok((library_id, preview)) => Message::LibraryPreviewRefreshed {
+                library_id,
+                preview,
+            },
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
+fn refresh_library_preview_by_id_task(app: &PDFolioApp, library_id: &str) -> Task<Message> {
+    app.libraries
+        .profiles
+        .iter()
+        .find(|profile| profile.id == library_id)
+        .cloned()
+        .map(refresh_library_preview_task)
+        .unwrap_or_else(Task::none)
 }
 
 fn default_sync_device_id() -> String {
@@ -447,17 +535,51 @@ fn default_sync_device_id() -> String {
 }
 
 pub(super) fn start_auto_sync_now(app: &mut PDFolioApp) -> Task<Message> {
+    auto_sync_library_task(app, app.libraries.active_library_id.clone())
+}
+
+pub(super) fn start_auto_sync_for_all_libraries(app: &mut PDFolioApp) -> Task<Message> {
+    let library_ids = app
+        .libraries
+        .profiles
+        .iter()
+        .map(|profile| profile.id.clone())
+        .collect::<Vec<_>>();
+    let mut task = Task::none();
+    for library_id in library_ids {
+        task = Task::batch([task, auto_sync_library_task(app, library_id)]);
+    }
+    task
+}
+
+fn auto_sync_library_task(app: &mut PDFolioApp, library_id: String) -> Task<Message> {
     if !app.sync_auth.is_signed_in() {
         return Task::none();
     }
-    if app.sync_in_progress {
-        app.sync_queued = true;
+    if app.sync_in_progress.is_some() {
+        app.sync_queued_libraries.insert(library_id);
         return Task::none();
     }
-    app.sync_queued = false;
-    app.sync_in_progress = true;
+    let Some(profile) = app
+        .libraries
+        .profiles
+        .iter()
+        .find(|profile| profile.id == library_id)
+        .cloned()
+    else {
+        return Task::none();
+    };
+    app.sync_queued_libraries.remove(&profile.id);
+    app.sync_in_progress = Some(profile.id.clone());
     app.last_sync_started_at = Some(Instant::now());
-    auto_sync_task(Arc::clone(&app.db), app.libraries.active_library_id.clone())
+    auto_sync_task(profile)
+}
+
+fn start_next_queued_sync(app: &mut PDFolioApp) -> Task<Message> {
+    let Some(library_id) = app.sync_queued_libraries.iter().next().cloned() else {
+        return Task::none();
+    };
+    auto_sync_library_task(app, library_id)
 }
 
 pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
@@ -475,17 +597,12 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 Ok(()) => {
                     app.mode = AppMode::Library;
                     app.library.library_startup_loading = true;
-                    app.sync_in_progress = true;
-                    app.last_sync_started_at = Some(Instant::now());
                     return Task::batch([
                         app.refresh_folders(),
                         app.refresh_library(),
                         attribute_pending_metadata_task(Arc::clone(&app.db)),
                         pending_raindrop_rollback_check_task(),
-                        auto_sync_task(
-                            Arc::clone(&app.db),
-                            app.libraries.active_library_id.clone(),
-                        ),
+                        sync_library_registry_for_app_task(app, true, true),
                     ]);
                 }
                 Err(error) => {
@@ -497,43 +614,71 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.sync_auth.error = Some(error);
             }
         },
-        Message::AutoSyncTick(tick) => {
-            if !app.sync_auth.is_signed_in() || app.sync_in_progress {
-                if app.sync_in_progress {
-                    app.sync_queued = true;
-                }
+        Message::AutoSyncTick(_tick) => {
+            if !app.sync_auth.is_signed_in() {
                 return Task::none();
             }
-            app.sync_in_progress = true;
-            app.last_sync_started_at = Some(tick);
-            return auto_sync_task(Arc::clone(&app.db), app.libraries.active_library_id.clone());
+            if app.sync_queued_libraries.is_empty() {
+                return sync_library_registry_for_app_task(app, false, false);
+            }
+            return start_next_queued_sync(app);
         }
         Message::RemoteSyncAvailable {
+            library_id,
             noticed_at,
             remote_sequence,
         } => {
-            if !app.sync_auth.is_signed_in() || app.sync_in_progress {
-                if app.sync_in_progress {
-                    app.sync_queued = true;
-                }
+            if !app.sync_auth.is_signed_in() {
                 return Task::none();
             }
             tracing::debug!(
                 remote_sequence,
-                library_id = %app.libraries.active_library_id,
+                library_id = %library_id,
                 "Live sync watcher detected remote CRDT updates"
             );
-            app.sync_in_progress = true;
             app.last_sync_started_at = Some(noticed_at);
             app.library.library_status =
                 Some(String::from("Syncing updates from another device..."));
-            return auto_sync_task(Arc::clone(&app.db), app.libraries.active_library_id.clone());
+            return auto_sync_library_task(app, library_id);
         }
-        Message::AutoSyncFinished(result) => {
-            app.sync_in_progress = false;
+        Message::LibraryRegistryRemoteAvailable {
+            noticed_at,
+            remote_sequence,
+        } => {
+            if !app.sync_auth.is_signed_in() {
+                return Task::none();
+            }
+            tracing::debug!(
+                remote_sequence,
+                "Live sync watcher detected remote library registry updates"
+            );
+            app.last_sync_started_at = Some(noticed_at);
+            return sync_library_registry_for_app_task(app, false, false);
+        }
+        Message::AutoSyncFinished { library_id, result } => {
+            if app.sync_in_progress.as_deref() == Some(library_id.as_str()) {
+                app.sync_in_progress = None;
+            }
             let mut follow_up_tasks = Vec::new();
+            let library_is_active = app.libraries.active_library_id == library_id;
+            let library_name = app
+                .libraries
+                .profiles
+                .iter()
+                .find(|profile| profile.id == library_id)
+                .map_or(library_id.as_str(), |profile| profile.name.as_str());
             match result {
                 Ok((uploads, crdt, hydration)) => {
+                    let library_changed = uploads.uploaded_blobs > 0
+                        || uploads.failed_blobs > 0
+                        || crdt.generated_operations > 0
+                        || crdt.pushed_operations > 0
+                        || crdt.pulled_operations > 0
+                        || hydration.hydrated_entries > 0
+                        || hydration.relinked_entries > 0
+                        || hydration.hydrated_folders > 0
+                        || hydration.hydrated_memberships > 0
+                        || hydration.missing_blobs > 0;
                     if uploads.uploaded_blobs > 0
                         || uploads.failed_blobs > 0
                         || crdt.generated_operations > 0
@@ -546,7 +691,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                         || hydration.missing_blobs > 0
                     {
                         app.library.library_status = Some(format!(
-                            "Synced {} PDFs, {} new, {} pushed, {} pulled, {} entries hydrated, {} PDFs healed, {} folders, {} memberships hydrated, {} PDFs missing.",
+                            "Synced {library_name}: {} PDFs, {} new, {} pushed, {} pulled, {} entries hydrated, {} PDFs healed, {} folders, {} memberships hydrated, {} PDFs missing.",
                             uploads.uploaded_blobs,
                             crdt.generated_operations,
                             crdt.pushed_operations,
@@ -558,12 +703,16 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                             hydration.missing_blobs
                         ));
                     }
-                    if crdt.pulled_operations > 0
-                        || hydration.hydrated_entries > 0
-                        || hydration.relinked_entries > 0
-                        || hydration.hydrated_folders > 0
-                        || hydration.hydrated_memberships > 0
-                        || hydration.missing_blobs > 0
+                    if library_changed {
+                        follow_up_tasks.push(refresh_library_preview_by_id_task(app, &library_id));
+                    }
+                    if library_is_active
+                        && (crdt.pulled_operations > 0
+                            || hydration.hydrated_entries > 0
+                            || hydration.relinked_entries > 0
+                            || hydration.hydrated_folders > 0
+                            || hydration.hydrated_memberships > 0
+                            || hydration.missing_blobs > 0)
                     {
                         follow_up_tasks.push(Task::batch([
                             app.refresh_folders(),
@@ -577,12 +726,42 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     app.library.library_status = Some(format!("Sync paused: {error}"));
                 }
             }
-            if app.sync_queued {
-                follow_up_tasks.push(start_auto_sync_now(app));
+            if !app.sync_queued_libraries.is_empty() {
+                follow_up_tasks.push(start_next_queued_sync(app));
             }
             if !follow_up_tasks.is_empty() {
                 return Task::batch(follow_up_tasks);
             }
+        }
+        Message::LibraryRegistrySyncFinished {
+            sync_all_after,
+            result,
+        } => match result {
+            Ok((registry, added_library_ids)) => {
+                let registry_task = match app.apply_library_registry(registry) {
+                    Ok(task) => task,
+                    Err(error) => return Task::done(Message::LibraryError(error.to_string())),
+                };
+                for library_id in added_library_ids {
+                    app.sync_queued_libraries.insert(library_id);
+                }
+                let sync_task = if sync_all_after {
+                    start_auto_sync_for_all_libraries(app)
+                } else {
+                    start_next_queued_sync(app)
+                };
+                return Task::batch([registry_task, sync_task]);
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Automatic PDF-Folio library registry sync failed");
+                app.library.library_status = Some(format!("Library sync paused: {error}"));
+            }
+        },
+        Message::LibraryPreviewRefreshed {
+            library_id,
+            preview,
+        } => {
+            app.libraries.previews.insert(library_id, preview);
         }
         Message::AppMenuOpened(menu) => {
             app.library.renaming_tag = None;
@@ -960,7 +1139,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::LibraryRegistryUpdated(registry) => {
             return match app.apply_library_registry(registry) {
-                Ok(task) => task,
+                Ok(task) => Task::batch([
+                    task,
+                    sync_library_registry_for_app_task(app, false, true),
+                    start_auto_sync_now(app),
+                ]),
                 Err(error) => Task::done(Message::LibraryError(error.to_string())),
             };
         }
@@ -2068,11 +2251,22 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return Task::perform(
                 async move { tokio::task::spawn_blocking(move || apply_watch_event(&db, event)).await? },
                 |result| match result {
-                    Ok(()) => Message::LibraryRefresh,
-                    Err(error) => Message::LibraryError(error.to_string()),
+                    Ok(()) => Message::LibraryWatchEventApplied(Ok(())),
+                    Err(error) => Message::LibraryWatchEventApplied(Err(error.to_string())),
                 },
             );
         }
+        Message::LibraryWatchEventApplied(result) => match result {
+            Ok(()) => {
+                return Task::batch([app.refresh_library(), start_auto_sync_now(app)]);
+            }
+            Err(error) => {
+                return Task::batch([
+                    Task::done(Message::LibraryError(error)),
+                    start_auto_sync_now(app),
+                ]);
+            }
+        },
         Message::TagFilterChanged(tag) => {
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();

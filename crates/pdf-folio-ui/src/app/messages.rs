@@ -353,14 +353,26 @@ pub enum Message {
     AutoSyncTick(Instant),
     /// Live remote watcher detected new CRDT operations.
     RemoteSyncAvailable {
+        /// Library whose remote log advanced.
+        library_id: String,
         /// Time the watcher noticed the remote change.
         noticed_at: Instant,
         /// Latest remote operation sequence observed.
         remote_sequence: i64,
     },
+    /// Live remote watcher detected registry CRDT operations.
+    LibraryRegistryRemoteAvailable {
+        /// Time the watcher noticed the registry change.
+        noticed_at: Instant,
+        /// Latest remote registry operation sequence observed.
+        remote_sequence: i64,
+    },
     /// One automatic CRDT sync pass completed.
-    AutoSyncFinished(
-        Result<
+    AutoSyncFinished {
+        /// Library that completed this sync pass.
+        library_id: String,
+        /// Sync result for the library.
+        result: Result<
             (
                 pdf_folio_sync::SyncBlobUploadReport,
                 pdf_folio_sync::SyncCrdtReport,
@@ -368,7 +380,21 @@ pub enum Message {
             ),
             String,
         >,
-    ),
+    },
+    /// App-level library registry sync completed.
+    LibraryRegistrySyncFinished {
+        /// Whether this registry sync should catch up every known library afterward.
+        sync_all_after: bool,
+        /// Updated registry after merging remote library profiles.
+        result: Result<(crate::app_libraries::LibraryRegistryRuntime, Vec<String>), String>,
+    },
+    /// A library switcher preview was refreshed.
+    LibraryPreviewRefreshed {
+        /// Library whose preview was loaded.
+        library_id: String,
+        /// New preview payload.
+        preview: crate::app_libraries::LibraryPreview,
+    },
     /// The native file picker was dismissed without choosing a file.
     FileDialogCanceled,
     /// A file was selected.
@@ -754,6 +780,8 @@ pub enum Message {
     ToggleLibraryTreeFolder(FolderId),
     /// A filesystem watcher event arrived.
     LibraryWatchEvent(LibraryWatchEvent),
+    /// A filesystem watcher event was applied to the local library.
+    LibraryWatchEventApplied(Result<(), String>),
     /// Tag filter changed.
     TagFilterChanged(Option<String>),
     /// A tag row in the sidebar was clicked.

@@ -717,6 +717,36 @@ impl Db {
             .context("Could not load sync entry rows.")
     }
 
+    /// Returns sync entry rows that may need a local library row or blob relink.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query sync rows.
+    pub fn sync_entries_needing_hydration(&self, library_id: &str) -> Result<Vec<SyncEntryRow>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT s.id, s.library_id, s.title, s.author, s.updated_at, s.deleted_at
+             FROM sync_entries s
+             LEFT JOIN entries e ON e.id = s.id
+             WHERE s.library_id = ?1
+               AND s.deleted_at IS NULL
+               AND (e.id IS NULL OR e.missing != 0)
+             ORDER BY s.updated_at ASC, s.id ASC",
+        )?;
+        let rows = statement.query_map(params![library_id], |row| {
+            Ok(SyncEntryRow {
+                id: EntryId::new(row.get::<_, String>(0)?),
+                library_id: row.get(1)?,
+                title: row.get(2)?,
+                author: row.get(3)?,
+                updated_at: row.get(4)?,
+                deleted_at: row.get(5)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load sync entry rows needing hydration.")
+    }
+
     /// Returns sync folder rows newer than `since`.
     ///
     /// # Errors
@@ -1001,6 +1031,24 @@ impl Db {
             .context("Could not load pending CRDT sync operations.")
     }
 
+    /// Returns the newest local CRDT logical time for a library.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query operations.
+    pub fn sync_crdt_max_logical_time(&self, library_id: &str) -> Result<Option<i64>> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT MAX(logical_time) FROM sync_crdt_operations WHERE library_id = ?1",
+                params![library_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .context("Could not load max CRDT logical time.")
+    }
+
     /// Marks local CRDT operations as pushed.
     ///
     /// # Errors
@@ -1046,6 +1094,33 @@ impl Db {
         let rows = statement.query_map(params![library_id], row_to_sync_crdt_operation)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not load CRDT sync operations.")
+    }
+
+    /// Returns all CRDT operations for one entity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query operations.
+    pub fn sync_crdt_operations_for_entity(
+        &self,
+        library_id: &str,
+        entity_kind: &str,
+        entity_id: &str,
+    ) -> Result<Vec<SyncCrdtOperation>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT op_id, library_id, device_id, logical_time, entity_kind, entity_id,
+                    payload, created_at, remote_sequence, pushed_at
+             FROM sync_crdt_operations
+             WHERE library_id = ?1 AND entity_kind = ?2 AND entity_id = ?3
+             ORDER BY logical_time ASC, device_id ASC, op_id ASC",
+        )?;
+        let rows = statement.query_map(
+            params![library_id, entity_kind, entity_id],
+            row_to_sync_crdt_operation,
+        )?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load CRDT sync operations for entity.")
     }
 
     /// Returns the remote sequence cursor for a library/device pair.
@@ -1105,6 +1180,28 @@ impl Db {
             )
             .optional()
             .context("Could not load sync blob upload state.")
+    }
+
+    /// Returns local entries whose blobs have not been marked uploaded yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query entries.
+    pub fn entries_needing_sync_blob_upload(&self) -> Result<Vec<LibraryEntry>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT e.id, e.path, e.title, e.author, e.display_title, e.display_author,
+                    e.sort_title, e.sort_author, e.metadata_locked, e.manual_order,
+                    e.author_attributed, e.page_count_attributed, e.added_at, e.opened_at,
+                    e.page_count, e.file_size, e.last_page, e.rating, e.cover_hash, e.missing
+             FROM entries e
+             LEFT JOIN sync_blob_uploads b ON b.hash = e.id
+             WHERE b.hash IS NULL AND e.trashed_at IS NULL
+             ORDER BY e.added_at ASC, e.id ASC",
+        )?;
+        let rows = statement.query_map([], row_to_entry)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load entries needing sync blob upload.")
     }
 
     /// Marks a content-addressed PDF blob as uploaded to remote storage.
@@ -1247,6 +1344,28 @@ impl Db {
             )?;
         }
         transaction.commit()?;
+        Ok(())
+    }
+
+    /// Applies synchronized trash state for an entry.
+    ///
+    /// Unlike user-initiated trash/restore operations, this preserves the
+    /// remote timestamp so devices do not echo equivalent trash changes back
+    /// with a different local clock value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot update the entry.
+    pub fn apply_synced_entry_trash_state(
+        &self,
+        entry_id: &EntryId,
+        trashed_at: Option<i64>,
+    ) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "UPDATE entries SET trashed_at = ?1 WHERE id = ?2",
+            params![trashed_at, entry_id.as_str()],
+        )?;
         Ok(())
     }
 
