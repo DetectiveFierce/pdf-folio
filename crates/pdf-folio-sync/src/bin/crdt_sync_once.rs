@@ -29,8 +29,9 @@ async fn main() -> Result<()> {
         crdt.materialized_memberships
     );
     println!(
-        "hydrated entries={} folders={} memberships={} downloaded={} cached={} skipped={} cache={}",
+        "hydrated entries={} relinked={} folders={} memberships={} downloaded={} cached={} skipped={} cache={}",
         hydration.hydrated_entries,
+        hydration.relinked_entries,
         hydration.hydrated_folders,
         hydration.hydrated_memberships,
         hydration.downloaded_blobs,

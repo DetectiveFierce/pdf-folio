@@ -528,17 +528,19 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                         || crdt.pushed_operations > 0
                         || crdt.pulled_operations > 0
                         || hydration.hydrated_entries > 0
+                        || hydration.relinked_entries > 0
                         || hydration.hydrated_folders > 0
                         || hydration.hydrated_memberships > 0
                         || hydration.missing_blobs > 0
                     {
                         app.library.library_status = Some(format!(
-                            "Synced {} PDFs, {} new, {} pushed, {} pulled, {} entries, {} folders, {} memberships hydrated, {} PDFs missing.",
+                            "Synced {} PDFs, {} new, {} pushed, {} pulled, {} entries hydrated, {} PDFs healed, {} folders, {} memberships hydrated, {} PDFs missing.",
                             uploads.uploaded_blobs,
                             crdt.generated_operations,
                             crdt.pushed_operations,
                             crdt.pulled_operations,
                             hydration.hydrated_entries,
+                            hydration.relinked_entries,
                             hydration.hydrated_folders,
                             hydration.hydrated_memberships,
                             hydration.missing_blobs
@@ -546,11 +548,16 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     }
                     if crdt.pulled_operations > 0
                         || hydration.hydrated_entries > 0
+                        || hydration.relinked_entries > 0
                         || hydration.hydrated_folders > 0
                         || hydration.hydrated_memberships > 0
                         || hydration.missing_blobs > 0
                     {
-                        return Task::batch([app.refresh_folders(), app.refresh_library()]);
+                        return Task::batch([
+                            app.refresh_folders(),
+                            app.refresh_library(),
+                            app.request_visible_thumbnails(),
+                        ]);
                     }
                 }
                 Err(error) => {

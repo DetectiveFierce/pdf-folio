@@ -320,9 +320,10 @@ async fn run_sync_command(args: SyncArgs) -> Result<()> {
                     report.materialized_memberships
                 );
                 println!(
-                    "`{}`: hydrated {} entries, {} folders, {} memberships; downloaded {} blobs, {} already cached, {} skipped. Cache: {}",
+                    "`{}`: hydrated {} entries, healed {} PDFs, {} folders, {} memberships; downloaded {} blobs, {} already cached, {} skipped. Cache: {}",
                     profile.name,
                     hydration.hydrated_entries,
+                    hydration.relinked_entries,
                     hydration.hydrated_folders,
                     hydration.hydrated_memberships,
                     hydration.downloaded_blobs,

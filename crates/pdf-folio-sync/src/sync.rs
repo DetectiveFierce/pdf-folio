@@ -88,6 +88,8 @@ pub struct SyncBlobUploadReport {
 pub struct SyncHydrationReport {
     /// Remote entries inserted into the local library.
     pub hydrated_entries: usize,
+    /// Existing local entries relinked to a present managed blob.
+    pub relinked_entries: usize,
     /// Remote folders inserted into the local library.
     pub hydrated_folders: usize,
     /// Remote folder memberships inserted into the local library.
@@ -336,8 +338,10 @@ impl SyncClient {
             }
 
             if let Some(entry) = db.entry_by_id(&row.id)? {
-                if blob_available && (entry.missing || !entry.path.is_file()) {
+                if blob_available && (entry.missing || !entry.path.is_file() || entry.path != path)
+                {
                     db.relink_entry_path(&row.id, &path)?;
+                    report.relinked_entries += 1;
                 }
                 if let Some(payload) = winning_entry_payload(db, library_id, row.id.as_str())? {
                     apply_entry_payload_to_local(db, &payload)?;
