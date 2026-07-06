@@ -500,6 +500,24 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.last_sync_started_at = Some(tick);
             return auto_sync_task(Arc::clone(&app.db), app.libraries.active_library_id.clone());
         }
+        Message::RemoteSyncAvailable {
+            noticed_at,
+            remote_sequence,
+        } => {
+            if !app.sync_auth.is_signed_in() || app.sync_in_progress {
+                return Task::none();
+            }
+            tracing::debug!(
+                remote_sequence,
+                library_id = %app.libraries.active_library_id,
+                "Live sync watcher detected remote CRDT updates"
+            );
+            app.sync_in_progress = true;
+            app.last_sync_started_at = Some(noticed_at);
+            app.library.library_status =
+                Some(String::from("Syncing updates from another device..."));
+            return auto_sync_task(Arc::clone(&app.db), app.libraries.active_library_id.clone());
+        }
         Message::AutoSyncFinished(result) => {
             app.sync_in_progress = false;
             match result {

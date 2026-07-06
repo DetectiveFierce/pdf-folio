@@ -162,6 +162,19 @@ impl SyncClient {
         remote_libraries(&remote).await
     }
 
+    /// Returns the latest remote CRDT operation sequence for one library.
+    ///
+    /// This is intentionally much cheaper than a full sync pass and is used by
+    /// the UI's live watcher to decide when another device has appended work.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the remote log cannot be queried.
+    pub async fn remote_crdt_head_sequence(&self, library_id: &str) -> Result<i64> {
+        let remote = self.turso.remote().await?;
+        remote_sync_head_sequence(&remote, library_id).await
+    }
+
     /// Creates the remote Turso schema if it does not already exist.
     ///
     /// # Errors
@@ -192,16 +205,22 @@ impl SyncClient {
                 report.skipped_blobs += 1;
                 continue;
             }
+            if db.sync_blob_uploaded_at(entry.id.as_str())?.is_some() {
+                report.already_remote_blobs += 1;
+                continue;
+            }
             match self
                 .r2
                 .upload_pdf_if_missing(entry.id.as_str(), &entry.path)
                 .await
             {
-                Ok(response) if response.upload_url.is_some() => {
-                    report.uploaded_blobs += 1;
-                }
-                Ok(_) => {
-                    report.already_remote_blobs += 1;
+                Ok(response) => {
+                    if response.upload_url.is_some() {
+                        report.uploaded_blobs += 1;
+                    } else {
+                        report.already_remote_blobs += 1;
+                    }
+                    db.remember_sync_blob_uploaded(entry.id.as_str())?;
                 }
                 Err(_) => {
                     report.failed_blobs += 1;
@@ -896,6 +915,23 @@ async fn remote_sync_operations_since(
         });
     }
     Ok(output)
+}
+
+async fn remote_sync_head_sequence(remote: &TursoRemote, library_id: &str) -> Result<i64> {
+    let rows = remote
+        .query(
+            "SELECT COALESCE(MAX(remote_sequence), 0)
+             FROM sync_operations
+             WHERE library_id = ?1",
+            vec![TursoValue::text(library_id)],
+        )
+        .await
+        .context("Could not query remote CRDT sync head.")?;
+    rows.first()
+        .and_then(|row| row.first())
+        .map(TursoValue::as_i64)
+        .transpose()?
+        .ok_or_else(|| anyhow::anyhow!("Remote CRDT sync head query returned no rows."))
 }
 
 async fn upsert_remote_libraries(remote: &TursoRemote, rows: &[SyncLibraryRow]) -> Result<()> {

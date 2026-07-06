@@ -1090,6 +1090,39 @@ impl Db {
         Ok(())
     }
 
+    /// Returns when a content-addressed PDF blob was successfully uploaded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query the upload ledger.
+    pub fn sync_blob_uploaded_at(&self, hash: &str) -> Result<Option<i64>> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT uploaded_at FROM sync_blob_uploads WHERE hash = ?1",
+                params![hash],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Could not load sync blob upload state.")
+    }
+
+    /// Marks a content-addressed PDF blob as uploaded to remote storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the upload ledger.
+    pub fn remember_sync_blob_uploaded(&self, hash: &str) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO sync_blob_uploads (hash, uploaded_at)
+             VALUES (?1, ?2)
+             ON CONFLICT(hash) DO UPDATE SET uploaded_at = excluded.uploaded_at",
+            params![hash, Utc::now().timestamp()],
+        )?;
+        Ok(())
+    }
+
     /// Materializes a sync entry row into the local entries table.
     ///
     /// The local `added_at` timestamp is set from the sync row so a later
@@ -3377,6 +3410,11 @@ impl Db {
                 device_id             TEXT NOT NULL,
                 last_remote_sequence  INTEGER NOT NULL,
                 PRIMARY KEY (library_id, device_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS sync_blob_uploads (
+                hash        TEXT PRIMARY KEY,
+                uploaded_at INTEGER NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_sync_crdt_operations_library_entity

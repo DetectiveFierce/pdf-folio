@@ -3,18 +3,19 @@
 use std::path::PathBuf;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use iced::futures::SinkExt;
 use iced::{event, mouse, stream, time, Event, Subscription};
 use notify::{EventKind, RecursiveMode, Watcher};
-use pdf_folio_db::LibraryWatcher;
+use pdf_folio_db::{Db, LibraryWatcher};
 
 use super::{shortcuts, AppMode, PDFolioApp, LIBRARY_CARD_HOVER_TICK_MS, VIEWER_ANIMATION_TICK_MS};
 use crate::library::drag::LIBRARY_DRAG_AUTOSCROLL_TICK_MS;
 use crate::messages::Message;
 
 const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(10);
+const LIVE_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
     let keyboard = event::listen_with(|event, status, _window| {
@@ -122,6 +123,23 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         Subscription::none()
     };
 
+    let live_sync = if app.sync_auth.is_signed_in() && !app.sync_in_progress {
+        app.libraries
+            .active_profile()
+            .map_or_else(Subscription::none, |profile| {
+                Subscription::run_with(
+                    LiveSyncWatch {
+                        db_path: profile.db_path.clone(),
+                        library_id: profile.id.clone(),
+                        device_id: default_sync_device_id(),
+                    },
+                    live_sync_stream,
+                )
+            })
+    } else {
+        Subscription::none()
+    };
+
     Subscription::batch([
         keyboard,
         cursor,
@@ -132,7 +150,57 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         folder_drag,
         animations,
         auto_sync,
+        live_sync,
     ])
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct LiveSyncWatch {
+    db_path: PathBuf,
+    library_id: String,
+    device_id: String,
+}
+
+fn live_sync_stream(watch: &LiveSyncWatch) -> impl iced::futures::Stream<Item = Message> {
+    let watch = watch.clone();
+    stream::channel(10, async move |mut output| {
+        let Ok(db) = Db::open(&watch.db_path) else {
+            return;
+        };
+        let Ok(session) = pdf_folio_sync::cached_session() else {
+            return;
+        };
+        let client = pdf_folio_sync::SyncClient::new(session);
+        loop {
+            tokio::time::sleep(LIVE_SYNC_INTERVAL).await;
+            let Ok(cursor) = db.sync_crdt_remote_cursor(&watch.library_id, &watch.device_id) else {
+                continue;
+            };
+            let Ok(remote_sequence) = client.remote_crdt_head_sequence(&watch.library_id).await
+            else {
+                continue;
+            };
+            if remote_sequence > cursor
+                && output
+                    .send(Message::RemoteSyncAvailable {
+                        noticed_at: Instant::now(),
+                        remote_sequence,
+                    })
+                    .await
+                    .is_err()
+            {
+                break;
+            }
+        }
+    })
+}
+
+fn default_sync_device_id() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| String::from("local-device"))
 }
 
 fn watch_style_directories_stream(

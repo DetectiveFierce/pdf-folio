@@ -351,6 +351,13 @@ pub enum Message {
     SyncSignInFinished(Result<pdf_folio_sync::Session, String>),
     /// Periodic automatic sync timer fired.
     AutoSyncTick(Instant),
+    /// Live remote watcher detected new CRDT operations.
+    RemoteSyncAvailable {
+        /// Time the watcher noticed the remote change.
+        noticed_at: Instant,
+        /// Latest remote operation sequence observed.
+        remote_sequence: i64,
+    },
     /// One automatic CRDT sync pass completed.
     AutoSyncFinished(
         Result<
