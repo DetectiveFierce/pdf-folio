@@ -355,6 +355,7 @@ pub enum Message {
     AutoSyncFinished(
         Result<
             (
+                pdf_folio_sync::SyncBlobUploadReport,
                 pdf_folio_sync::SyncCrdtReport,
                 pdf_folio_sync::SyncHydrationReport,
             ),

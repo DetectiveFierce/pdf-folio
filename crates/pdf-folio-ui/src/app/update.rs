@@ -421,6 +421,7 @@ fn auto_sync_task(db: Arc<Db>, library_id: String) -> Task<Message> {
                 pdf_folio_sync::cached_session().context("No cached sync session is available.")?;
             let client = pdf_folio_sync::SyncClient::new(session);
             client.ensure_remote_schema().await?;
+            let uploads = client.upload_local_blobs(&db).await?;
             let crdt = client
                 .sync_crdt_metadata(&db, &library_id, &default_sync_device_id())
                 .await?;
@@ -428,7 +429,7 @@ fn auto_sync_task(db: Arc<Db>, library_id: String) -> Task<Message> {
             let hydration = client
                 .hydrate_remote_library(&db, &library_id, &cache)
                 .await?;
-            Ok::<_, anyhow::Error>((crdt, hydration))
+            Ok::<_, anyhow::Error>((uploads, crdt, hydration))
         },
         |result| match result {
             Ok(reports) => Message::AutoSyncFinished(Ok(reports)),
@@ -502,28 +503,34 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::AutoSyncFinished(result) => {
             app.sync_in_progress = false;
             match result {
-                Ok((crdt, hydration)) => {
-                    if crdt.generated_operations > 0
+                Ok((uploads, crdt, hydration)) => {
+                    if uploads.uploaded_blobs > 0
+                        || uploads.failed_blobs > 0
+                        || crdt.generated_operations > 0
                         || crdt.pushed_operations > 0
                         || crdt.pulled_operations > 0
                         || hydration.hydrated_entries > 0
                         || hydration.hydrated_folders > 0
                         || hydration.hydrated_memberships > 0
+                        || hydration.missing_blobs > 0
                     {
                         app.library.library_status = Some(format!(
-                            "Synced {} new, {} pushed, {} pulled, {} entries, {} folders, {} memberships hydrated.",
+                            "Synced {} PDFs, {} new, {} pushed, {} pulled, {} entries, {} folders, {} memberships hydrated, {} PDFs missing.",
+                            uploads.uploaded_blobs,
                             crdt.generated_operations,
                             crdt.pushed_operations,
                             crdt.pulled_operations,
                             hydration.hydrated_entries,
                             hydration.hydrated_folders,
-                            hydration.hydrated_memberships
+                            hydration.hydrated_memberships,
+                            hydration.missing_blobs
                         ));
                     }
                     if crdt.pulled_operations > 0
                         || hydration.hydrated_entries > 0
                         || hydration.hydrated_folders > 0
                         || hydration.hydrated_memberships > 0
+                        || hydration.missing_blobs > 0
                     {
                         return Task::batch([app.refresh_folders(), app.refresh_library()]);
                     }

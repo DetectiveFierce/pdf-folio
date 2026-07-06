@@ -68,6 +68,19 @@ pub struct SyncCrdtReport {
     pub materialized_memberships: usize,
 }
 
+/// Summary for uploading local PDF blobs during automatic sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SyncBlobUploadReport {
+    /// PDF blobs uploaded into remote object storage.
+    pub uploaded_blobs: usize,
+    /// PDF blobs that were already present remotely.
+    pub already_remote_blobs: usize,
+    /// Local entries skipped because they are not content-addressed PDFs or their files are absent.
+    pub skipped_blobs: usize,
+    /// Local PDF blobs that could not be uploaded during this pass.
+    pub failed_blobs: usize,
+}
+
 /// Summary for hydrating local library rows from remote sync metadata and blobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SyncHydrationReport {
@@ -81,6 +94,8 @@ pub struct SyncHydrationReport {
     pub downloaded_blobs: usize,
     /// Entries whose blob was already cached locally.
     pub cached_blobs: usize,
+    /// Remote entry blobs that were not available during this hydration pass.
+    pub missing_blobs: usize,
     /// Remote rows skipped because they are deleted, invalid, already local, or unavailable.
     pub skipped_entries: usize,
 }
@@ -161,6 +176,41 @@ impl SyncClient {
         Ok(())
     }
 
+    /// Uploads local content-addressed PDF files to remote object storage.
+    ///
+    /// Individual blob upload failures are counted instead of aborting the
+    /// whole pass. Metadata sync can still converge, and receiving devices can
+    /// hydrate entries as missing until a later automatic sync uploads the blob.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when local entries cannot be read.
+    pub async fn upload_local_blobs(&self, db: &Db) -> Result<SyncBlobUploadReport> {
+        let mut report = SyncBlobUploadReport::default();
+        for entry in db.get_all_entries()? {
+            if !is_blob_hash(entry.id.as_str()) || !entry.path.is_file() {
+                report.skipped_blobs += 1;
+                continue;
+            }
+            match self
+                .r2
+                .upload_pdf_if_missing(entry.id.as_str(), &entry.path)
+                .await
+            {
+                Ok(response) if response.upload_url.is_some() => {
+                    report.uploaded_blobs += 1;
+                }
+                Ok(_) => {
+                    report.already_remote_blobs += 1;
+                }
+                Err(_) => {
+                    report.failed_blobs += 1;
+                }
+            }
+        }
+        Ok(report)
+    }
+
     /// Runs one CRDT-based metadata sync pass for a library.
     ///
     /// The pass is idempotent: local state is snapshotted into immutable
@@ -235,23 +285,40 @@ impl SyncClient {
                 report.skipped_entries += 1;
                 continue;
             }
-            if db.entry_by_id(&row.id)?.is_some() {
-                report.skipped_entries += 1;
-                continue;
-            }
-
             let path = cache.path_for_hash(row.id.as_str());
+            let mut blob_available = cache.contains(row.id.as_str());
             if cache.contains(row.id.as_str()) {
                 report.cached_blobs += 1;
             } else {
-                self.r2.download_pdf(row.id.as_str(), &path).await?;
-                report.downloaded_blobs += 1;
+                match self.r2.download_pdf(row.id.as_str(), &path).await {
+                    Ok(()) => {
+                        blob_available = true;
+                        report.downloaded_blobs += 1;
+                    }
+                    Err(_) => {
+                        report.missing_blobs += 1;
+                    }
+                }
+            }
+
+            if let Some(entry) = db.entry_by_id(&row.id)? {
+                if blob_available && (entry.missing || !entry.path.is_file()) {
+                    db.relink_entry_path(&row.id, &path)?;
+                }
+                if let Some(payload) = winning_entry_payload(db, library_id, row.id.as_str())? {
+                    apply_entry_payload_to_local(db, &payload)?;
+                }
+                report.skipped_entries += 1;
+                continue;
             }
 
             if db.hydrate_sync_entry(
                 &row,
                 &path,
-                std::fs::metadata(&path).ok().map(|metadata| metadata.len()),
+                blob_available
+                    .then(|| std::fs::metadata(&path).ok().map(|metadata| metadata.len()))
+                    .flatten(),
+                !blob_available,
             )? {
                 report.hydrated_entries += 1;
             }

@@ -1104,6 +1104,7 @@ impl Db {
         row: &SyncEntryRow,
         path: &Path,
         file_size: Option<u64>,
+        missing: bool,
     ) -> Result<bool> {
         let connection = self.connection()?;
         let exists = connection
@@ -1123,8 +1124,8 @@ impl Db {
             "INSERT INTO entries
                 (id, path, title, author, sort_title, sort_author, manual_order,
                  author_attributed, page_count_attributed, added_at, page_count,
-                 file_size, cover_hash, missing, trashed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, NULL, ?10, NULL, 0, ?11)",
+                file_size, cover_hash, missing, trashed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, NULL, ?10, NULL, ?11, ?12)",
             params![
                 row.id.as_str(),
                 path.to_string_lossy(),
@@ -1136,6 +1137,7 @@ impl Db {
                 i64::from(row.author.is_some()),
                 row.updated_at,
                 file_size.map(|value| value as i64),
+                i64::from(missing),
                 row.deleted_at,
             ],
         )?;
