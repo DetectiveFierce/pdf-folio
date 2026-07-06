@@ -1,6 +1,6 @@
 //! Reusable rendered library UI components.
 
-use iced::widget::scrollable::Viewport;
+use iced::widget::scrollable::{Direction, Scrollbar, Viewport};
 use iced::widget::{
     button, column, container, pick_list, row, scrollable, slider, text, tooltip, Svg,
 };
@@ -127,11 +127,21 @@ pub fn breadcrumb_button<'a, Message: Clone + 'a>(
 pub fn library_scrollable<'a, Message: 'a>(
     content: iced::widget::Column<'a, Message>,
     tokens: ThemeTokens,
+    scrollbar_gutter: f32,
     on_scroll: impl Fn(Viewport) -> Message + 'a,
 ) -> Element<'a, Message> {
+    let scrollbar_width = tokens.primitives.scrollbar_width;
+    let scrollbar_spacing = (scrollbar_gutter - scrollbar_width).max(0.0);
     scrollable(content)
         .id(iced::widget::Id::new(LIBRARY_SCROLLABLE_ID))
+        .width(Length::Fill)
         .height(Length::Fill)
+        .direction(Direction::Vertical(
+            Scrollbar::new()
+                .width(scrollbar_width)
+                .scroller_width(tokens.primitives.scrollbar_scroller_width)
+                .spacing(scrollbar_spacing),
+        ))
         .style(move |_, status| {
             pdf_folio_style::scrollable_style(tokens, Class::LibraryRow, status)
         })

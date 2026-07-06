@@ -320,7 +320,7 @@ impl PDFolioApp {
             self.library.library_scroll_offset,
             self.library_grid_card_width(),
             self.layout().library_folder_grid_row_height,
-            self.layout().library_masonry_gap,
+            self.library_grid_column_gap(),
             Spacing::SM,
             folder_cards_per_row(self),
         )
@@ -343,7 +343,7 @@ impl PDFolioApp {
             self.library.library_scroll_offset,
             self.library_grid_card_width(),
             self.layout().library_folder_grid_row_height,
-            self.layout().library_masonry_gap,
+            self.library_grid_column_gap(),
             Spacing::SM,
             folder_cards_per_row(self),
         )
@@ -401,7 +401,7 @@ impl PDFolioApp {
         } else {
             let per_row = self.library_entries_per_row().max(1);
             let column_step =
-                (self.library_grid_card_width() + self.layout().library_masonry_gap).max(1.0);
+                (self.library_grid_card_width() + self.library_grid_column_gap()).max(1.0);
             let content_x = (cursor.x - self.library.library_viewport_x).max(0.0);
             let column = (content_x / column_step)
                 .floor()

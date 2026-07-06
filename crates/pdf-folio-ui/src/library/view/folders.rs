@@ -12,7 +12,7 @@ pub(crate) fn view_folder_cards<'a>(
     let active_folder_drag = app.library.folder_drag.as_ref().filter(|drag| drag.active);
     let mut rows = column![].spacing(Spacing::SM);
     for chunk in folders.chunks(folder_cards_per_row(app)) {
-        let mut card_row = row![].spacing(app.layout().library_masonry_gap);
+        let mut card_row = row![].spacing(app.library_grid_column_gap());
         for folder in chunk {
             let mode = if active_folder_drag.is_some_and(|drag| drag.folder_id == folder.id) {
                 if active_folder_drag
@@ -34,8 +34,7 @@ pub(crate) fn view_folder_cards<'a>(
 }
 
 pub(crate) fn folder_cards_per_row(app: &PDFolioApp) -> usize {
-    let available_width =
-        (app.library.library_viewport_width - app.layout().library_scrollbar_gutter).max(1.0);
+    let available_width = app.library_available_grid_width();
     let card_pitch = app.library_grid_card_width() + app.layout().library_masonry_gap;
     ((available_width + app.layout().library_masonry_gap) / card_pitch)
         .floor()

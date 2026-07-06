@@ -123,7 +123,7 @@ impl PDFolioApp {
             },
             library: LibraryRuntime {
                 compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),
-                library_grid_zoom: preferences.grid_zoom.clamp(
+                library_grid_zoom: LibraryPreferences::default().grid_zoom.clamp(
                     layout.metric("LibraryInteraction", "grid_zoom_min", 0.25),
                     layout.metric("LibraryInteraction", "grid_zoom_max", 12.0),
                 ),

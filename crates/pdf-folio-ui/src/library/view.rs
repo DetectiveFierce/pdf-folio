@@ -3,7 +3,6 @@
 use crate::app_view::dismissible_error_banner;
 use crate::menu::library_sidebar_tab_label;
 use crate::*;
-use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{column, row, stack};
 use pdf_folio_ui_components::library::view::{
     document_preview_lines, flush_media_style, ghost_tags_row,
@@ -204,11 +203,15 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
                 scroll_content.push(view_folder_cards(app, child_folders.clone(), tokens));
         }
         scroll_content = scroll_content.push(rows);
-        content = content.push(library_scrollable(scroll_content, tokens));
+        content = content.push(library_scrollable(
+            scroll_content,
+            tokens,
+            app.layout().library_scrollbar_gutter,
+        ));
     } else {
         let layout = app.library_render_item_masonry_layout(&render_items);
         let mut grid = row![]
-            .spacing(app.layout().library_masonry_gap)
+            .spacing(app.library_grid_column_gap())
             .height(layout.content_height);
         for column_items in &layout.columns {
             let mut stack = column![]
@@ -257,7 +260,6 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
             }
             grid = grid.push(stack);
         }
-        grid = grid.push(container("").width(app.layout().library_scrollbar_gutter));
         let mut scroll_content = column![].spacing(Spacing::MD);
         if app.parent_directory_drop_box_visible() {
             scroll_content = scroll_content.push(view_parent_directory_drop_box(app, tokens));
@@ -267,7 +269,11 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
                 scroll_content.push(view_folder_cards(app, child_folders.clone(), tokens));
         }
         scroll_content = scroll_content.push(grid);
-        content = content.push(library_scrollable(scroll_content, tokens));
+        content = content.push(library_scrollable(
+            scroll_content,
+            tokens,
+            app.layout().library_scrollbar_gutter,
+        ));
     }
 
     let main_content = container(content)
@@ -658,8 +664,9 @@ pub(crate) fn breadcrumb_button<'a>(
 pub(crate) fn library_scrollable<'a>(
     content: iced::widget::Column<'a, Message>,
     tokens: ThemeTokens,
+    scrollbar_gutter: f32,
 ) -> Element<'a, Message> {
-    component_library_scrollable(content, tokens, |viewport| {
+    component_library_scrollable(content, tokens, scrollbar_gutter, |viewport| {
         let offset = viewport.absolute_offset();
         let bounds = viewport.bounds();
         Message::LibraryScrolled {

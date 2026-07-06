@@ -838,7 +838,7 @@ fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
         },
         selected_folder: app.library.selected_folder.clone(),
         sidebar_width: app.library.library_tag_sidebar_width,
-        grid_zoom: app.library_grid_zoom(),
+        grid_zoom: LibraryPreferences::default().grid_zoom,
         visible_metadata_fields: app.library.library_metadata_density.visible_fields(),
         library_tree_root_expanded: app.library.library_tree_root_expanded,
         collapsed_folder_ids: app

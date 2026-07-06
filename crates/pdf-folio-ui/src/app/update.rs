@@ -822,11 +822,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 .library_scroll_offset
                 .min(app.max_library_scroll_offset());
             app.update_library_drag_target_from_cursor();
-            return Task::batch([
-                save_library_preferences_task(app),
-                save_app_session_task(app),
-                app.request_visible_thumbnails(),
-            ]);
+            return Task::batch([save_app_session_task(app), app.request_visible_thumbnails()]);
         }
         Message::LibraryMetadataDensityChanged(density) => {
             app.library.library_metadata_density = density;

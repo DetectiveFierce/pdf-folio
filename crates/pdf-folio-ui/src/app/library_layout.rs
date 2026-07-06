@@ -87,13 +87,10 @@ impl PDFolioApp {
         } else {
             0.0
         };
-        let window_main_width = (self.viewer.viewport_width - sidebar_width).max(1.0);
-        self.library
-            .library_viewport_width
-            .max(window_main_width)
-            .max(self.layout().window_size()[0] - sidebar_width)
-            - Spacing::LG * 2.0
-            - self.layout().library_scrollbar_gutter
+        let estimated_width =
+            (self.viewer.viewport_width - sidebar_width - Spacing::LG * 2.0).max(1.0);
+        let viewport_width = self.library.library_viewport_width.min(estimated_width);
+        (viewport_width - self.layout().library_scrollbar_gutter).max(1.0)
     }
 
     pub(super) fn recalculate_library_viewport_width(&mut self) {
@@ -118,8 +115,22 @@ impl PDFolioApp {
             .clamp(self.library_grid_zoom_min(), self.library_grid_zoom_max());
     }
 
-    pub(super) fn library_grid_card_width(&self) -> f32 {
+    pub(super) fn library_grid_column_gap(&self) -> f32 {
+        self.layout().library_masonry_gap
+    }
+
+    pub(super) fn library_grid_target_card_width(&self) -> f32 {
         self.layout().library_grid_card_width * self.library_grid_zoom()
+    }
+
+    pub(super) fn library_grid_card_width(&self) -> f32 {
+        if self.library.compact_view_mode {
+            return self.library_grid_target_card_width();
+        }
+
+        let columns = self.library_entries_per_row().max(1);
+        let total_gap = columns.saturating_sub(1) as f32 * self.library_grid_column_gap();
+        ((self.library_available_grid_width() - total_gap) / columns as f32).max(1.0)
     }
 
     pub(super) fn library_card_info_height(&self) -> f32 {

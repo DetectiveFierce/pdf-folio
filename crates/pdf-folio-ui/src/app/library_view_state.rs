@@ -52,7 +52,8 @@ impl PDFolioApp {
             1
         } else {
             let available_width = self.library_available_grid_width();
-            let column_pitch = self.library_grid_card_width() + self.layout().library_masonry_gap;
+            let column_pitch =
+                self.library_grid_target_card_width() + self.layout().library_masonry_gap;
             ((available_width + self.layout().library_masonry_gap) / column_pitch)
                 .floor()
                 .max(1.0)
