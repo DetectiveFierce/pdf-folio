@@ -40,6 +40,15 @@ impl PDFolioApp {
         folder_id: Option<&FolderId>,
         trash: bool,
     ) -> FolderSmartCounts {
+        if let Some(counts) = self
+            .library
+            .folder_smart_count_cache
+            .get(&(trash, folder_id.cloned()))
+            .copied()
+        {
+            return counts;
+        }
+
         let folder_ids = folder_id.map(|id| self.folder_subtree_ids_for(id, trash));
         let entries = if trash {
             &self.library.library_trash_entries
@@ -67,6 +76,63 @@ impl PDFolioApp {
             }
         }
         counts
+    }
+
+    pub(super) fn rebuild_folder_smart_count_cache(&mut self) {
+        let mut cache = HashMap::new();
+        cache.extend(Self::build_folder_smart_count_cache_for(
+            false,
+            &self.library.library_entries,
+            &self.library.library_folders,
+        ));
+        cache.extend(Self::build_folder_smart_count_cache_for(
+            true,
+            &self.library.library_trash_entries,
+            &self.library.library_trash_folders,
+        ));
+        self.library.folder_smart_count_cache = cache;
+    }
+
+    fn build_folder_smart_count_cache_for(
+        trash: bool,
+        entries: &[LibraryEntry],
+        folders: &[Folder],
+    ) -> HashMap<(bool, Option<FolderId>), FolderSmartCounts> {
+        let parent_by_folder = folders
+            .iter()
+            .map(|folder| (folder.id.clone(), folder.parent_id.clone()))
+            .collect::<HashMap<_, _>>();
+        let mut cache = HashMap::<(bool, Option<FolderId>), FolderSmartCounts>::new();
+
+        for entry in entries {
+            let contribution = FolderSmartCounts {
+                total: 1,
+                in_progress: usize::from(entry.page_count.is_some_and(|page_count| {
+                    page_count > 0 && entry.last_page.saturating_add(1) < page_count
+                })),
+                missing: usize::from(entry.missing),
+            };
+            add_folder_smart_count(&mut cache, trash, None, contribution);
+
+            let mut counted_folders = HashSet::new();
+            for folder in &entry.folders {
+                let mut cursor = Some(folder.id.clone());
+                while let Some(folder_id) = cursor {
+                    if !counted_folders.insert(folder_id.clone()) {
+                        break;
+                    }
+                    add_folder_smart_count(
+                        &mut cache,
+                        trash,
+                        Some(folder_id.clone()),
+                        contribution,
+                    );
+                    cursor = parent_by_folder.get(&folder_id).cloned().flatten();
+                }
+            }
+        }
+
+        cache
     }
 
     pub(super) fn folder_subtree_ids(&self, folder_id: &FolderId) -> HashSet<FolderId> {
@@ -247,4 +313,16 @@ impl PDFolioApp {
         breadcrumbs.extend(path);
         breadcrumbs
     }
+}
+
+fn add_folder_smart_count(
+    cache: &mut HashMap<(bool, Option<FolderId>), FolderSmartCounts>,
+    trash: bool,
+    folder_id: Option<FolderId>,
+    contribution: FolderSmartCounts,
+) {
+    let counts = cache.entry((trash, folder_id)).or_default();
+    counts.total += contribution.total;
+    counts.in_progress += contribution.in_progress;
+    counts.missing += contribution.missing;
 }

@@ -717,6 +717,15 @@ impl Db {
             .context("Could not load sync entry rows.")
     }
 
+    /// Returns all sync entry rows for one library.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query sync rows.
+    pub fn sync_entries_for_library(&self, library_id: &str) -> Result<Vec<SyncEntryRow>> {
+        self.sync_entries_updated_since(library_id, i64::MIN)
+    }
+
     /// Returns sync entry rows that may need a local library row or blob relink.
     ///
     /// # Errors
@@ -778,6 +787,15 @@ impl Db {
             .context("Could not load sync folder rows.")
     }
 
+    /// Returns all sync folder rows for one library.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query sync rows.
+    pub fn sync_folders_for_library(&self, library_id: &str) -> Result<Vec<SyncFolderRow>> {
+        self.sync_folders_updated_since(library_id, i64::MIN)
+    }
+
     /// Returns sync membership rows newer than `since`.
     ///
     /// # Errors
@@ -806,6 +824,18 @@ impl Db {
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not load sync entry-folder rows.")
+    }
+
+    /// Returns all sync membership rows for one library.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query sync rows.
+    pub fn sync_entry_folders_for_library(
+        &self,
+        library_id: &str,
+    ) -> Result<Vec<SyncEntryFolderRow>> {
+        self.sync_entry_folders_updated_since(library_id, i64::MIN)
     }
 
     fn sync_entry_folder_updated_at(
@@ -1204,6 +1234,28 @@ impl Db {
             .context("Could not load entries needing sync blob upload.")
     }
 
+    /// Returns true when at least one local PDF blob still needs remote upload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query entries.
+    pub fn has_entries_needing_sync_blob_upload(&self) -> Result<bool> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT 1
+                 FROM entries e
+                 LEFT JOIN sync_blob_uploads b ON b.hash = e.id
+                 WHERE b.hash IS NULL AND e.trashed_at IS NULL
+                 LIMIT 1",
+                [],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|value| value.is_some())
+            .context("Could not check entries needing sync blob upload.")
+    }
+
     /// Marks a content-addressed PDF blob as uploaded to remote storage.
     ///
     /// # Errors
@@ -1369,6 +1421,69 @@ impl Db {
         Ok(())
     }
 
+    /// Applies synchronized folder state to an existing local folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot update the folder.
+    pub fn apply_synced_folder_state(&self, row: &SyncFolderRow) -> Result<()> {
+        let connection = self.connection()?;
+        let exists = connection
+            .query_row(
+                "SELECT 1 FROM folders WHERE id = ?1",
+                params![row.id.as_str()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !exists {
+            return Ok(());
+        }
+        let parent_id = match &row.parent_id {
+            Some(parent_id)
+                if connection
+                    .query_row(
+                        "SELECT 1 FROM folders WHERE id = ?1",
+                        params![parent_id.as_str()],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some() =>
+            {
+                Some(parent_id.as_str())
+            }
+            _ => None,
+        };
+        connection.execute(
+            "UPDATE folders
+             SET name = ?1, parent_id = ?2, updated_at = ?3, trashed_at = ?4
+             WHERE id = ?5",
+            params![
+                row.name,
+                parent_id,
+                row.updated_at,
+                row.deleted_at,
+                row.id.as_str(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Applies synchronized entry-folder membership state to the local graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot update the membership.
+    pub fn apply_synced_entry_folder_state(&self, row: &SyncEntryFolderRow) -> Result<bool> {
+        if row.deleted_at.is_some() {
+            return Ok(self.connection()?.execute(
+                "DELETE FROM entry_folders WHERE entry_id = ?1 AND folder_id = ?2",
+                params![row.entry_id.as_str(), row.folder_id.as_str()],
+            )? > 0);
+        }
+        self.hydrate_sync_entry_folder(row)
+    }
+
     /// Materializes a sync folder row into the local folder table.
     ///
     /// Parent links are applied only when the parent folder already exists,
@@ -1488,6 +1603,25 @@ impl Db {
             .chain(self.get_trashed_entries()?)
             .collect::<Vec<_>>();
         let snapshot = self.library_organization_snapshot()?;
+        let entry_ids = entries
+            .iter()
+            .map(|entry| entry.id.as_str().to_owned())
+            .collect::<std::collections::BTreeSet<_>>();
+        let folder_ids = snapshot
+            .folders
+            .iter()
+            .map(|folder| folder.id.as_str().to_owned())
+            .collect::<std::collections::BTreeSet<_>>();
+        let membership_ids = snapshot
+            .entry_folders
+            .iter()
+            .map(|membership| {
+                (
+                    membership.entry_id.as_str().to_owned(),
+                    membership.folder_id.as_str().to_owned(),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>();
 
         for entry in &entries {
             let updated_at = entry
@@ -1523,6 +1657,16 @@ impl Db {
             })?;
         }
 
+        for row in self.sync_entries_for_library(library_id)? {
+            if row.deleted_at.is_none() && !entry_ids.contains(row.id.as_str()) {
+                self.upsert_sync_entry(&SyncEntryRow {
+                    updated_at: now.max(row.updated_at + 1),
+                    deleted_at: Some(now),
+                    ..row
+                })?;
+            }
+        }
+
         for folder in &snapshot.folders {
             let deleted_at = folder.trashed_at.map(|timestamp| timestamp.timestamp());
             self.upsert_sync_folder(&SyncFolderRow {
@@ -1535,6 +1679,16 @@ impl Db {
             })?;
         }
 
+        for row in self.sync_folders_for_library(library_id)? {
+            if row.deleted_at.is_none() && !folder_ids.contains(row.id.as_str()) {
+                self.upsert_sync_folder(&SyncFolderRow {
+                    updated_at: now.max(row.updated_at + 1),
+                    deleted_at: Some(now),
+                    ..row
+                })?;
+            }
+        }
+
         for membership in &snapshot.entry_folders {
             let updated_at = self
                 .sync_entry_folder_updated_at(&membership.entry_id, &membership.folder_id)?
@@ -1545,6 +1699,20 @@ impl Db {
                 updated_at,
                 deleted_at: None,
             })?;
+        }
+
+        for row in self.sync_entry_folders_for_library(library_id)? {
+            let key = (
+                row.entry_id.as_str().to_owned(),
+                row.folder_id.as_str().to_owned(),
+            );
+            if row.deleted_at.is_none() && !membership_ids.contains(&key) {
+                self.upsert_sync_entry_folder(&SyncEntryFolderRow {
+                    updated_at: now.max(row.updated_at + 1),
+                    deleted_at: Some(now),
+                    ..row
+                })?;
+            }
         }
 
         Ok(SyncSeedSummary {
@@ -1684,11 +1852,7 @@ impl Db {
         let mut entries = rows
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not load library entries.")?;
-        for entry in &mut entries {
-            entry.tags = self.tags_for_entry_with_connection(&connection, &entry.id)?;
-            entry.folders =
-                self.folders_for_entry_with_connection(&connection, &entry.id, false)?;
-        }
+        self.attach_entry_collections_with_connection(&connection, &mut entries, false)?;
         Ok(entries)
     }
 
@@ -1709,10 +1873,7 @@ impl Db {
         let mut entries = rows
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not load trashed library entries.")?;
-        for entry in &mut entries {
-            entry.tags = self.tags_for_entry_with_connection(&connection, &entry.id)?;
-            entry.folders = self.folders_for_entry_with_connection(&connection, &entry.id, true)?;
-        }
+        self.attach_entry_collections_with_connection(&connection, &mut entries, true)?;
         Ok(entries)
     }
 
@@ -3177,6 +3338,84 @@ impl Db {
         let rows = statement.query_map(params![entry_id.as_str()], row_to_folder)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not load entry folders.")
+    }
+
+    fn attach_entry_collections_with_connection(
+        &self,
+        connection: &Connection,
+        entries: &mut [LibraryEntry],
+        include_trashed_folders: bool,
+    ) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        let entry_ids = entries
+            .iter()
+            .map(|entry| entry.id.as_str().to_owned())
+            .collect::<Vec<_>>();
+        let placeholders = std::iter::repeat("?")
+            .take(entry_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let mut tags_by_entry = std::collections::HashMap::<String, Vec<String>>::new();
+        let mut tag_statement = connection.prepare(&format!(
+            "SELECT entry_id, tag
+             FROM tags
+             WHERE entry_id IN ({placeholders})
+             ORDER BY entry_id ASC, tag ASC"
+        ))?;
+        let tag_rows = tag_statement.query_map(params_from_iter(entry_ids.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in tag_rows {
+            let (entry_id, tag) = row.context("Could not load entry tag.")?;
+            tags_by_entry.entry(entry_id).or_default().push(tag);
+        }
+
+        let trash_filter = if include_trashed_folders {
+            ""
+        } else {
+            " AND f.trashed_at IS NULL"
+        };
+        let mut folders_by_entry = std::collections::HashMap::<String, Vec<Folder>>::new();
+        let mut folder_statement = connection.prepare(&format!(
+            "SELECT ef.entry_id, f.id, f.name, f.parent_id, f.manual_order, f.created_at, f.updated_at
+             FROM entry_folders ef
+             INNER JOIN folders f ON f.id = ef.folder_id
+             WHERE ef.entry_id IN ({placeholders}){trash_filter}
+             ORDER BY ef.entry_id ASC, ef.manual_order ASC, f.name ASC"
+        ))?;
+        let folder_rows =
+            folder_statement.query_map(params_from_iter(entry_ids.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    Folder {
+                        id: FolderId::new(row.get::<_, String>(1)?),
+                        name: row.get(2)?,
+                        parent_id: row.get::<_, Option<String>>(3)?.map(FolderId::new),
+                        manual_order: row.get(4)?,
+                        created_at: DateTime::from_timestamp(row.get(5)?, 0)
+                            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+                        updated_at: DateTime::from_timestamp(row.get(6)?, 0)
+                            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+                    },
+                ))
+            })?;
+        for row in folder_rows {
+            let (entry_id, folder) = row.context("Could not load entry folder.")?;
+            folders_by_entry.entry(entry_id).or_default().push(folder);
+        }
+
+        for entry in entries {
+            entry.tags = tags_by_entry.remove(entry.id.as_str()).unwrap_or_default();
+            entry.folders = folders_by_entry
+                .remove(entry.id.as_str())
+                .unwrap_or_default();
+        }
+
+        Ok(())
     }
 
     fn get_folders_with_connection(&self, connection: &Connection) -> Result<Vec<Folder>> {

@@ -117,7 +117,8 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         && (app.library_card_hover_animation_active()
             || app.library.bulk_operation_progress.is_some()
             || app.library.library_history_restore_started_at.is_some()
-            || app.library.folder_drop_flash.is_some())
+            || app.library.folder_drop_flash.is_some()
+            || app.sync_in_progress.is_some())
     {
         time::every(Duration::from_millis(LIBRARY_CARD_HOVER_TICK_MS)).map(Message::AnimationFrame)
     } else if app.mode == AppMode::Viewer
@@ -130,13 +131,16 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         Subscription::none()
     };
 
-    let auto_sync = if app.sync_auth.is_signed_in() && app.sync_in_progress.is_none() {
+    let auto_sync = if app.startup_background_ready
+        && app.sync_auth.is_signed_in()
+        && app.sync_in_progress.is_none()
+    {
         time::every(AUTO_SYNC_INTERVAL).map(Message::AutoSyncTick)
     } else {
         Subscription::none()
     };
 
-    let live_sync = if app.sync_auth.is_signed_in() {
+    let live_sync = if app.startup_background_ready && app.sync_auth.is_signed_in() {
         let device_id = default_sync_device_id();
         Subscription::batch(app.libraries.profiles.iter().map(|profile| {
             Subscription::run_with(
@@ -152,7 +156,7 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         Subscription::none()
     };
 
-    let registry_live_sync = if app.sync_auth.is_signed_in() {
+    let registry_live_sync = if app.startup_background_ready && app.sync_auth.is_signed_in() {
         app.libraries
             .active_profile()
             .map(|profile| {

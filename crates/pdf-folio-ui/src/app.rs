@@ -79,9 +79,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-#[cfg(test)]
-use std::time::SystemTime;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use iced::widget::text::Wrapping;
@@ -150,7 +148,8 @@ use crate::library::tasks::{
 #[cfg(test)]
 use crate::library::tasks::{clean_import_title, title_from_path};
 use crate::library::thumbnails::{
-    bulk_thumbnail_task, load_or_render_thumbnail, ThumbnailCacheKey, ThumbnailSize, ThumbnailView,
+    bulk_thumbnail_task, load_cached_thumbnail, load_or_render_thumbnail, ThumbnailCacheKey,
+    ThumbnailSize, ThumbnailView,
 };
 #[cfg(test)]
 use crate::library::view::{
@@ -200,9 +199,7 @@ use app_libraries::{
 };
 use app_session::{load_app_session, save_app_session, AppSession};
 use app_sync_auth::{SyncAuthRuntime, SyncAuthState};
-use app_update::{
-    pending_raindrop_rollback_check_task, sync_library_registry_for_app_task, update,
-};
+use app_update::{pending_raindrop_rollback_check_task, update};
 use app_view::view;
 use app_viewer_layout::*;
 use pdf_folio_ui_components::library::view::with_alpha;
@@ -310,6 +307,10 @@ pub struct PDFolioApp {
     pub sync_queued_libraries: HashSet<String>,
     /// Last automatic sync start time.
     pub last_sync_started_at: Option<Instant>,
+    /// Last successful automatic sync/check completion time.
+    pub last_sync_completed_at: Option<SystemTime>,
+    /// Whether background subscriptions may start after the first local frame.
+    pub startup_background_ready: bool,
     /// Last-run state that is waiting for library/document prerequisites.
     pending_session_restore: Option<AppSession>,
 }
@@ -373,6 +374,7 @@ pub struct LibraryRuntime {
     pub library_trash_entries: Vec<LibraryEntry>,
     pub library_folders: Vec<Folder>,
     pub library_trash_folders: Vec<Folder>,
+    pub(crate) folder_smart_count_cache: HashMap<(bool, Option<FolderId>), FolderSmartCounts>,
     pub trash_view_active: bool,
     pub library_sort_mode: LibrarySortMode,
     pub selected_folder: Option<FolderId>,
@@ -685,7 +687,7 @@ enum LibraryRenderItem {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct FolderSmartCounts {
+pub(crate) struct FolderSmartCounts {
     total: usize,
     in_progress: usize,
     missing: usize,
@@ -749,6 +751,8 @@ enum FolderCardRenderMode {
 ///
 /// Returns an error when startup state cannot be created.
 pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
+    let launch_started_at = Instant::now();
+    let startup_probe_enabled = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").is_some();
     let startup_file = initial_file.clone();
     let startup_session = if startup_file.is_none() {
         match load_app_session() {
@@ -766,6 +770,11 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
         .map(AppSession::window_size)
         .unwrap_or_else(initial_window_size);
     let app = PDFolioApp::with_initial_file_and_session(initial_file, startup_session.clone())?;
+    tracing::info!(
+        elapsed_ms = launch_started_at.elapsed().as_millis(),
+        startup_probe_enabled,
+        "PDF-Folio local startup state constructed"
+    );
 
     tracing::info!(
         mode = ?app.mode,
@@ -790,8 +799,42 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
             } else {
                 Task::none()
             };
-            let sync_task = sync_library_registry_for_app_task(&app, true, true);
-            (app, Task::batch([open_task, rollback_task, sync_task]))
+            let startup_probe_task = if startup_probe_enabled {
+                Task::perform(
+                    {
+                        let launch_started_at = launch_started_at;
+                        async move {
+                            let probe_started_at = Instant::now();
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            (launch_started_at, probe_started_at, Instant::now())
+                        }
+                    },
+                    |(launch_started_at, probe_started_at, emitted_at)| {
+                        Message::StartupResponsivenessProbe {
+                            launch_started_at,
+                            probe_started_at,
+                            emitted_at,
+                        }
+                    },
+                )
+            } else {
+                Task::none()
+            };
+            let startup_background_ready_task = Task::perform(
+                async {
+                    tokio::time::sleep(Duration::from_millis(750)).await;
+                },
+                |_| Message::StartupBackgroundReady,
+            );
+            (
+                app,
+                Task::batch([
+                    open_task,
+                    rollback_task,
+                    startup_probe_task,
+                    startup_background_ready_task,
+                ]),
+            )
         },
         update,
         view,
@@ -808,6 +851,7 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
 
     application
         .default_font(iced::Font::with_name(UI_FONT_FAMILY))
+        .antialiasing(false)
         .subscription(subscription)
         .scale_factor(|app| app.viewer.scale_factor)
         .window(iced::window::Settings {

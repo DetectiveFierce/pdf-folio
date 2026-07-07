@@ -15,12 +15,15 @@ use crate::viewer::zoom::{zoom_control, zoom_menu};
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{canvas, column, row, stack};
-use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 const OVERFLOW_HORIZONTAL_SVG: &[u8] = include_bytes!("../../assets/icons/overflow-horizontal.svg");
 const OVERFLOW_VERTICAL_SVG: &[u8] = include_bytes!("../../assets/icons/overflow-vertical.svg");
+static VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
+    let probe_started_at = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").map(|_| Instant::now());
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let base_content: Element<'_, Message> = if app.mode == AppMode::SignedOut {
         view_signed_out(app, tokens)
@@ -234,14 +237,24 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         shell
     };
 
-    if app.library.library_history_restore_started_at.is_some() {
+    let element = if app.library.library_history_restore_started_at.is_some() {
         stack![shell, history_restore_spinner_layer(app, tokens)]
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     } else {
         shell
+    };
+    if let Some(started_at) = probe_started_at {
+        if VIEW_PROBE_LOGS.fetch_add(1, Ordering::Relaxed) < 8 {
+            tracing::warn!(
+                elapsed_ms = started_at.elapsed().as_millis(),
+                mode = ?app.mode,
+                "PDF-Folio view tree constructed"
+            );
+        }
     }
+    element
 }
 
 fn command_palette_capture_layer<'a>() -> Element<'a, Message> {

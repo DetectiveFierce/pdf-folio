@@ -148,6 +148,17 @@ impl ViewerSidebarTab {
 /// Messages handled by the PDF-Folio application update loop.
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// Startup responsiveness probe fired after launch.
+    StartupResponsivenessProbe {
+        /// When the whole app launch began.
+        launch_started_at: Instant,
+        /// When the probe task began waiting.
+        probe_started_at: Instant,
+        /// When the probe message was emitted to the update loop.
+        emitted_at: Instant,
+    },
+    /// Startup background subscriptions may begin.
+    StartupBackgroundReady,
     /// Open the native file picker.
     OpenFileDialog,
     /// Start Google sync sign-in.
@@ -177,14 +188,7 @@ pub enum Message {
         /// Library that completed this sync pass.
         library_id: String,
         /// Sync result for the library.
-        result: Result<
-            (
-                pdf_folio_sync::SyncBlobUploadReport,
-                pdf_folio_sync::SyncCrdtReport,
-                pdf_folio_sync::SyncHydrationReport,
-            ),
-            String,
-        >,
+        result: Result<pdf_folio_sync::SyncRunReport, String>,
     },
     /// App-level library registry sync completed.
     LibraryRegistrySyncFinished {

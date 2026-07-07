@@ -2,8 +2,10 @@
 
 use crate::app_commands::{command_message, command_visible, CommandId, CommandSurface};
 use crate::app_view::dismissible_error_banner;
+use crate::viewer::canvas::HistoryRestoreSpinner;
 use crate::*;
-use iced::widget::{column, row, stack};
+use chrono::{DateTime, Local};
+use iced::widget::{canvas, column, row, stack, Svg};
 use pdf_folio_ui_components::library::view::{
     document_preview_lines, flush_media_style, ghost_tags_row,
     library_drop_zone_card as component_library_drop_zone_card,
@@ -15,9 +17,12 @@ use pdf_folio_ui_components::library::view::{
     library_sort_picker as component_library_sort_picker, tags_row as component_tags_row,
     with_alpha,
 };
-use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant, SystemTime};
 
 const SEARCH_CLEAR_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"##;
+const SYNC_CHECK_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"##;
+static LIBRARY_VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
 #[path = "view/dialogs.rs"]
 mod dialogs;
@@ -37,6 +42,7 @@ pub(crate) use inspector::*;
 pub(crate) use sidebar::*;
 
 pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
+    let probe_started_at = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").map(|_| Instant::now());
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let entries = app.visible_library_entries();
     let child_folders = app.child_folders();
@@ -206,7 +212,18 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     if library_inspector_visible(app) {
         layout = layout.push(view_library_inspector(app));
     }
-    layout.height(Length::Fill).into()
+    let element = layout.height(Length::Fill).into();
+    if let Some(started_at) = probe_started_at {
+        if LIBRARY_VIEW_PROBE_LOGS.fetch_add(1, Ordering::Relaxed) < 8 {
+            tracing::warn!(
+                elapsed_ms = started_at.elapsed().as_millis(),
+                entries = entries.len(),
+                child_folders = child_folders.len(),
+                "PDF-Folio library view tree constructed"
+            );
+        }
+    }
+    element
 }
 
 fn view_library_header(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
@@ -374,7 +391,7 @@ fn library_header_title(app: &PDFolioApp) -> String {
 fn view_library_selection_toolbar(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let selected_count = app.library.selected_library_entries.len();
     let label = format!("{} selected", format_count(selected_count, "PDF"));
-    let mut actions = row![
+    let selection_label = row![
         master_checkbox(
             app.master_checkbox_state(),
             tokens,
@@ -389,6 +406,11 @@ fn view_library_selection_toolbar(app: &PDFolioApp, tokens: ThemeTokens) -> Elem
     .spacing(Spacing::MD)
     .align_y(iced::Alignment::Center)
     .width(Length::Fill);
+
+    let mut actions = row![selection_label]
+        .spacing(Spacing::MD)
+        .align_y(iced::Alignment::Center)
+        .width(Length::Fill);
 
     if command_visible(
         app,
@@ -466,6 +488,86 @@ fn library_header_button<'a>(
     .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
 }
 
+fn library_sync_indicator(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    if !app.sync_auth.is_signed_in() {
+        return container("").width(Length::Shrink).into();
+    }
+
+    let size = app.layout().metric("LibrarySyncIndicator", "size", 30.0);
+    let tooltip_label = if app.sync_in_progress.is_some() {
+        String::from("Syncing changes")
+    } else if !app.sync_queued_libraries.is_empty() {
+        String::from("Waiting to begin syncing changes")
+    } else {
+        last_sync_tooltip_label(app.last_sync_completed_at)
+    };
+
+    let content: Element<'_, Message> = if app.sync_in_progress.is_some() {
+        let spinner_size = app
+            .layout()
+            .metric("LibrarySyncIndicator", "spinner_size", 14.0);
+        canvas(HistoryRestoreSpinner {
+            started_at: app
+                .last_sync_started_at
+                .unwrap_or(app.library.animation_now),
+            now: app.library.animation_now,
+            color: with_alpha(tokens.accent, 0.82),
+        })
+        .width(Length::Fixed(spinner_size))
+        .height(Length::Fixed(spinner_size))
+        .into()
+    } else if app.sync_queued_libraries.is_empty() {
+        Svg::new(iced::widget::svg::Handle::from_memory(SYNC_CHECK_SVG))
+            .width(Length::Fixed(14.0))
+            .height(Length::Fixed(14.0))
+            .style(move |_, _| iced::widget::svg::Style {
+                color: Some(with_alpha(tokens.text_secondary, 0.78)),
+            })
+            .into()
+    } else {
+        text("...")
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .color(with_alpha(tokens.text_secondary, 0.82))
+            .wrapping(Wrapping::None)
+            .into()
+    };
+
+    let indicator = container(content)
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center);
+
+    tooltip(
+        indicator,
+        container(
+            text(tooltip_label)
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary)
+                .wrapping(Wrapping::None),
+        )
+        .padding(Spacing::SM)
+        .style(move |_| container_style(tokens, Class::Tooltip)),
+        tooltip::Position::Bottom,
+    )
+    .delay(Duration::from_millis(400))
+    .into()
+}
+
+fn last_sync_tooltip_label(last_synced_at: Option<SystemTime>) -> String {
+    match last_synced_at {
+        Some(time) => format!("Last synced at {}", format_local_time(time)),
+        None => String::from("Last synced at never"),
+    }
+}
+
+fn format_local_time(time: SystemTime) -> String {
+    let local: DateTime<Local> = time.into();
+    local.format("%-I:%M:%S %p").to_string()
+}
+
 pub(crate) fn view_library_breadcrumb_row<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -530,6 +632,7 @@ pub(crate) fn view_library_breadcrumb_row<'a>(
         tokens,
         Message::LibraryGridZoomChanged,
     ));
+    controls = controls.push(library_sync_indicator(app, tokens));
 
     let reorder_hint_width = if narrow {
         app.layout()

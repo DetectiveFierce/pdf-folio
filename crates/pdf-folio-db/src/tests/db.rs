@@ -610,3 +610,52 @@ fn seed_sync_metadata_captures_current_library_state() {
     assert_eq!(memberships.len(), 1);
     assert_eq!(memberships[0].entry_id.as_str(), "paper");
 }
+
+#[test]
+fn sync_blob_upload_preflight_detects_only_unuploaded_entries() {
+    let db = test_db();
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+
+    assert!(db.has_entries_needing_sync_blob_upload().unwrap());
+    db.remember_sync_blob_uploaded("paper").unwrap();
+    assert!(!db.has_entries_needing_sync_blob_upload().unwrap());
+}
+
+#[test]
+fn seed_sync_metadata_tombstones_previously_synced_deleted_rows() {
+    let db = test_db();
+    let entry_id = EntryId::new("paper");
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+    let folder_id = db.create_folder("Research", None).unwrap();
+    db.add_entry_to_folder(&entry_id, &folder_id).unwrap();
+    db.seed_sync_metadata("default").unwrap();
+
+    db.remove_entry_from_folder(&entry_id, &folder_id).unwrap();
+    db.delete_folder(&folder_id).unwrap();
+    db.delete_entry(&entry_id).unwrap();
+    db.seed_sync_metadata("default").unwrap();
+
+    let entry = db
+        .sync_entries_for_library("default")
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == entry_id)
+        .unwrap();
+    assert!(entry.deleted_at.is_some());
+
+    let folder = db
+        .sync_folders_for_library("default")
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == folder_id)
+        .unwrap();
+    assert!(folder.deleted_at.is_some());
+
+    let membership = db
+        .sync_entry_folders_for_library("default")
+        .unwrap()
+        .into_iter()
+        .find(|row| row.entry_id == entry_id && row.folder_id == folder_id)
+        .unwrap();
+    assert!(membership.deleted_at.is_some());
+}

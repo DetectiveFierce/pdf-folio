@@ -15,6 +15,7 @@ use pdf_folio_db::{
 
 use crate::library::filters::entry_matches_query;
 use crate::library::metadata::{entry_author, entry_title, file_size};
+use crate::library::thumbnails::cache_thumbnail_variants;
 use crate::messages::Message;
 use crate::{
     ExportConflictBehavior, ExportFilenameTemplate, ExportMode, LibraryClipboard,
@@ -1528,6 +1529,7 @@ pub(crate) fn import_pdf_with_index(db: &Db, path: PathBuf) -> anyhow::Result<Im
         file_size: file_size(&path),
         cover_hash: None,
     })?;
+    cache_thumbnail_variants(&id, &doc)?;
 
     let search_index = SearchIndex::open_default()?;
     let mut documents = Vec::with_capacity(usize::from(page_count));

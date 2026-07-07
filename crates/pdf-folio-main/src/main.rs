@@ -14,9 +14,9 @@
 //! [`clap`]: https://docs.rs/clap
 
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use chrono::Utc;
 use clap::{Parser, Subcommand};
 use directories::ProjectDirs;
 use pdf_folio_db::Db;
@@ -564,16 +564,35 @@ fn save_stored_library_registry(registry: &StoredLibraryRegistry) -> Result<()> 
 }
 
 fn library_rows(profiles: &[SyncLibraryProfile]) -> Vec<SyncLibraryRow> {
-    let updated_at = Utc::now().timestamp();
+    let registry_updated_at = registry_path()
+        .ok()
+        .and_then(|path| file_modified_unix_timestamp(&path))
+        .unwrap_or_else(current_unix_timestamp);
     profiles
         .iter()
         .map(|profile| SyncLibraryRow {
             id: profile.id.clone(),
             name: profile.name.clone(),
-            updated_at,
+            updated_at: file_modified_unix_timestamp(&profile.db_path)
+                .unwrap_or(registry_updated_at),
             deleted_at: None,
         })
         .collect()
+}
+
+fn current_unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default()
+}
+
+fn file_modified_unix_timestamp(path: &Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs() as i64)
 }
 
 fn app_data_dir() -> Result<PathBuf> {

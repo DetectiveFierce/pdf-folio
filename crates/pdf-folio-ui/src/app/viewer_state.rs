@@ -64,7 +64,12 @@ impl PDFolioApp {
         let layout = style_book.layout();
         let sync_auth = SyncAuthRuntime::load();
         let auth_ready = sync_auth.is_signed_in();
-        Ok(Self {
+        let library_entries = db.get_entries_sorted(preferences.sort_mode)?;
+        let library_trash_entries = db.get_trashed_entries()?;
+        let library_folders = db.get_folders()?;
+        let library_trash_folders = db.get_trashed_folders()?;
+        let library_status = Some(format!("{} PDFs in library", library_entries.len()));
+        let mut app = Self {
             mode: if auth_ready {
                 AppMode::Library
             } else {
@@ -125,10 +130,11 @@ impl PDFolioApp {
                 library_metadata_density: LibraryMetadataDensity::from_visible_fields(
                     &preferences.visible_metadata_fields,
                 ),
-                library_entries: Vec::new(),
-                library_trash_entries: Vec::new(),
-                library_folders: Vec::new(),
-                library_trash_folders: Vec::new(),
+                library_entries,
+                library_trash_entries,
+                library_folders,
+                library_trash_folders,
+                folder_smart_count_cache: HashMap::new(),
                 trash_view_active: false,
                 library_sort_mode: preferences.sort_mode,
                 selected_folder: preferences.selected_folder,
@@ -185,9 +191,9 @@ impl PDFolioApp {
                 details_entry_id: None,
                 details_title_input: String::new(),
                 details_author_input: String::new(),
-                library_status: None,
+                library_status,
                 library_error: None,
-                library_startup_loading: auth_ready,
+                library_startup_loading: false,
                 library_history_restore_started_at: None,
                 raindrop_connect_dialog_open: false,
                 raindrop_callback_copied: false,
@@ -252,8 +258,13 @@ impl PDFolioApp {
             sync_in_progress: None,
             sync_queued_libraries: HashSet::new(),
             last_sync_started_at: None,
+            last_sync_completed_at: None,
+            startup_background_ready: false,
             pending_session_restore: None,
-        })
+        };
+        app.rebuild_folder_smart_count_cache();
+        app.set_active_library_preview_from_entries();
+        Ok(app)
     }
 
     /// Creates application state and records the startup PDF path when available.
@@ -277,6 +288,16 @@ impl PDFolioApp {
             app.viewer.viewport_height = height;
             app.viewer.viewer_viewport_width = app.estimated_viewer_viewport_width();
             app.viewer.viewer_viewport_height = app.estimated_viewer_viewport_height();
+        }
+        if let Some(session) = app.pending_session_restore.clone() {
+            app.apply_library_session(&session);
+            app.library.library_entries =
+                app.db.get_entries_sorted(app.library.library_sort_mode)?;
+            app.library.library_trash_entries = app.db.get_trashed_entries()?;
+            app.rebuild_folder_smart_count_cache();
+            app.library.thumbnails.clear();
+            app.library.pending_thumbnails.clear();
+            app.set_active_library_preview_from_entries();
         }
         let Some(path) = initial_file else {
             return Ok(app);

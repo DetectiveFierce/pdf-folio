@@ -10,6 +10,7 @@ path = "src/app.rs"
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
 directories.workspace = true
 iced.workspace = true
 notify.workspace = true

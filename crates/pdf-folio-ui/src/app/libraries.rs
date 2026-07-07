@@ -445,14 +445,18 @@ pub(super) fn sync_library_registry_profiles(
 pub(super) fn sync_library_rows_for_registry(
     registry: &LibraryRegistryRuntime,
 ) -> Vec<SyncLibraryRow> {
-    let updated_at = current_unix_timestamp();
+    let registry_updated_at = registry_path()
+        .ok()
+        .and_then(|path| file_modified_unix_timestamp(&path))
+        .unwrap_or_else(current_unix_timestamp);
     registry
         .profiles
         .iter()
         .map(|profile| SyncLibraryRow {
             id: profile.id.clone(),
             name: profile.name.clone(),
-            updated_at,
+            updated_at: file_modified_unix_timestamp(&profile.db_path)
+                .unwrap_or(registry_updated_at),
             deleted_at: None,
         })
         .chain(
@@ -462,8 +466,8 @@ pub(super) fn sync_library_rows_for_registry(
                 .map(|library_id| SyncLibraryRow {
                     id: library_id.clone(),
                     name: library_id.clone(),
-                    updated_at,
-                    deleted_at: Some(updated_at),
+                    updated_at: registry_updated_at,
+                    deleted_at: Some(registry_updated_at),
                 }),
         )
         .collect()
@@ -506,6 +510,14 @@ fn current_unix_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or_default()
+}
+
+fn file_modified_unix_timestamp(path: &Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs() as i64)
 }
 
 fn library_db_path(data_dir: &Path, library_id: &str) -> PathBuf {

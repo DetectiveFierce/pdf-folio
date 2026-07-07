@@ -68,16 +68,17 @@ pub(crate) async fn load_or_render_thumbnail(
         if path.exists() {
             let data = std::fs::read(&path)?;
             let width = size.width_px();
-            let height = (data.len() / (usize::from(width) * 4)).clamp(1, usize::from(u16::MAX));
-            return Ok((
-                entry.id,
-                size,
-                RenderedPage {
-                    width,
-                    height: height as u16,
-                    rgba: data,
-                },
-            ));
+            if let Some(height) = thumbnail_height_from_rgba_len(data.len(), width) {
+                return Ok((
+                    entry.id,
+                    size,
+                    RenderedPage {
+                        width,
+                        height,
+                        rgba: data,
+                    },
+                ));
+            }
         }
 
         let doc = PdfDoc::open(&entry.path)?;
@@ -86,6 +87,25 @@ pub(crate) async fn load_or_render_thumbnail(
         Ok((entry.id, size, page))
     })
     .await?
+}
+
+pub(crate) fn load_cached_thumbnail(
+    entry_id: &EntryId,
+    size: ThumbnailSize,
+) -> anyhow::Result<Option<ThumbnailView>> {
+    let path = thumbnail_variant_path(entry_id, size)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = std::fs::read(&path)?;
+    let width = size.width_px();
+    let height = thumbnail_height_from_rgba_len(data.len(), width).unwrap_or(1);
+    let handle = image::Handle::from_rgba(u32::from(width), u32::from(height), data);
+    Ok(Some(ThumbnailView {
+        width,
+        height,
+        handle,
+    }))
 }
 
 pub(crate) fn bulk_thumbnail_task(entries: Vec<LibraryEntry>) -> Task<Message> {
@@ -117,12 +137,16 @@ pub(crate) fn bulk_thumbnail_task(entries: Vec<LibraryEntry>) -> Task<Message> {
 
 fn rebuild_entry_thumbnail(entry: &LibraryEntry) -> anyhow::Result<()> {
     let doc = PdfDoc::open(&entry.path)?;
+    cache_thumbnail_variants(&entry.id, &doc)
+}
+
+pub(crate) fn cache_thumbnail_variants(entry_id: &EntryId, doc: &PdfDoc) -> anyhow::Result<()> {
     for size in [
         ThumbnailSize::Small,
         ThumbnailSize::Default,
         ThumbnailSize::Large,
     ] {
-        let path = thumbnail_variant_path(&entry.id, size)?;
+        let path = thumbnail_variant_path(entry_id, size)?;
         let page = doc.render_page(0, size.width_px())?;
         std::fs::write(path, &page.rgba)?;
     }
@@ -135,4 +159,17 @@ fn thumbnail_variant_path(entry_id: &EntryId, size: ThumbnailSize) -> anyhow::Re
         return Ok(default_path);
     };
     Ok(default_path.with_file_name(format!("{}.{}.rgba", entry_id.as_str(), suffix)))
+}
+
+fn thumbnail_height_from_rgba_len(len: usize, width: u16) -> Option<u16> {
+    let stride = usize::from(width) * 4;
+    if stride == 0 || len < stride || len % stride != 0 {
+        return None;
+    }
+    let height = len / stride;
+    let max_height = usize::from(width) * 3;
+    if height == 0 || height > max_height {
+        return None;
+    }
+    Some(height as u16)
 }

@@ -261,7 +261,7 @@ impl PDFolioApp {
         ])
     }
 
-    fn apply_library_session(&mut self, session: &AppSession) {
+    pub(super) fn apply_library_session(&mut self, session: &AppSession) {
         self.appearance.theme = parse_theme(&session.appearance.theme);
         self.mode = match session.mode {
             SessionMode::Library => AppMode::Library,

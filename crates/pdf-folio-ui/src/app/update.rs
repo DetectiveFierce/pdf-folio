@@ -495,19 +495,10 @@ fn auto_sync_task(library: LibraryProfile) -> Task<Message> {
             let device_id = default_sync_device_id();
             let db = Db::open(&library.db_path)
                 .with_context(|| format!("Could not open {} for sync.", library.name))?;
-            let uploads = client
-                .upload_local_blobs(&db, &cache)
+            client
+                .sync_library_if_needed(&db, &library.id, &device_id, &cache)
                 .await
-                .with_context(|| format!("Could not upload PDF blobs for {}.", library.name))?;
-            let crdt = client
-                .sync_crdt_metadata(&db, &library.id, &device_id)
-                .await
-                .with_context(|| format!("Could not sync metadata for {}.", library.name))?;
-            let hydration = client
-                .hydrate_remote_library(&db, &library.id, &cache)
-                .await
-                .with_context(|| format!("Could not hydrate {}.", library.name))?;
-            Ok::<_, anyhow::Error>((uploads, crdt, hydration))
+                .with_context(|| format!("Could not sync {}.", library.name))
         },
         move |result| Message::AutoSyncFinished {
             library_id: library_id.clone(),
@@ -553,21 +544,26 @@ fn default_sync_device_id() -> String {
 }
 
 pub(super) fn start_auto_sync_now(app: &mut PDFolioApp) -> Task<Message> {
-    auto_sync_library_task(app, app.libraries.active_library_id.clone())
+    if app.sync_auth.is_signed_in() {
+        app.sync_queued_libraries
+            .insert(app.libraries.active_library_id.clone());
+    }
+    Task::none()
 }
 
 pub(super) fn start_auto_sync_for_all_libraries(app: &mut PDFolioApp) -> Task<Message> {
-    let library_ids = app
-        .libraries
-        .profiles
-        .iter()
-        .map(|profile| profile.id.clone())
-        .collect::<Vec<_>>();
-    let mut task = Task::none();
-    for library_id in library_ids {
-        task = Task::batch([task, auto_sync_library_task(app, library_id)]);
+    if app.sync_auth.is_signed_in() {
+        for library_id in app
+            .libraries
+            .profiles
+            .iter()
+            .map(|profile| profile.id.clone())
+            .collect::<Vec<_>>()
+        {
+            app.sync_queued_libraries.insert(library_id);
+        }
     }
-    task
+    Task::none()
 }
 
 fn auto_sync_library_task(app: &mut PDFolioApp, library_id: String) -> Task<Message> {
@@ -653,6 +649,44 @@ fn export_entries_for_source(app: &PDFolioApp, source: &ExportSource) -> Vec<Lib
 
 pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
     match message {
+        Message::StartupResponsivenessProbe {
+            launch_started_at,
+            probe_started_at,
+            emitted_at,
+        } => {
+            let processed_at = Instant::now();
+            let total_ms = processed_at
+                .saturating_duration_since(launch_started_at)
+                .as_millis();
+            let probe_wait_ms = emitted_at
+                .saturating_duration_since(probe_started_at)
+                .as_millis();
+            let update_queue_ms = processed_at
+                .saturating_duration_since(emitted_at)
+                .as_millis();
+            tracing::warn!(
+                total_ms,
+                probe_wait_ms,
+                update_queue_ms,
+                "PDF-Folio startup responsiveness probe processed"
+            );
+            app.library.library_status = Some(format!(
+                "Startup probe: update accepted after {total_ms} ms ({update_queue_ms} ms queued)"
+            ));
+            return Task::none();
+        }
+        Message::StartupBackgroundReady => {
+            app.startup_background_ready = true;
+            app.load_cached_visible_thumbnails();
+            let thumbnail_task = app.request_visible_thumbnails();
+            if app.sync_auth.is_signed_in() {
+                return Task::batch([
+                    thumbnail_task,
+                    sync_library_registry_for_app_task(app, false, true),
+                ]);
+            }
+            return thumbnail_task;
+        }
         Message::SyncSignInRequested => {
             app.sync_auth.state = SyncAuthState::SigningIn;
             app.sync_auth.error = None;
@@ -665,13 +699,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             Ok(session) => match app.sync_auth.apply_signed_in_session(session) {
                 Ok(()) => {
                     app.mode = AppMode::Library;
-                    app.library.library_startup_loading = true;
                     return Task::batch([
                         app.refresh_folders(),
                         app.refresh_library(),
-                        attribute_pending_metadata_task(Arc::clone(&app.db)),
                         pending_raindrop_rollback_check_task(),
-                        sync_library_registry_for_app_task(app, true, true),
+                        sync_library_registry_for_app_task(app, false, true),
                     ]);
                 }
                 Err(error) => {
@@ -688,7 +720,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 return Task::none();
             }
             if app.sync_queued_libraries.is_empty() {
-                return sync_library_registry_for_app_task(app, false, false);
+                return Task::none();
             }
             return start_next_queued_sync(app);
         }
@@ -737,7 +769,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 .find(|profile| profile.id == library_id)
                 .map_or(library_id.as_str(), |profile| profile.name.as_str());
             match result {
-                Ok((uploads, crdt, hydration)) => {
+                Ok(report) => {
+                    app.last_sync_completed_at = Some(std::time::SystemTime::now());
+                    let uploads = report.uploads;
+                    let crdt = report.crdt;
+                    let hydration = report.hydration;
                     let library_changed = uploads.uploaded_blobs > 0
                         || uploads.failed_blobs > 0
                         || crdt.generated_operations > 0
@@ -807,6 +843,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             result,
         } => match result {
             Ok((registry, added_library_ids)) => {
+                app.last_sync_completed_at = Some(std::time::SystemTime::now());
                 let registry_task = match app.apply_library_registry(registry) {
                     Ok(task) => task,
                     Err(error) => return Task::done(Message::LibraryError(error.to_string())),
@@ -1099,6 +1136,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         } => {
             app.library.library_entries = entries;
             app.library.library_trash_entries = trash_entries;
+            app.rebuild_folder_smart_count_cache();
             app.library.library_history_restore_started_at = None;
             app.set_active_library_preview_from_entries();
             app.library.library_startup_loading = false;
@@ -1287,6 +1325,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::LibraryFoldersLoaded(folders) => {
             app.library.library_folders = folders;
+            app.rebuild_folder_smart_count_cache();
             if !app.library.trash_view_active
                 && app
                     .library
@@ -1321,6 +1360,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::LibraryTrashFoldersLoaded(folders) => {
             app.library.library_trash_folders = folders;
+            app.rebuild_folder_smart_count_cache();
             if app.library.trash_view_active
                 && app
                     .library
@@ -1366,20 +1406,12 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                     }
                     Ok(None) => {
                         app.library.raindrop_rollback_recovery_active = false;
-                        return Task::batch([
-                            app.refresh_folders(),
-                            app.refresh_library(),
-                            attribute_pending_metadata_task(Arc::clone(&app.db)),
-                        ]);
+                        return Task::none();
                     }
                     Err(error) => return Task::done(Message::LibraryError(error.to_string())),
                 }
             }
-            return Task::batch([
-                app.refresh_folders(),
-                app.refresh_library(),
-                attribute_pending_metadata_task(Arc::clone(&app.db)),
-            ]);
+            return Task::none();
         }
         Message::PendingRaindropRollbackFinished { removed, errors } => {
             app.library.raindrop_rollback_recovery_status = Some(format!(
@@ -1905,7 +1937,9 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 start_auto_sync_now(app),
             ]);
         }
-        Message::AuthorAttributionFinished => return app.refresh_library(),
+        Message::AuthorAttributionFinished => {
+            return Task::batch([app.refresh_library(), start_auto_sync_now(app)]);
+        }
         Message::OpenLibraryEntry(entry_id) => {
             if let Some(entry) = app
                 .active_library_entries()
@@ -2434,6 +2468,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::TagFilterChanged(tag) => {
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();
+            app.library.trash_view_active = false;
             app.library.active_tag_filter = tag;
             app.library.active_recently_opened_filter = false;
             app.library.previous_tag_pill_view = None;
@@ -2525,6 +2560,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             }
         }
         Message::ReadingFilterChanged(filter) => {
+            app.library.trash_view_active = false;
             app.library.active_reading_filter = filter;
             app.library.active_recently_opened_filter = false;
             app.library.missing_filter_active = false;
@@ -2543,6 +2579,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             ]);
         }
         Message::RecentlyOpenedFilterChanged(active) => {
+            app.library.trash_view_active = false;
             app.library.active_recently_opened_filter = active;
             if active {
                 app.library.active_reading_filter = None;
@@ -2563,6 +2600,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             ]);
         }
         Message::MissingFilterChanged(active) => {
+            app.library.trash_view_active = false;
             app.library.missing_filter_active = active;
             if active {
                 app.library.active_recently_opened_filter = false;
@@ -2576,6 +2614,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::FolderSelected(folder_id) => {
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();
+            app.library.trash_view_active = false;
             app.library.selected_folder = folder_id.clone();
             app.library.active_recently_opened_filter = false;
             app.library.previous_tag_pill_view = None;
@@ -2595,6 +2634,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::ClearLibraryFilters => {
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();
+            app.library.trash_view_active = false;
             app.library.search_query.clear();
             app.library.search_results = None;
             app.library.search_hit_pages.clear();
@@ -2611,6 +2651,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.prune_selection_to_visible_entries(&visible_entries);
             return Task::batch([
                 save_library_preferences_task(app),
+                save_app_session_task(app),
                 app.request_visible_thumbnails(),
                 scroll_library_to_offset_task(0.0),
             ]);
@@ -3074,7 +3115,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 format!("{label}; {} indexing errors.", errors.len())
             });
             app.library.details_entry_id = None;
-            return app.refresh_library();
+            return Task::batch([app.refresh_library(), start_auto_sync_now(app)]);
         }
         Message::BulkTagInputChanged(value) => {
             app.library.bulk_tag_input = value
