@@ -1,6 +1,25 @@
 use super::*;
 
 pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<Message> {
+    if app.chrome.command_palette_open {
+        return match shortcut {
+            Shortcut::FineScroll(delta) if delta > 0 => {
+                Task::done(Message::CommandPaletteMoveSelection(1))
+            }
+            Shortcut::FineScroll(delta) if delta < 0 => {
+                Task::done(Message::CommandPaletteMoveSelection(-1))
+            }
+            Shortcut::OpenSelected => Task::done(Message::CommandPaletteRunSelected),
+            Shortcut::Escape => {
+                app.chrome.command_palette_open = false;
+                app.chrome.command_palette_query.clear();
+                app.chrome.command_palette_selected_index = 0;
+                Task::none()
+            }
+            _ => Task::none(),
+        };
+    }
+
     match shortcut {
         Shortcut::In => {
             app.viewer.active_zoom_preset = None;
@@ -133,17 +152,39 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 Task::none()
             }
         }
+        Shortcut::OpenCommandPalette => {
+            if app.mode == AppMode::Library || app.mode == AppMode::Viewer {
+                app.chrome.command_palette_open = true;
+                app.chrome.command_palette_query.clear();
+                app.chrome.command_palette_selected_index = 0;
+                app.chrome.open_context_menu = None;
+            }
+            Task::none()
+        }
+        Shortcut::ToggleLibrarySidebar => {
+            if app.mode == AppMode::Library {
+                Task::done(Message::ToggleLibrarySidebar)
+            } else {
+                Task::none()
+            }
+        }
+        Shortcut::ToggleLibraryInspector => {
+            if app.mode == AppMode::Library {
+                Task::done(Message::ToggleLibraryInspector)
+            } else {
+                Task::none()
+            }
+        }
         Shortcut::Escape => {
-            if app.chrome.pending_confirmation.is_some() {
+            if app.chrome.command_palette_open {
+                app.chrome.command_palette_open = false;
+                app.chrome.command_palette_query.clear();
+                app.chrome.command_palette_selected_index = 0;
+            } else if app.chrome.pending_confirmation.is_some() {
                 app.chrome.pending_confirmation = None;
             } else if app.library.renaming_tag.is_some() {
                 app.library.renaming_tag = None;
                 app.library.tag_rename_input.clear();
-            } else if app.chrome.open_app_menu.is_some() {
-                app.chrome.open_app_menu = None;
-                app.chrome.open_view_menu_flyout = None;
-            } else if app.chrome.open_selection_menu.is_some() {
-                app.chrome.open_selection_menu = None;
             } else if app.viewer.zoom_menu_open {
                 app.viewer.zoom_menu_open = false;
             } else if app.viewer.zoom_editing {
@@ -167,10 +208,25 @@ pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 app.library.create_folder_dialog_open = false;
             } else if app.library.move_picker.is_some() {
                 app.library.move_picker = None;
+            } else if app.library.import_menu_open {
+                app.library.import_menu_open = false;
             } else if app.library.raindrop_connect_dialog_open {
                 app.library.raindrop_connect_dialog_open = false;
             } else if app.library.raindrop_import_dialog_open {
                 app.library.raindrop_import_dialog_open = false;
+            } else if app.library.import_review.is_some() {
+                app.library.import_review = None;
+            } else if app.library.tag_manager_open {
+                app.library.tag_manager_open = false;
+                app.library.tag_manager_filter.clear();
+                app.library.tag_manager_merge_destination.clear();
+            } else if app.library.export_dialog.is_some()
+                || app.library.export_progress.is_some()
+                || app.library.last_export_summary.is_some()
+            {
+                app.library.export_dialog = None;
+                app.library.export_progress = None;
+                app.library.last_export_summary = None;
             } else {
                 app.viewer.toc_open = false;
             }

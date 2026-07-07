@@ -6,9 +6,27 @@ use crate::app_libraries::{
 use anyhow::Context;
 use directories::ProjectDirs;
 use iced::futures::SinkExt;
+use pdf_folio_db::ImportSummary;
 
 #[path = "update/shortcuts.rs"]
 mod shortcuts;
+
+fn mark_entry_opened_task(app: &PDFolioApp) -> Task<Message> {
+    let Some(entry_id) = app.viewer.current_entry_id.clone() else {
+        return Task::none();
+    };
+    let db = Arc::clone(&app.db);
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || db.mark_entry_opened(&entry_id)).await??;
+            Ok::<_, anyhow::Error>(())
+        },
+        |result| match result {
+            Ok(()) => Message::ProgressSaved,
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
 
 enum RaindropImportTaskEvent {
     CreatedFolder(FolderId),
@@ -582,6 +600,57 @@ fn start_next_queued_sync(app: &mut PDFolioApp) -> Task<Message> {
     auto_sync_library_task(app, library_id)
 }
 
+fn import_review_from_summary(
+    title: String,
+    summary: &ImportSummary,
+    destination_label: String,
+    suggested_tags: Vec<String>,
+) -> ImportReviewState {
+    let imported_entry_ids = summary
+        .entries
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let duplicate_count = summary
+        .entries
+        .iter()
+        .filter(|entry| !entry.inserted)
+        .count();
+    ImportReviewState {
+        title,
+        imported_entry_ids,
+        imported_count: summary.entries.len().saturating_sub(duplicate_count),
+        duplicate_count,
+        failed_count: summary.errors.len(),
+        destination_label,
+        suggested_tags,
+        errors: summary.errors.clone(),
+    }
+}
+
+fn export_entries_for_source(app: &PDFolioApp, source: &ExportSource) -> Vec<LibraryEntry> {
+    let all_entries = app
+        .library
+        .library_entries
+        .iter()
+        .chain(app.library.library_trash_entries.iter());
+    match source {
+        ExportSource::SelectedEntries => app.selected_entries(),
+        ExportSource::SingleEntry(entry_id) => all_entries
+            .filter(|entry| &entry.id == entry_id)
+            .cloned()
+            .collect(),
+        ExportSource::Folder(folder_id) => all_entries
+            .filter(|entry| entry.folders.iter().any(|folder| &folder.id == folder_id))
+            .cloned()
+            .collect(),
+        ExportSource::Tag(tag) => all_entries
+            .filter(|entry| entry.tags.iter().any(|entry_tag| entry_tag == tag))
+            .cloned()
+            .collect(),
+    }
+}
+
 pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
     match message {
         Message::SyncSignInRequested => {
@@ -763,68 +832,6 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         } => {
             app.libraries.previews.insert(library_id, preview);
         }
-        Message::AppMenuOpened(menu) => {
-            app.library.renaming_tag = None;
-            app.library.tag_rename_input.clear();
-            app.chrome.open_selection_menu = None;
-            app.chrome.open_view_menu_flyout = None;
-            app.chrome.open_context_menu = None;
-            app.chrome.open_app_menu = if app.chrome.open_app_menu == Some(menu) {
-                None
-            } else {
-                Some(menu)
-            };
-            if app.mode == AppMode::Library {
-                return scroll_library_to_offset_task(app.library.library_scroll_offset);
-            }
-        }
-        Message::AppMenuClosed => {
-            app.chrome.open_app_menu = None;
-            app.chrome.open_view_menu_flyout = None;
-            if app.mode == AppMode::Library {
-                return scroll_library_to_offset_task(app.library.library_scroll_offset);
-            }
-        }
-        Message::ViewMenuFlyoutOpened(flyout) => {
-            if app.chrome.open_app_menu == Some(AppMenu::View) {
-                app.chrome.open_view_menu_flyout = Some(flyout);
-                if app.mode == AppMode::Library {
-                    return scroll_library_to_offset_task(app.library.library_scroll_offset);
-                }
-            }
-        }
-        Message::AppMenuActionSelected(action) => {
-            app.chrome.open_app_menu = None;
-            app.chrome.open_view_menu_flyout = None;
-            app.chrome.open_context_menu = None;
-            match action {
-                AppMenuAction::SetViewerScrollMode(mode) => {
-                    let task = app.set_viewer_scroll_mode(mode);
-                    return with_session_save(task, app);
-                }
-                AppMenuAction::SetViewerSpreadMode(mode) => {
-                    let task = app.set_viewer_spread_mode(mode);
-                    return with_session_save(task, app);
-                }
-                _ => {}
-            }
-            if let Some(message) = app_menu_action_message(app, action) {
-                return Task::done(message);
-            }
-        }
-        Message::SelectionMenuOpened(menu) => {
-            app.chrome.open_app_menu = None;
-            app.chrome.open_view_menu_flyout = None;
-            app.chrome.open_context_menu = None;
-            app.chrome.open_selection_menu = if app.chrome.open_selection_menu == Some(menu) {
-                None
-            } else {
-                Some(menu)
-            };
-        }
-        Message::SelectionMenuClosed => {
-            app.chrome.open_selection_menu = None;
-        }
         Message::CursorMoved(position) => {
             app.chrome.cursor_position = position;
         }
@@ -849,6 +856,82 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.chrome.open_context_menu = None;
             if app.mode == AppMode::Library {
                 return scroll_library_to_offset_task(app.library.library_scroll_offset);
+            }
+        }
+        Message::OpenCommandPalette => {
+            if app.mode == AppMode::Library || app.mode == AppMode::Viewer {
+                app.chrome.command_palette_open = true;
+                app.chrome.command_palette_query.clear();
+                app.chrome.command_palette_selected_index = 0;
+                app.chrome.open_context_menu = None;
+                if app.mode == AppMode::Library {
+                    return scroll_library_to_offset_task(app.library.library_scroll_offset);
+                }
+            }
+        }
+        Message::CloseCommandPalette => {
+            app.chrome.command_palette_open = false;
+            app.chrome.command_palette_query.clear();
+            app.chrome.command_palette_selected_index = 0;
+            if app.mode == AppMode::Library {
+                return scroll_library_to_offset_task(app.library.library_scroll_offset);
+            }
+        }
+        Message::CommandPaletteQueryChanged(query) => {
+            app.chrome.command_palette_query = query;
+            app.chrome.command_palette_selected_index = 0;
+        }
+        Message::CommandPaletteMoveSelection(delta) => {
+            let visible_count = crate::app_commands::library_commands(app)
+                .into_iter()
+                .filter(|command| {
+                    command.visible
+                        && crate::app_commands::command_matches(
+                            command.spec,
+                            &app.chrome.command_palette_query,
+                        )
+                })
+                .count();
+            if visible_count > 0 {
+                let current = app.chrome.command_palette_selected_index as i32;
+                let next = (current + delta).rem_euclid(visible_count as i32) as usize;
+                app.chrome.command_palette_selected_index = next;
+            }
+        }
+        Message::CommandPaletteRunSelected => {
+            let selected = crate::app_commands::library_commands(app)
+                .into_iter()
+                .filter(|command| {
+                    command.visible
+                        && crate::app_commands::command_matches(
+                            command.spec,
+                            &app.chrome.command_palette_query,
+                        )
+                })
+                .nth(app.chrome.command_palette_selected_index)
+                .map(|command| command.spec.id);
+            if let Some(command_id) = selected {
+                return Task::done(Message::CommandPaletteRun(command_id));
+            }
+        }
+        Message::CommandPaletteRun(command_id) => {
+            app.chrome.command_palette_open = false;
+            app.chrome.command_palette_query.clear();
+            app.chrome.command_palette_selected_index = 0;
+            if let Some(message) = crate::app_commands::command_message(app, command_id) {
+                return Task::done(message);
+            }
+        }
+        Message::CloseImportReview => {
+            app.library.import_review = None;
+        }
+        Message::SelectImportReviewEntries => {
+            if let Some(review) = app.library.import_review.as_ref() {
+                let imported_entry_ids = review.imported_entry_ids.clone();
+                app.clear_library_selection();
+                for entry_id in imported_entry_ids {
+                    app.select_library_entry(entry_id);
+                }
             }
         }
         Message::ContextMenuActionSelected(action) => {
@@ -890,7 +973,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::LibraryDocumentOpened { entry_id, doc } => {
             let task = app.open_library_document(entry_id, doc);
-            return with_session_save(task, app);
+            return with_session_save(Task::batch([task, mark_entry_opened_task(app)]), app);
         }
         Message::BackToLibrary => return with_session_save(app.return_to_library(), app),
         Message::BackToViewer => return with_session_save(app.return_to_viewer(), app),
@@ -1338,7 +1421,17 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_status = Some(status);
             app.library.library_error = None;
         }
-        Message::ImportFolderDialog => return import_folder_dialog_task(),
+        Message::OpenImportMenu => {
+            app.library.import_menu_open = true;
+            app.chrome.open_context_menu = None;
+        }
+        Message::CloseImportMenu => {
+            app.library.import_menu_open = false;
+        }
+        Message::ImportFolderDialog => {
+            app.library.import_menu_open = false;
+            return import_folder_dialog_task();
+        }
         Message::ImportFolderSelected(path) => {
             app.library.library_status = Some(format!("Importing {}...", path.display()));
             let db = Arc::clone(&app.db);
@@ -1356,7 +1449,10 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 },
             );
         }
-        Message::ImportPdfDialog => return import_pdf_dialog_task(),
+        Message::ImportPdfDialog => {
+            app.library.import_menu_open = false;
+            return import_pdf_dialog_task();
+        }
         Message::ImportPdfSelected(path) => {
             app.library.library_status = Some(format!("Importing {}...", path.display()));
             let db = Arc::clone(&app.db);
@@ -1383,6 +1479,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             );
         }
         Message::ImportRaindrop => {
+            app.library.import_menu_open = false;
             app.library.library_error = None;
             app.library.raindrop_import_preview = None;
             app.library.raindrop_pdf_thumbnails.clear();
@@ -1749,6 +1846,12 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.library.library_error = Some(error.to_string());
             }
             app.library.raindrop_import_progress = None;
+            app.library.import_review = Some(import_review_from_summary(
+                format!("Raindrop import from {}", summary.account_label),
+                &summary.import,
+                String::from("Raindrop destination"),
+                Vec::new(),
+            ));
             app.library.library_status = Some(format!(
                 "Imported {} Raindrop PDFs from {}{}",
                 summary.import.entries.len(),
@@ -1769,6 +1872,24 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             ]);
         }
         Message::ImportFinished(summary) => {
+            let destination_label = app
+                .library
+                .selected_folder
+                .as_ref()
+                .and_then(|folder_id| {
+                    app.library
+                        .library_folders
+                        .iter()
+                        .find(|folder| &folder.id == folder_id)
+                        .map(|folder| folder.name.clone())
+                })
+                .unwrap_or_else(|| String::from("Library root"));
+            app.library.import_review = Some(import_review_from_summary(
+                String::from("Import review"),
+                &summary,
+                destination_label,
+                Vec::new(),
+            ));
             app.library.library_status = Some(format!(
                 "Imported {} PDFs{}",
                 summary.entries.len(),
@@ -1890,6 +2011,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.search_hit_pages.clear();
             app.library.active_tag_filter = None;
             app.library.active_reading_filter = None;
+            app.library.active_recently_opened_filter = false;
             app.library.missing_filter_active = false;
             app.library.previous_tag_pill_view = None;
             app.library.library_drag = None;
@@ -2193,6 +2315,16 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.fit_library_grid_zoom_to_columns(columns);
             return with_session_save(app.request_visible_thumbnails(), app);
         }
+        Message::ToggleLibrarySidebar => {
+            if app.mode == AppMode::Library {
+                let columns = app.library_entries_per_row();
+                app.library.library_tag_sidebar_open = !app.library.library_tag_sidebar_open;
+                app.library.resizing_library_tag_sidebar = false;
+                app.recalculate_library_viewport_width();
+                app.fit_library_grid_zoom_to_columns(columns);
+                return with_session_save(app.request_visible_thumbnails(), app);
+            }
+        }
         Message::BeginTagSidebarResize => {
             app.library.resizing_library_tag_sidebar = true;
         }
@@ -2212,6 +2344,34 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 save_app_session_task(app),
             ]);
         }
+        Message::ToggleLibraryInspector => {
+            if app.mode == AppMode::Library {
+                let columns = app.library_entries_per_row();
+                app.library.library_inspector_open = !app.library.library_inspector_open;
+                app.library.resizing_library_inspector = false;
+                app.recalculate_library_viewport_width();
+                app.fit_library_grid_zoom_to_columns(columns);
+                return with_session_save(app.request_visible_thumbnails(), app);
+            }
+        }
+        Message::BeginLibraryInspectorResize => {
+            app.library.resizing_library_inspector = true;
+            app.library.library_inspector_open = true;
+        }
+        Message::LibraryInspectorResizeDragged(cursor_x) => {
+            if app.library.resizing_library_inspector {
+                let width = (app.viewer.viewport_width - cursor_x).max(1.0);
+                app.library.library_inspector_width = width.clamp(
+                    app.layout().metric("LibraryInspector", "min_width", 260.0),
+                    app.layout().metric("LibraryInspector", "max_width", 520.0),
+                );
+                app.recalculate_library_viewport_width();
+            }
+        }
+        Message::EndLibraryInspectorResize => {
+            app.library.resizing_library_inspector = false;
+            return save_app_session_task(app);
+        }
         Message::LibrarySidebarTabChanged(tab) => {
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();
@@ -2224,6 +2384,10 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 save_library_preferences_task(app),
                 save_app_session_task(app),
             ]);
+        }
+        Message::ToggleLibraryTags => {
+            app.library.library_tags_expanded = !app.library.library_tags_expanded;
+            return save_app_session_task(app);
         }
         Message::ToggleLibraryTreeFolder(folder_id) => {
             if !app
@@ -2271,6 +2435,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();
             app.library.active_tag_filter = tag;
+            app.library.active_recently_opened_filter = false;
             app.library.previous_tag_pill_view = None;
             if app.library.active_tag_filter.is_some() {
                 app.library.selected_folder = None;
@@ -2311,6 +2476,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 search_hit_pages: app.library.search_hit_pages.clone(),
                 active_tag_filter: app.library.active_tag_filter.clone(),
                 active_reading_filter: app.library.active_reading_filter,
+                active_recently_opened_filter: app.library.active_recently_opened_filter,
                 missing_filter_active: app.library.missing_filter_active,
                 selected_folder: app.library.selected_folder.clone(),
                 details_folder_id: app.library.details_folder_id.clone(),
@@ -2321,6 +2487,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.search_hit_pages.clear();
             app.library.active_tag_filter = Some(tag);
             app.library.active_reading_filter = None;
+            app.library.active_recently_opened_filter = false;
             app.library.missing_filter_active = false;
             app.library.selected_folder = None;
             app.library.details_folder_id = None;
@@ -2341,6 +2508,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.library.search_hit_pages = snapshot.search_hit_pages;
                 app.library.active_tag_filter = snapshot.active_tag_filter;
                 app.library.active_reading_filter = snapshot.active_reading_filter;
+                app.library.active_recently_opened_filter = snapshot.active_recently_opened_filter;
                 app.library.missing_filter_active = snapshot.missing_filter_active;
                 app.library.selected_folder = snapshot.selected_folder;
                 app.library.details_folder_id = snapshot.details_folder_id;
@@ -2358,14 +2526,47 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ReadingFilterChanged(filter) => {
             app.library.active_reading_filter = filter;
+            app.library.active_recently_opened_filter = false;
+            app.library.missing_filter_active = false;
+            app.library.active_tag_filter = None;
+            app.library.selected_folder = None;
+            app.library.details_folder_id = None;
             app.library.previous_tag_pill_view = None;
             app.library.library_drag = None;
+            app.library.library_scroll_offset = 0.0;
             let visible_entries = app.visible_library_entries();
             app.prune_selection_to_visible_entries(&visible_entries);
-            return with_session_save(app.request_visible_thumbnails(), app);
+            return Task::batch([
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(0.0),
+                save_app_session_task(app),
+            ]);
+        }
+        Message::RecentlyOpenedFilterChanged(active) => {
+            app.library.active_recently_opened_filter = active;
+            if active {
+                app.library.active_reading_filter = None;
+                app.library.missing_filter_active = false;
+                app.library.active_tag_filter = None;
+                app.library.selected_folder = None;
+                app.library.details_folder_id = None;
+            }
+            app.library.previous_tag_pill_view = None;
+            app.library.library_drag = None;
+            app.library.library_scroll_offset = 0.0;
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+            return Task::batch([
+                app.request_visible_thumbnails(),
+                scroll_library_to_offset_task(0.0),
+                save_app_session_task(app),
+            ]);
         }
         Message::MissingFilterChanged(active) => {
             app.library.missing_filter_active = active;
+            if active {
+                app.library.active_recently_opened_filter = false;
+            }
             app.library.previous_tag_pill_view = None;
             app.library.library_drag = None;
             let visible_entries = app.visible_library_entries();
@@ -2376,6 +2577,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();
             app.library.selected_folder = folder_id.clone();
+            app.library.active_recently_opened_filter = false;
             app.library.previous_tag_pill_view = None;
             app.select_folder_for_details(folder_id);
             app.sync_folder_rename_input();
@@ -2398,6 +2600,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.search_hit_pages.clear();
             app.library.active_tag_filter = None;
             app.library.active_reading_filter = None;
+            app.library.active_recently_opened_filter = false;
             app.library.missing_filter_active = false;
             app.library.selected_folder = None;
             app.library.details_folder_id = None;
@@ -2494,9 +2697,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if app.library.selected_library_entries.is_empty() {
                 return Task::none();
             }
-            app.chrome.open_app_menu = None;
             app.chrome.open_context_menu = None;
-            app.chrome.open_selection_menu = None;
             app.library.move_picker = Some(LibraryMovePicker {
                 target: LibraryMoveTarget::SelectedEntries,
                 selected_destination: app.library.selected_folder.clone(),
@@ -2513,9 +2714,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 .iter()
                 .find(|folder| folder.id == folder_id)
                 .and_then(|folder| folder.parent_id.clone());
-            app.chrome.open_app_menu = None;
             app.chrome.open_context_menu = None;
-            app.chrome.open_selection_menu = None;
             app.library.move_picker = Some(LibraryMovePicker {
                 target: LibraryMoveTarget::Folder(folder_id),
                 selected_destination,
@@ -2651,6 +2850,8 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             }
         }
         Message::StartTagRename(tag) => {
+            app.library.tag_manager_open = false;
+            app.library.library_sidebar_tab = LibrarySidebarTab::Tags;
             app.library.renaming_tag = Some(tag.clone());
             app.library.tag_rename_input = tag;
             return operation::focus(Id::new(LIBRARY_TAG_RENAME_INPUT_ID));
@@ -2742,32 +2943,6 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 ConfirmationAction::DeleteLibrary(library_id) => Message::DeleteLibrary(library_id),
             });
         }
-        Message::SelectionToolbarActionSelected(action) => {
-            app.chrome.open_selection_menu = None;
-            return Task::done(match action {
-                SelectionToolbarAction::AddTag => Message::BulkAddTag,
-                SelectionToolbarAction::RemoveTag => Message::BulkRemoveTag,
-                SelectionToolbarAction::AddToFolder => Message::BulkAddToCurrentFolder,
-                SelectionToolbarAction::RemoveFromFolder => Message::BulkRemoveFromCurrentFolder,
-                SelectionToolbarAction::SaveDetails => Message::SaveDetailsMetadata,
-                SelectionToolbarAction::ResetDetails => {
-                    let Some(entry_id) = app.library.details_entry_id.clone() else {
-                        return Task::none();
-                    };
-                    Message::RequestConfirmation(ConfirmationAction::ResetDetailsMetadata(entry_id))
-                }
-                SelectionToolbarAction::SortTitles => Message::BulkApplyTitleSortCleanup,
-                SelectionToolbarAction::RefreshMetadata => Message::BulkRefreshPdfMetadata,
-                SelectionToolbarAction::ResetMetadata => {
-                    Message::RequestConfirmation(ConfirmationAction::BulkResetDisplayMetadata)
-                }
-                SelectionToolbarAction::RebuildThumbnails => Message::BulkRebuildThumbnails,
-                SelectionToolbarAction::Reindex => Message::BulkReindex,
-                SelectionToolbarAction::DeleteMetadata => {
-                    Message::RequestConfirmation(ConfirmationAction::BulkDeleteFromLibrary)
-                }
-            });
-        }
         Message::DetailsTitleChanged(value) => {
             app.library.details_title_input = value
                 .chars()
@@ -2847,6 +3022,18 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 Some(format!("Opening folder for {}...", entry_title(&entry)));
             return open_file_manager_task(entry.path, false);
         }
+        Message::CopyEntryFilePath(entry_id) => {
+            let Some(entry) = app
+                .active_library_entries()
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .cloned()
+            else {
+                return Task::none();
+            };
+            app.library.library_status = Some(String::from("File path copied."));
+            return clipboard::write(entry.path.display().to_string());
+        }
         Message::RelinkMissingEntry(entry_id) => {
             return relink_file_dialog_task(entry_id);
         }
@@ -2895,6 +3082,141 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 .filter(|ch| !ch.is_control())
                 .take(80)
                 .collect();
+        }
+        Message::InspectorTagInputChanged(value) => {
+            app.library.inspector_tag_input = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(120)
+                .collect();
+            app.library.inspector_tag_suggestions_open =
+                !app.library.inspector_tag_input.trim().is_empty();
+            app.library.inspector_tag_highlighted_index = 0;
+        }
+        Message::InspectorApplyTag(tag) => {
+            let tag = tag.trim().to_owned();
+            if tag.is_empty() || app.library.selected_library_entries.is_empty() {
+                return Task::none();
+            }
+            app.library.inspector_tag_input.clear();
+            app.library.inspector_tag_suggestions_open = false;
+            app.library.inspector_tag_highlighted_index = 0;
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            app.start_bulk_operation_progress("Adding tag to", entry_ids.len());
+            return bulk_operation_task(
+                Arc::clone(&app.db),
+                entry_ids,
+                String::from("Tagged"),
+                String::from("Add Tag"),
+                move |db, entry_id| db.add_tag(entry_id, &tag),
+            );
+        }
+        Message::InspectorAddTag => {
+            let tags = app
+                .library
+                .inspector_tag_input
+                .split(',')
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            if tags.is_empty() || app.library.selected_library_entries.is_empty() {
+                return Task::none();
+            }
+            app.library.inspector_tag_input.clear();
+            app.library.inspector_tag_suggestions_open = false;
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            app.start_bulk_operation_progress("Adding tags to", entry_ids.len());
+            return bulk_operation_task(
+                Arc::clone(&app.db),
+                entry_ids,
+                String::from("Tagged"),
+                String::from("Add Tags"),
+                move |db, entry_id| {
+                    for tag in &tags {
+                        db.add_tag(entry_id, tag)?;
+                    }
+                    Ok(())
+                },
+            );
+        }
+        Message::InspectorRemoveTag { entry_id, tag } => {
+            app.start_bulk_operation_progress("Removing tag from", 1);
+            return bulk_operation_task(
+                Arc::clone(&app.db),
+                vec![entry_id],
+                String::from("Removed tag from"),
+                String::from("Remove Tag"),
+                move |db, entry_id| db.remove_tag(entry_id, &tag),
+            );
+        }
+        Message::InspectorRemoveTagFromSelection(tag) => {
+            let entry_ids = app
+                .library
+                .selected_library_entries
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            if entry_ids.is_empty() {
+                return Task::none();
+            }
+            app.start_bulk_operation_progress("Removing tag from", entry_ids.len());
+            return bulk_operation_task(
+                Arc::clone(&app.db),
+                entry_ids,
+                String::from("Removed tag from"),
+                String::from("Remove Tag"),
+                move |db, entry_id| db.remove_tag(entry_id, &tag),
+            );
+        }
+        Message::OpenTagManager => {
+            app.library.tag_manager_open = true;
+            app.library.tag_manager_filter.clear();
+            app.library.tag_manager_merge_destination.clear();
+        }
+        Message::CloseTagManager => {
+            app.library.tag_manager_open = false;
+            app.library.tag_manager_filter.clear();
+            app.library.tag_manager_merge_destination.clear();
+        }
+        Message::TagManagerFilterChanged(value) => {
+            app.library.tag_manager_filter = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(120)
+                .collect();
+        }
+        Message::TagManagerMergeDestinationChanged(value) => {
+            app.library.tag_manager_merge_destination = value
+                .chars()
+                .filter(|ch| !ch.is_control())
+                .take(120)
+                .collect();
+        }
+        Message::MergeTag {
+            source,
+            destination,
+        } => {
+            let destination = destination.trim().to_owned();
+            if source.trim().is_empty() || destination.is_empty() || source == destination {
+                return Task::none();
+            }
+            app.library.tag_manager_open = false;
+            app.library.tag_manager_filter.clear();
+            app.library.tag_manager_merge_destination.clear();
+            app.library.renaming_tag = None;
+            app.library.tag_rename_input.clear();
+            return rename_tag_task(Arc::clone(&app.db), source, destination);
         }
         Message::BulkAddTag => {
             let tag = app.library.bulk_tag_input.trim().to_owned();
@@ -3136,6 +3458,114 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 start_auto_sync_now(app),
             ]);
         }
+        Message::OpenExportDialog(source) => {
+            app.library.export_dialog = Some(LibraryExportDialog::new(source));
+            app.library.last_export_summary = None;
+        }
+        Message::CloseExportDialog => {
+            app.library.export_dialog = None;
+            app.library.export_progress = None;
+            app.library.last_export_summary = None;
+        }
+        Message::ExportDestinationSelected(path) => {
+            if let Some(dialog) = app.library.export_dialog.as_mut() {
+                dialog.destination = Some(path);
+            }
+        }
+        Message::ChooseExportDestination => return export_destination_dialog_task(),
+        Message::ExportModeChanged(mode) => {
+            if let Some(dialog) = app.library.export_dialog.as_mut() {
+                dialog.mode = mode;
+            }
+        }
+        Message::ExportFilenameTemplateChanged(template) => {
+            if let Some(dialog) = app.library.export_dialog.as_mut() {
+                dialog.filename_template = template;
+            }
+        }
+        Message::ExportMetadataCsvToggled(value) => {
+            if let Some(dialog) = app.library.export_dialog.as_mut() {
+                dialog.include_metadata_csv = value;
+            }
+        }
+        Message::ExportMetadataJsonToggled(value) => {
+            if let Some(dialog) = app.library.export_dialog.as_mut() {
+                dialog.include_metadata_json = value;
+            }
+        }
+        Message::ExportTagsToggled(value) => {
+            if let Some(dialog) = app.library.export_dialog.as_mut() {
+                dialog.include_tags = value;
+            }
+        }
+        Message::ExportReadingProgressToggled(value) => {
+            if let Some(dialog) = app.library.export_dialog.as_mut() {
+                dialog.include_reading_progress = value;
+            }
+        }
+        Message::ExportConflictBehaviorChanged(value) => {
+            if let Some(dialog) = app.library.export_dialog.as_mut() {
+                dialog.conflict_behavior = value;
+            }
+        }
+        Message::StartExport => {
+            let Some(dialog) = app.library.export_dialog.clone() else {
+                return Task::none();
+            };
+            if dialog.destination.is_none() {
+                return export_destination_dialog_task();
+            }
+            let entries = export_entries_for_source(app, &dialog.source);
+            if entries.is_empty() {
+                app.library.library_error =
+                    Some(String::from("There are no PDFs available for this export."));
+                return Task::none();
+            }
+            app.library.export_progress = Some(LibraryExportProgress {
+                label: String::from("Exporting PDFs"),
+                total: entries.len(),
+                started_at: Instant::now(),
+            });
+            return export_library_entries_task(entries, dialog);
+        }
+        Message::ExportFinished(result) => {
+            app.library.export_progress = None;
+            match result {
+                Ok(summary) => {
+                    app.library.library_status = Some(format!(
+                        "Exported {} PDFs to {}{}",
+                        summary.exported,
+                        summary.destination.display(),
+                        if summary.skipped == 0 {
+                            String::new()
+                        } else {
+                            format!(" ({} skipped)", summary.skipped)
+                        }
+                    ));
+                    if summary.errors.is_empty() {
+                        app.library.library_error = None;
+                    } else {
+                        app.library.library_error = Some(summary.errors.join("\n"));
+                    }
+                    app.library.last_export_summary = Some(summary);
+                }
+                Err(error) => {
+                    app.library.library_error = Some(error);
+                    app.library.library_status = Some(String::from("Export failed."));
+                }
+            }
+        }
+        Message::RevealExportedFolder => {
+            if let Some(summary) = app.library.last_export_summary.as_ref() {
+                return open_file_manager_task(summary.destination.clone(), false);
+            }
+        }
+        Message::CopyExportPath => {
+            if let Some(summary) = app.library.last_export_summary.as_ref() {
+                app.library.library_status = Some(String::from("Export path copied."));
+                return clipboard::write(summary.destination.display().to_string());
+            }
+        }
         Message::FolderAssignmentFinished {
             folder_id,
             label,
@@ -3243,7 +3673,11 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             return with_session_save(app.scroll_to_selected_viewer_find_match(), app);
         }
         Message::CloseOverlay => {
-            if app.libraries.name_dialog.is_some() {
+            if app.chrome.command_palette_open {
+                app.chrome.command_palette_open = false;
+                app.chrome.command_palette_query.clear();
+                app.chrome.command_palette_selected_index = 0;
+            } else if app.libraries.name_dialog.is_some() {
                 app.libraries.name_dialog = None;
                 app.libraries.new_library_name.clear();
             } else if app.libraries.open_menu_library_id.is_some() {
@@ -3263,17 +3697,27 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.library.create_folder_dialog_open = false;
             } else if app.library.move_picker.is_some() {
                 app.library.move_picker = None;
+            } else if app.library.import_menu_open {
+                app.library.import_menu_open = false;
             } else if app.library.raindrop_connect_dialog_open {
                 app.library.raindrop_connect_dialog_open = false;
             } else if app.library.raindrop_import_dialog_open {
                 app.library.raindrop_import_dialog_open = false;
+            } else if app.library.import_review.is_some() {
+                app.library.import_review = None;
+            } else if app.library.tag_manager_open {
+                app.library.tag_manager_open = false;
+                app.library.tag_manager_filter.clear();
+                app.library.tag_manager_merge_destination.clear();
+            } else if app.library.export_dialog.is_some()
+                || app.library.export_progress.is_some()
+                || app.library.last_export_summary.is_some()
+            {
+                app.library.export_dialog = None;
+                app.library.export_progress = None;
+                app.library.last_export_summary = None;
             } else if app.chrome.pending_confirmation.is_some() {
                 app.chrome.pending_confirmation = None;
-            } else if app.chrome.open_app_menu.is_some() {
-                app.chrome.open_app_menu = None;
-                app.chrome.open_view_menu_flyout = None;
-            } else if app.chrome.open_selection_menu.is_some() {
-                app.chrome.open_selection_menu = None;
             } else if app.chrome.open_context_menu.is_some() {
                 app.chrome.open_context_menu = None;
             } else {
@@ -3408,8 +3852,7 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if app.mode == AppMode::Library {
                 app.recalculate_library_viewport_width();
                 app.library.library_viewport_height =
-                    (app.viewer.viewport_height - app_menu_bar_height(app) - Spacing::LG * 2.0)
-                        .max(1.0);
+                    (app.viewer.viewport_height - Spacing::LG * 2.0).max(1.0);
                 return with_session_save(app.request_visible_thumbnails(), app);
             }
             return with_session_save(app.apply_active_dimension_zoom(), app);
@@ -3548,6 +3991,14 @@ pub(super) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if matches!(preset, ZoomPreset::PageWidth) {
                 app.viewer.horizontal_offset = 0.0;
             }
+            return with_session_save(task, app);
+        }
+        Message::ViewerScrollModeSelected(mode) => {
+            let task = app.set_viewer_scroll_mode(mode);
+            return with_session_save(task, app);
+        }
+        Message::ViewerSpreadModeSelected(mode) => {
+            let task = app.set_viewer_spread_mode(mode);
             return with_session_save(task, app);
         }
         _ => {}

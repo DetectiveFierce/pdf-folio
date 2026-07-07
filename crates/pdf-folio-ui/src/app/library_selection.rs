@@ -99,7 +99,6 @@ impl PDFolioApp {
     pub(super) fn clear_library_selection(&mut self) {
         self.library.selected_library_entries.clear();
         self.library.library_selection_anchor = None;
-        self.chrome.open_selection_menu = None;
         if self.library.trash_view_active {
             self.library.details_folder_id = None;
             self.library.folder_details_sidebar_open = false;
@@ -140,6 +139,7 @@ impl PDFolioApp {
     pub(super) fn open_folder_from_tree(&mut self, folder_id: Option<FolderId>) {
         self.library.trash_view_active = false;
         self.library.selected_folder = folder_id.clone();
+        self.library.active_recently_opened_filter = false;
         self.library.previous_tag_pill_view = None;
         self.select_folder_in_tree(folder_id);
         self.library.library_drag = None;

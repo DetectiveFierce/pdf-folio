@@ -19,6 +19,7 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
         }) => {
             let captured_global_shortcut = is_ctrl_character(&key, text.as_deref(), modifiers, "f")
                 || is_ctrl_character(&key, text.as_deref(), modifiers, "c")
+                || is_ctrl_character(&key, text.as_deref(), modifiers, "k")
                 || is_escape(&key);
             if status == event::Status::Captured && !captured_global_shortcut {
                 return None;
@@ -33,6 +34,9 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
                 }
                 (_, Some("g") | Some("G")) if modifiers.control() => {
                     Some(Message::ShortcutPressed(Shortcut::Jump))
+                }
+                (key, text) if is_ctrl_character(key, text, modifiers, "k") => {
+                    Some(Message::ShortcutPressed(Shortcut::OpenCommandPalette))
                 }
                 (key, text) if is_ctrl_character(key, text, modifiers, "c") => {
                     Some(Message::ShortcutPressed(Shortcut::Copy))
@@ -71,6 +75,12 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
                 }
                 (key, text) if is_ctrl_character(key, text, modifiers, "f") => {
                     Some(Message::ShortcutPressed(Shortcut::FocusSearch))
+                }
+                (_, Some("i") | Some("I")) if status != event::Status::Captured => {
+                    Some(Message::ShortcutPressed(Shortcut::ToggleLibraryInspector))
+                }
+                (_, Some("b") | Some("B")) if status != event::Status::Captured => {
+                    Some(Message::ShortcutPressed(Shortcut::ToggleLibrarySidebar))
                 }
                 (_, Some("a") | Some("A")) if modifiers.control() => {
                     Some(Message::ShortcutPressed(Shortcut::SelectAll))
@@ -168,9 +178,65 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_k_opens_palette_even_when_event_is_captured() {
+        let message = keyboard_event_message(ctrl_key_event("k", None), event::Status::Captured);
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::OpenCommandPalette))
+        ));
+    }
+
+    #[test]
     fn captured_non_ctrl_shortcuts_are_ignored() {
         let message = keyboard_event_message(
             key_event("f", None, keyboard::Modifiers::default()),
+            event::Status::Captured,
+        );
+
+        assert!(message.is_none());
+    }
+
+    #[test]
+    fn i_toggles_library_inspector_when_event_is_not_captured() {
+        let message = keyboard_event_message(
+            key_event("i", Some("i"), keyboard::Modifiers::default()),
+            event::Status::Ignored,
+        );
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::ToggleLibraryInspector))
+        ));
+    }
+
+    #[test]
+    fn i_does_not_toggle_library_inspector_when_event_is_captured() {
+        let message = keyboard_event_message(
+            key_event("i", Some("i"), keyboard::Modifiers::default()),
+            event::Status::Captured,
+        );
+
+        assert!(message.is_none());
+    }
+
+    #[test]
+    fn b_toggles_library_sidebar_when_event_is_not_captured() {
+        let message = keyboard_event_message(
+            key_event("b", Some("b"), keyboard::Modifiers::default()),
+            event::Status::Ignored,
+        );
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::ToggleLibrarySidebar))
+        ));
+    }
+
+    #[test]
+    fn b_does_not_toggle_library_sidebar_when_event_is_captured() {
+        let message = keyboard_event_message(
+            key_event("b", Some("b"), keyboard::Modifiers::default()),
             event::Status::Captured,
         );
 

@@ -127,6 +127,41 @@ pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
     .into()
 }
 
+pub(crate) fn view_import_menu_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let mut actions = column![].spacing(Spacing::SM);
+    if command_visible(app, CommandId::ImportPdf, CommandSurface::ImportMenu) {
+        actions = actions.push(toolbar_button("Import PDFs", tokens).on_press(
+            command_message(app, CommandId::ImportPdf).unwrap_or(Message::ImportPdfDialog),
+        ));
+    }
+    if command_visible(app, CommandId::ImportFolder, CommandSurface::ImportMenu) {
+        actions = actions.push(toolbar_button("Import Folder", tokens).on_press(
+            command_message(app, CommandId::ImportFolder).unwrap_or(Message::ImportFolderDialog),
+        ));
+    }
+    if command_visible(app, CommandId::ImportRaindrop, CommandSurface::ImportMenu) {
+        actions = actions.push(toolbar_button("Import from Raindrop", tokens).on_press(
+            command_message(app, CommandId::ImportRaindrop).unwrap_or(Message::ImportRaindrop),
+        ));
+    }
+
+    let dialog = column![
+        text("Import")
+            .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
+            .color(tokens.text_primary),
+        actions,
+        row![toolbar_button("Cancel", tokens).on_press(Message::CloseImportMenu)]
+            .spacing(Spacing::SM)
+            .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::LG);
+
+    modal_container(app, tokens, dialog, "ImportMenuDialog", 360.0)
+}
+
 fn delete_folder_count_card<'a>(
     label: &'a str,
     count: usize,
@@ -225,6 +260,373 @@ pub(crate) fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message
     container(
         container(dialog)
             .width(app.layout().metric("CreateFolderDialog", "width", 420.0))
+            .style(move |_| container_style(tokens, Class::JumpOverlay)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center(Length::Fill)
+    .style(move |_| container_style(tokens, Class::PresentationOverlay))
+    .into()
+}
+
+pub(crate) fn view_import_review_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let Some(review) = app.library.import_review.as_ref() else {
+        return container("").into();
+    };
+    let mut details = column![
+        sidebar_detail_row(
+            "Imported",
+            format_count(review.imported_count, "new PDF"),
+            360.0,
+            tokens
+        ),
+        sidebar_detail_row(
+            "Duplicates",
+            format_count(review.duplicate_count, "PDF"),
+            360.0,
+            tokens
+        ),
+        sidebar_detail_row(
+            "Failed",
+            format_count(review.failed_count, "PDF"),
+            360.0,
+            tokens
+        ),
+        sidebar_detail_row(
+            "Destination",
+            review.destination_label.clone(),
+            360.0,
+            tokens
+        ),
+    ]
+    .spacing(Spacing::SM);
+    if !review.errors.is_empty() {
+        details = details.push(
+            container(
+                text(review.errors.join("\n"))
+                    .size(FontSize::SM)
+                    .font(ui_font(FontWeight::REGULAR))
+                    .color(tokens.text_secondary),
+            )
+            .padding(Spacing::SM)
+            .style(move |_| container_style(tokens, Class::ErrorBanner)),
+        );
+    }
+
+    let dialog = column![
+        text(&review.title)
+            .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
+            .color(tokens.text_primary),
+        text("Review the PDFs that just finished importing.")
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::REGULAR))
+            .color(tokens.text_secondary),
+        details,
+        text_input(
+            "Tags to add to selected imported PDFs",
+            &app.library.inspector_tag_input
+        )
+        .on_input(Message::InspectorTagInputChanged)
+        .on_submit(Message::InspectorAddTag)
+        .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+        .width(Length::Fill),
+        row![
+            toolbar_button("Select imported", tokens).on_press(Message::SelectImportReviewEntries),
+            toolbar_button("Add tag", tokens).on_press(Message::InspectorAddTag),
+            toolbar_button("Move", tokens).on_press(Message::OpenMoveSelectionDialog),
+            toolbar_button("Done", tokens).on_press(Message::CloseImportReview),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::LG);
+
+    modal_container(app, tokens, dialog, "ImportReviewDialog", 500.0)
+}
+
+pub(crate) fn view_export_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    if let Some(summary) = app.library.last_export_summary.as_ref() {
+        let dialog = column![
+            text("Export Complete")
+                .size(FontSize::HEADING)
+                .font(display_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary),
+            text(format!(
+                "Exported {} PDFs to {}.",
+                summary.exported,
+                summary.destination.display()
+            ))
+            .size(FontSize::MD)
+            .color(tokens.text_secondary),
+            row![
+                toolbar_button("Reveal", tokens).on_press(Message::RevealExportedFolder),
+                toolbar_button("Copy path", tokens).on_press(Message::CopyExportPath),
+                toolbar_button("Close", tokens).on_press(Message::CloseExportDialog),
+            ]
+            .spacing(Spacing::SM)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(Spacing::MD)
+        .padding(Spacing::LG);
+        return modal_container(app, tokens, dialog, "ExportDialog", 520.0);
+    }
+    if let Some(progress) = app.library.export_progress.as_ref() {
+        let elapsed = app
+            .library
+            .animation_now
+            .saturating_duration_since(progress.started_at)
+            .as_secs_f32();
+        let dialog = column![
+            text(&progress.label)
+                .size(FontSize::HEADING)
+                .font(display_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary),
+            text(format!("Preparing {} PDFs.", progress.total))
+                .size(FontSize::MD)
+                .color(tokens.text_secondary),
+            progress_bar(indeterminate_progress_value(elapsed), tokens),
+        ]
+        .spacing(Spacing::MD)
+        .padding(Spacing::LG);
+        return modal_container(app, tokens, dialog, "ExportDialog", 520.0);
+    }
+    let Some(dialog_state) = app.library.export_dialog.as_ref() else {
+        return container("").into();
+    };
+
+    let destination = dialog_state
+        .destination
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| String::from("Choose a destination folder"));
+    let dialog = column![
+        text("Export PDFs")
+            .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
+            .color(tokens.text_primary),
+        sidebar_detail_row("Destination", destination, 430.0, tokens),
+        row![
+            toolbar_button("Choose folder", tokens).on_press(Message::ChooseExportDestination),
+            export_choice_button(
+                "Flat",
+                dialog_state.mode == ExportMode::CopyFlat,
+                Message::ExportModeChanged(ExportMode::CopyFlat),
+                tokens
+            ),
+            export_choice_button(
+                "Folders",
+                dialog_state.mode == ExportMode::PreserveFolders,
+                Message::ExportModeChanged(ExportMode::PreserveFolders),
+                tokens
+            ),
+            export_choice_button(
+                "ZIP",
+                dialog_state.mode == ExportMode::Zip,
+                Message::ExportModeChanged(ExportMode::Zip),
+                tokens
+            ),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+        row![
+            export_choice_button(
+                "Original",
+                dialog_state.filename_template == ExportFilenameTemplate::OriginalFilename,
+                Message::ExportFilenameTemplateChanged(ExportFilenameTemplate::OriginalFilename),
+                tokens
+            ),
+            export_choice_button(
+                "Title",
+                dialog_state.filename_template == ExportFilenameTemplate::Title,
+                Message::ExportFilenameTemplateChanged(ExportFilenameTemplate::Title),
+                tokens
+            ),
+            export_choice_button(
+                "Author-title",
+                dialog_state.filename_template == ExportFilenameTemplate::AuthorTitle,
+                Message::ExportFilenameTemplateChanged(ExportFilenameTemplate::AuthorTitle),
+                tokens
+            ),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+        row![
+            checkbox(dialog_state.include_metadata_csv)
+                .label("metadata.csv")
+                .on_toggle(Message::ExportMetadataCsvToggled)
+                .text_size(FontSize::SM),
+            checkbox(dialog_state.include_metadata_json)
+                .label("metadata.json")
+                .on_toggle(Message::ExportMetadataJsonToggled)
+                .text_size(FontSize::SM),
+        ]
+        .spacing(Spacing::SM),
+        row![
+            checkbox(dialog_state.include_tags)
+                .label("tags")
+                .on_toggle(Message::ExportTagsToggled)
+                .text_size(FontSize::SM),
+            checkbox(dialog_state.include_reading_progress)
+                .label("reading progress")
+                .on_toggle(Message::ExportReadingProgressToggled)
+                .text_size(FontSize::SM),
+        ]
+        .spacing(Spacing::SM),
+        row![
+            export_choice_button(
+                "Skip",
+                dialog_state.conflict_behavior == ExportConflictBehavior::Skip,
+                Message::ExportConflictBehaviorChanged(ExportConflictBehavior::Skip),
+                tokens
+            ),
+            export_choice_button(
+                "Overwrite",
+                dialog_state.conflict_behavior == ExportConflictBehavior::Overwrite,
+                Message::ExportConflictBehaviorChanged(ExportConflictBehavior::Overwrite),
+                tokens
+            ),
+            export_choice_button(
+                "Keep both",
+                dialog_state.conflict_behavior == ExportConflictBehavior::KeepBoth,
+                Message::ExportConflictBehaviorChanged(ExportConflictBehavior::KeepBoth),
+                tokens
+            ),
+        ]
+        .spacing(Spacing::SM),
+        row![
+            toolbar_button("Cancel", tokens).on_press(Message::CloseExportDialog),
+            toolbar_button("Export", tokens).on_press(Message::StartExport),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::LG);
+
+    modal_container(app, tokens, dialog, "ExportDialog", 560.0)
+}
+
+pub(crate) fn view_tag_manager_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let query = app.library.tag_manager_filter.trim().to_lowercase();
+    let destination = app.library.tag_manager_merge_destination.trim().to_owned();
+    let mut list = column![].spacing(Spacing::XS);
+    for tag in app
+        .all_tags()
+        .into_iter()
+        .filter(|tag| query.is_empty() || tag.to_lowercase().contains(&query))
+        .take(40)
+    {
+        let count = app
+            .library
+            .library_entries
+            .iter()
+            .filter(|entry| entry.tags.iter().any(|entry_tag| entry_tag == &tag))
+            .count();
+        let mut row = row![
+            text(tag.clone())
+                .size(FontSize::MD)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary)
+                .width(Length::Fill),
+            text(format_count(count, "PDF"))
+                .size(FontSize::SM)
+                .color(tokens.text_secondary),
+            toolbar_button("Rename", tokens).on_press(Message::StartTagRename(tag.clone())),
+            toolbar_button("Delete", tokens).on_press(Message::RequestConfirmation(
+                ConfirmationAction::DeleteTag(tag.clone()),
+            )),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center);
+        if !destination.is_empty() && destination != tag {
+            row = row.push(toolbar_button("Merge", tokens).on_press(Message::MergeTag {
+                source: tag.clone(),
+                destination: destination.clone(),
+            }));
+        }
+        list = list.push(
+            container(row)
+                .padding(Spacing::SM)
+                .style(move |_| container_style(tokens, Class::SidebarDetailRow)),
+        );
+    }
+
+    let dialog = column![
+        text("Tag Manager")
+            .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
+            .color(tokens.text_primary),
+        text_input("Filter tags", &app.library.tag_manager_filter)
+            .on_input(Message::TagManagerFilterChanged)
+            .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+            .width(Length::Fill),
+        text_input(
+            "Merge destination tag",
+            &app.library.tag_manager_merge_destination
+        )
+        .on_input(Message::TagManagerMergeDestinationChanged)
+        .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
+        .width(Length::Fill),
+        scrollable(list).height(
+            app.layout()
+                .metric("TagManagerDialog", "list_height", 360.0)
+        ),
+        row![
+            toolbar_button("Close", tokens).on_press(Message::CloseTagManager),
+            toolbar_button("Clear filter", tokens)
+                .on_press(Message::TagManagerFilterChanged(String::new())),
+            toolbar_button("Clear merge", tokens)
+                .on_press(Message::TagManagerMergeDestinationChanged(String::new())),
+        ]
+        .spacing(Spacing::SM),
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::LG);
+
+    modal_container(app, tokens, dialog, "TagManagerDialog", 640.0)
+}
+
+fn export_choice_button<'a>(
+    label: &'a str,
+    active: bool,
+    message: Message,
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
+    button(
+        text(label)
+            .size(FontSize::SM)
+            .font(ui_font(if active {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::MEDIUM
+            }))
+            .color(if active {
+                tokens.text_primary
+            } else {
+                tokens.text_secondary
+            })
+            .wrapping(Wrapping::None),
+    )
+    .padding([Spacing::SM, Spacing::MD])
+    .on_press(message)
+    .style(move |_, status| button_style(tokens, Class::ToolbarButton, status))
+}
+
+fn modal_container<'a>(
+    app: &'a PDFolioApp,
+    tokens: ThemeTokens,
+    dialog: iced::widget::Column<'a, Message>,
+    metric_group: &'static str,
+    fallback_width: f32,
+) -> Element<'a, Message> {
+    container(
+        container(dialog)
+            .width(app.layout().metric(metric_group, "width", fallback_width))
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)

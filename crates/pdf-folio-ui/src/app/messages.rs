@@ -14,157 +14,16 @@ use pdf_folio_raindrop::{
     RaindropImportDestination, RaindropImportPreview, RaindropImportProgress, RaindropImportSummary,
 };
 
+use crate::app_commands::CommandId;
 use crate::library::state::{LibraryMetadataDensity, LibraryReadingFilter};
 use crate::library::thumbnails::ThumbnailSize;
 use crate::style::StyleBook;
 use crate::viewer::state::{ViewerScrollMode, ViewerSpreadMode};
 use crate::viewer::zoom::ZoomPreset;
-use crate::Settings;
-
-/// Top-level application menu groups.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppMenu {
-    /// File and import commands.
-    File,
-    /// Selection and metadata editing commands.
-    Edit,
-    /// Layout, theme, navigation, and zoom commands.
-    View,
-    /// Open-PDF reading commands.
-    Document,
-    /// Library organization and maintenance commands.
-    Library,
-    /// Long-running library maintenance commands.
-    Tools,
-    /// Product help and status commands.
-    Help,
-}
-
-impl AppMenu {
-    /// User-facing menu title.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::File => "File",
-            Self::Edit => "Edit",
-            Self::View => "View",
-            Self::Document => "Document",
-            Self::Library => "Library",
-            Self::Tools => "Tools",
-            Self::Help => "Help",
-        }
-    }
-}
-
-/// Concrete actions launched from the application menu bar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppMenuAction {
-    /// Open a PDF from disk.
-    OpenFile,
-    /// Import PDFs from a folder.
-    ImportFolder,
-    /// Import a single PDF into the library.
-    ImportPdf,
-    /// Import PDFs from Raindrop.io.
-    ImportRaindrop,
-    /// Return from the viewer to the library.
-    BackToLibrary,
-    /// Reload the library from storage.
-    RefreshLibrary,
-    /// Select all visible PDFs.
-    SelectAllVisible,
-    /// Clear selected PDFs.
-    ClearSelection,
-    /// Undo the latest library organization edit.
-    UndoLibraryAction,
-    /// Redo the next library organization edit.
-    RedoLibraryAction,
-    /// Cut selected library PDFs or folder.
-    CutLibrarySelection,
-    /// Copy selected library PDFs or folder.
-    CopyLibrarySelection,
-    /// Paste the internal library clipboard.
-    PasteLibraryClipboard,
-    /// Save the current single-PDF metadata edit.
-    SaveDetails,
-    /// Reset the current single-PDF metadata edit.
-    ResetDetails,
-    /// Add the typed bulk tag.
-    AddTag,
-    /// Remove the typed bulk tag.
-    RemoveTag,
-    /// Add selection to the active folder.
-    AddToFolder,
-    /// Remove selection from the active folder.
-    RemoveFromFolder,
-    /// Move the selected PDFs to a chosen library folder or root.
-    MoveTo,
-    /// Move selected PDFs to the Trash Can.
-    DeleteFromLibrary,
-    /// Toggle grid/list library layout.
-    ToggleLayout,
-    /// Toggle the light/dark theme.
-    ToggleTheme,
-    /// Reload KDL style files.
-    ReloadStyles,
-    /// Toggle the viewer table-of-contents panel.
-    ToggleToc,
-    /// Open the jump-to-page dialog.
-    JumpToPage,
-    /// Open find-in-document for the active PDF.
-    FindInDocument,
-    /// Increase viewer zoom.
-    ZoomIn,
-    /// Decrease viewer zoom.
-    ZoomOut,
-    /// Reset viewer zoom.
-    ResetZoom,
-    /// Change viewer page scrolling behavior.
-    SetViewerScrollMode(ViewerScrollMode),
-    /// Change viewer spread pairing behavior.
-    SetViewerSpreadMode(ViewerSpreadMode),
-    /// Change the library sort mode.
-    SortLibrary(LibrarySortMode),
-    /// Toggle the missing-files library filter.
-    ToggleMissingFiles,
-    /// Create a folder under the active folder.
-    CreateFolder,
-    /// Clear display metadata for selected PDFs.
-    ResetMetadata,
-    /// Apply title sort cleanup to selected PDFs.
-    SortTitles,
-    /// Refresh selected PDF metadata.
-    RefreshMetadata,
-    /// Rebuild selected PDF thumbnails.
-    RebuildThumbnails,
-    /// Reindex selected PDFs for full-text search.
-    Reindex,
-    /// Restore the library view shown before drilling into a tag pill.
-    RestoreTagPillView,
-}
-
-/// Right-opening submenus nested inside the View menu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewMenuFlyout {
-    /// Viewer scrolling behavior options.
-    Scrolling,
-    /// Viewer spread behavior options.
-    Spreads,
-}
-
-/// Contextual menus shown inside the selected-PDF menu strip.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelectionMenu {
-    /// Single-selection metadata actions.
-    More,
-    /// Bulk tag actions.
-    Tags,
-    /// Bulk folder membership actions.
-    Folders,
-    /// Bulk metadata actions.
-    Metadata,
-    /// Bulk maintenance actions.
-    Maintenance,
-}
+use crate::{
+    ExportConflictBehavior, ExportFilenameTemplate, ExportMode, ExportSource, LibraryExportSummary,
+    Settings,
+};
 
 /// Right-click surfaces that can show contextual actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +49,7 @@ pub enum ContextMenuAction {
     ClearSelection,
     AddTag,
     MoveTo,
+    Export,
     RevealInFileManager,
     OpenContainingFolder,
     RelinkMissingFile,
@@ -245,61 +105,6 @@ pub enum ConfirmationAction {
     DeleteTag(String),
     /// Delete a whole discrete library database.
     DeleteLibrary(String),
-}
-
-/// Top selection-toolbar actions chosen from compact dropdown menus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelectionToolbarAction {
-    /// Add the typed tag to selected PDFs.
-    AddTag,
-    /// Remove the typed tag from selected PDFs.
-    RemoveTag,
-    /// Add selected PDFs to the active folder.
-    AddToFolder,
-    /// Remove selected PDFs from the active folder.
-    RemoveFromFolder,
-    /// Save the single selected PDF metadata edits.
-    SaveDetails,
-    /// Reset the single selected PDF metadata edits.
-    ResetDetails,
-    /// Recompute title sort keys.
-    SortTitles,
-    /// Refresh extracted PDF metadata.
-    RefreshMetadata,
-    /// Clear selected PDF display metadata overrides.
-    ResetMetadata,
-    /// Rebuild cover thumbnails.
-    RebuildThumbnails,
-    /// Reindex full text.
-    Reindex,
-    /// Move selected PDFs to the Trash Can.
-    DeleteMetadata,
-}
-
-impl SelectionToolbarAction {
-    /// User-facing menu label.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::AddTag => "Add tag",
-            Self::RemoveTag => "Remove tag",
-            Self::AddToFolder => "Add to folder",
-            Self::RemoveFromFolder => "Remove from folder",
-            Self::SaveDetails => "Save details",
-            Self::ResetDetails => "Reset details",
-            Self::SortTitles => "Sort titles",
-            Self::RefreshMetadata => "Refresh metadata",
-            Self::ResetMetadata => "Reset metadata",
-            Self::RebuildThumbnails => "Rebuild thumbnails",
-            Self::Reindex => "Reindex",
-            Self::DeleteMetadata => "Move to Trash",
-        }
-    }
-}
-
-impl std::fmt::Display for SelectionToolbarAction {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.label())
-    }
 }
 
 /// Main navigation tabs inside the library sidebar.
@@ -460,6 +265,10 @@ pub enum Message {
     CloseZoomMenu,
     /// Apply a named zoom preset.
     ZoomPresetSelected(ZoomPreset),
+    /// Set viewer scrolling behavior.
+    ViewerScrollModeSelected(ViewerScrollMode),
+    /// Set viewer spread behavior.
+    ViewerSpreadModeSelected(ViewerSpreadMode),
     /// A wheel zoom gesture has been idle long enough to render the final zoom level.
     ZoomRenderSettled(u64),
     /// Jump to a zero-based page.
@@ -504,6 +313,18 @@ pub enum Message {
     },
     /// Close the contextual right-click menu.
     ContextMenuClosed,
+    /// Open the Library command palette.
+    OpenCommandPalette,
+    /// Close the Library command palette.
+    CloseCommandPalette,
+    /// Update the command-palette query.
+    CommandPaletteQueryChanged(String),
+    /// Move the highlighted command by a signed delta.
+    CommandPaletteMoveSelection(i32),
+    /// Run the highlighted command.
+    CommandPaletteRunSelected,
+    /// Run a command from the shared command registry.
+    CommandPaletteRun(CommandId),
     /// A contextual menu action was chosen.
     ContextMenuActionSelected(ContextMenuAction),
     /// Show the viewer find-in-text bar.
@@ -601,6 +422,10 @@ pub enum Message {
     DismissLibraryError,
     /// A library operation completed with a user-facing status.
     LibraryStatus(String),
+    /// Open the unified import chooser.
+    OpenImportMenu,
+    /// Close the unified import chooser.
+    CloseImportMenu,
     /// Open the native folder picker for bulk import.
     ImportFolderDialog,
     /// The native folder picker selected an import directory.
@@ -611,6 +436,10 @@ pub enum Message {
     ImportPdfSelected(PathBuf),
     /// Bulk import finished.
     ImportFinished(ImportSummary),
+    /// Close the import review sheet.
+    CloseImportReview,
+    /// Select all PDFs from the latest import review.
+    SelectImportReviewEntries,
     /// Start importing PDFs from Raindrop.io.
     ImportRaindrop,
     /// Raindrop.io remote PDF preview loaded.
@@ -766,16 +595,28 @@ pub enum Message {
     CollapseLibrarySidebar,
     /// Expand the library tag sidebar.
     ExpandLibrarySidebar,
+    /// Toggle the library tag sidebar.
+    ToggleLibrarySidebar,
     /// Begin resizing the library tag sidebar.
     BeginTagSidebarResize,
     /// Resize the library tag sidebar to a new logical width.
     TagSidebarResizeDragged(f32),
     /// Finish resizing the library tag sidebar.
     EndTagSidebarResize,
+    /// Toggle the right-side Library inspector.
+    ToggleLibraryInspector,
+    /// Begin resizing the right-side Library inspector.
+    BeginLibraryInspectorResize,
+    /// Resize the right-side Library inspector from the current cursor x position.
+    LibraryInspectorResizeDragged(f32),
+    /// Finish resizing the right-side Library inspector.
+    EndLibraryInspectorResize,
     /// Switch the active library sidebar navigation tab.
     LibrarySidebarTabChanged(LibrarySidebarTab),
     /// Expand or collapse the library root node in the sidebar file tree.
     ToggleLibraryTreeRoot,
+    /// Expand or collapse the library tags section.
+    ToggleLibraryTags,
     /// Expand or collapse one folder node in the sidebar file tree.
     ToggleLibraryTreeFolder(FolderId),
     /// A filesystem watcher event arrived.
@@ -792,6 +633,8 @@ pub enum Message {
     RestoreLibraryViewBeforeTag,
     /// Reading-progress filter changed.
     ReadingFilterChanged(Option<LibraryReadingFilter>),
+    /// Recently-opened filter changed.
+    RecentlyOpenedFilterChanged(bool),
     /// Missing-files filter changed.
     MissingFilterChanged(bool),
     /// Selected library folder changed.
@@ -863,6 +706,26 @@ pub enum Message {
     EntryDeleted(EntryId),
     /// Bulk tag text changed.
     BulkTagInputChanged(String),
+    /// Inspector tag input changed.
+    InspectorTagInputChanged(String),
+    /// Apply an existing suggested tag from the inspector.
+    InspectorApplyTag(String),
+    /// Add the inspector tag input to selected PDFs.
+    InspectorAddTag,
+    /// Remove a tag from one entry through the inspector.
+    InspectorRemoveTag { entry_id: EntryId, tag: String },
+    /// Remove a tag from every selected PDF through the inspector.
+    InspectorRemoveTagFromSelection(String),
+    /// Open the tag manager modal.
+    OpenTagManager,
+    /// Close the tag manager modal.
+    CloseTagManager,
+    /// Tag manager filter changed.
+    TagManagerFilterChanged(String),
+    /// Tag manager merge destination changed.
+    TagManagerMergeDestinationChanged(String),
+    /// Merge one tag into another existing/new tag.
+    MergeTag { source: String, destination: String },
     /// Add the bulk tag to all selected PDFs.
     BulkAddTag,
     /// Remove the bulk tag from all selected PDFs.
@@ -891,8 +754,6 @@ pub enum Message {
     PermanentlyDeleteSelectedFolderFromTrash(FolderId),
     /// A trashed folder subtree was permanently deleted.
     TrashFolderPermanentlyDeleted { updated: usize, errors: Vec<String> },
-    /// A compact selection-toolbar menu action was chosen.
-    SelectionToolbarActionSelected(SelectionToolbarAction),
     /// Request confirmation before a destructive or overwriting library action.
     RequestConfirmation(ConfirmationAction),
     /// Run the currently pending destructive or overwriting library action.
@@ -913,6 +774,8 @@ pub enum Message {
     RevealEntryInFileManager(EntryId),
     /// Open the containing folder for one PDF.
     OpenEntryContainingFolder(EntryId),
+    /// Copy one PDF source file path.
+    CopyEntryFilePath(EntryId),
     /// Pick a replacement source file for a missing PDF.
     RelinkMissingEntry(EntryId),
     /// A replacement source file was chosen for a missing PDF.
@@ -932,6 +795,36 @@ pub enum Message {
         updated: usize,
         errors: Vec<String>,
     },
+    /// Open the library export dialog.
+    OpenExportDialog(ExportSource),
+    /// Close the library export dialog or completion sheet.
+    CloseExportDialog,
+    /// Native folder picker chose an export destination.
+    ExportDestinationSelected(PathBuf),
+    /// Open the native folder picker for an export destination.
+    ChooseExportDestination,
+    /// Export mode changed.
+    ExportModeChanged(ExportMode),
+    /// Export filename template changed.
+    ExportFilenameTemplateChanged(ExportFilenameTemplate),
+    /// Export metadata CSV option changed.
+    ExportMetadataCsvToggled(bool),
+    /// Export metadata JSON option changed.
+    ExportMetadataJsonToggled(bool),
+    /// Export tags option changed.
+    ExportTagsToggled(bool),
+    /// Export reading progress option changed.
+    ExportReadingProgressToggled(bool),
+    /// Export conflict behavior changed.
+    ExportConflictBehaviorChanged(ExportConflictBehavior),
+    /// Start the configured export.
+    StartExport,
+    /// Export finished.
+    ExportFinished(Result<LibraryExportSummary, String>),
+    /// Reveal the last export destination in the platform file manager.
+    RevealExportedFolder,
+    /// Copy the last export destination path.
+    CopyExportPath,
     /// A drag-to-folder assignment finished.
     FolderAssignmentFinished {
         folder_id: Option<FolderId>,
@@ -953,18 +846,6 @@ pub enum Message {
     ShortcutPressed(Shortcut),
     /// Settings changed.
     SettingsChanged(Settings),
-    /// Open or switch the active top-level menu.
-    AppMenuOpened(AppMenu),
-    /// Close the active top-level menu.
-    AppMenuClosed,
-    /// Run an action selected from the top-level menu.
-    AppMenuActionSelected(AppMenuAction),
-    /// Open a right-side flyout from the View menu.
-    ViewMenuFlyoutOpened(ViewMenuFlyout),
-    /// Open or switch the active selected-PDF contextual menu.
-    SelectionMenuOpened(SelectionMenu),
-    /// Close the active selected-PDF contextual menu.
-    SelectionMenuClosed,
 }
 
 /// Keyboard shortcuts handled by the Phase 1 viewer.
@@ -1010,6 +891,12 @@ pub enum Shortcut {
     Undo,
     /// Redo the latest undone library organization edit.
     Redo,
+    /// Open the Library command palette.
+    OpenCommandPalette,
+    /// Toggle the left-side Library sidebar.
+    ToggleLibrarySidebar,
+    /// Toggle the right-side Library inspector.
+    ToggleLibraryInspector,
     /// Close overlays or panels.
     Escape,
 }

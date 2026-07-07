@@ -222,5 +222,6 @@ impl PDFolioApp {
         self.library.library_drag = None;
         self.library.folder_drag = None;
         self.library.resizing_library_tag_sidebar = false;
+        self.library.resizing_library_inspector = false;
     }
 }

@@ -1,21 +1,19 @@
 //! App shell and viewer-surface rendering.
 
+use crate::app_commands::{command_matches, library_commands, CommandDanger};
 use crate::app_context_menu::{context_menu_capture_layer, view_context_menu_dropdown};
 use crate::library::view::{
     chevron_button, floating_folder_drag_preview, floating_library_drag_preview,
-    view_confirmation_dialog, view_create_folder_dialog, view_library,
+    view_confirmation_dialog, view_create_folder_dialog, view_export_dialog,
+    view_import_menu_dialog, view_import_review_dialog, view_library,
     view_library_move_picker_dialog, view_raindrop_connect_dialog, view_raindrop_import_dialog,
-    view_raindrop_import_progress_dialog,
-};
-use crate::menu::{
-    app_menu_bar_height, app_menu_capture_layer, selection_menu_capture_layer, view_app_menu_bar,
-    view_app_menu_dropdown, view_selection_menu_dropdown,
+    view_raindrop_import_progress_dialog, view_tag_manager_dialog,
 };
 use crate::viewer::canvas::{HistoryRestoreSpinner, ViewerCanvas, ViewerSelectionOverlay};
 use crate::viewer::outline::{view_jump_dialog, view_sidebar};
 use crate::viewer::zoom::{zoom_control, zoom_menu};
 use crate::*;
-use iced::widget::scrollable::{Direction, Scrollbar};
+use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{canvas, column, row, stack};
 use std::time::Duration;
 
@@ -96,13 +94,12 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         main = main.push(viewer_stack);
 
         column![
-            view_app_menu_bar(app),
             view_viewer_toolbar(app),
             row![sidebar, main.width(Length::Fill)].height(Length::Fill)
         ]
         .into()
     } else {
-        let mut library_shell = column![view_app_menu_bar(app)];
+        let mut library_shell = column![];
         if let Some(error) = app.viewer.document_error.as_deref() {
             library_shell = library_shell.push(dismissible_error_banner(
                 error,
@@ -114,20 +111,11 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         library_shell.push(view_library(app)).into()
     };
 
-    let menu_content = if app.chrome.open_app_menu.is_some() {
+    let menu_content = if app.chrome.command_palette_open {
         stack![
             base_content,
-            app_menu_capture_layer(app),
-            view_app_menu_dropdown(app, tokens)
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-    } else if app.chrome.open_selection_menu.is_some() {
-        stack![
-            base_content,
-            selection_menu_capture_layer(app),
-            view_selection_menu_dropdown(app, tokens)
+            command_palette_capture_layer(),
+            view_command_palette(app, tokens)
         ]
         .width(Length::Fill)
         .height(Length::Fill)
@@ -171,6 +159,29 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
             .into()
     } else if app.library.move_picker.is_some() {
         stack![menu_content, view_library_move_picker_dialog(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if app.library.import_menu_open {
+        stack![menu_content, view_import_menu_dialog(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if app.library.import_review.is_some() {
+        stack![menu_content, view_import_review_dialog(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if app.library.tag_manager_open {
+        stack![menu_content, view_tag_manager_dialog(app)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if app.library.export_dialog.is_some()
+        || app.library.export_progress.is_some()
+        || app.library.last_export_summary.is_some()
+    {
+        stack![menu_content, view_export_dialog(app)]
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -231,6 +242,158 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     } else {
         shell
     }
+}
+
+fn command_palette_capture_layer<'a>() -> Element<'a, Message> {
+    pin(
+        mouse_area(container("").width(Length::Fill).height(Length::Fill))
+            .on_press(Message::CloseCommandPalette),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+fn view_command_palette(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let panel_width = app
+        .layout()
+        .metric("CommandPalette", "width", 520.0)
+        .min((app.viewer.viewport_width - Spacing::XL * 2.0).max(320.0));
+    let list_height = app
+        .layout()
+        .metric("CommandPalette", "list_height", 420.0)
+        .min((app.viewer.viewport_height - Spacing::XL * 2.0 - 148.0).max(180.0));
+    let commands = library_commands(app)
+        .into_iter()
+        .filter(|command| command.visible && command.enabled)
+        .filter(|command| command_matches(command.spec, &app.chrome.command_palette_query))
+        .collect::<Vec<_>>();
+
+    let input = text_input("Search commands", &app.chrome.command_palette_query)
+        .on_input(Message::CommandPaletteQueryChanged)
+        .on_submit(Message::CommandPaletteRunSelected)
+        .padding([Spacing::SM, Spacing::MD])
+        .size(FontSize::MD)
+        .font(ui_font(FontWeight::REGULAR))
+        .style(move |_, status| text_input_style(tokens, Class::LibrarySearchInput, status))
+        .width(Length::Fill);
+
+    let mut list = column![].spacing(Spacing::XS).width(Length::Fill);
+    for (index, command) in commands.iter().enumerate() {
+        let selected = index == app.chrome.command_palette_selected_index;
+        let text_color = if selected {
+            tokens.text_primary
+        } else if command.spec.danger == CommandDanger::Destructive {
+            tokens.error
+        } else {
+            tokens.text_secondary
+        };
+        let shortcut = command.spec.shortcut.unwrap_or("");
+        let target_label = match command.spec.target {
+            crate::app_commands::CommandTargetKind::None => "",
+            crate::app_commands::CommandTargetKind::Library => "Library",
+            crate::app_commands::CommandTargetKind::Folder => "Folder",
+            crate::app_commands::CommandTargetKind::Tag => "Tag",
+            crate::app_commands::CommandTargetKind::SinglePdf => "PDF",
+            crate::app_commands::CommandTargetKind::MultiplePdfs => "Selection",
+            crate::app_commands::CommandTargetKind::SearchResult => "Visible",
+            crate::app_commands::CommandTargetKind::Viewer => "Viewer",
+            crate::app_commands::CommandTargetKind::Document => "Document",
+        };
+        let icon_slot = if command.spec.icon.is_some() {
+            "•"
+        } else {
+            ""
+        };
+        let row_content = row![
+            text(icon_slot)
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(tokens.text_secondary)
+                .width(Length::Fixed(12.0)),
+            column![
+                text(command.spec.label)
+                    .size(FontSize::MD)
+                    .font(ui_font(FontWeight::MEDIUM))
+                    .color(text_color)
+                    .wrapping(Wrapping::None),
+                text(
+                    format!("{} {}", command.spec.category.label(), target_label)
+                        .trim()
+                        .to_owned()
+                )
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::REGULAR))
+                .color(tokens.text_secondary)
+                .wrapping(Wrapping::None),
+            ]
+            .spacing(1.0)
+            .width(Length::Fill),
+            text(shortcut)
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::REGULAR))
+                .color(tokens.text_secondary)
+                .wrapping(Wrapping::None),
+        ]
+        .spacing(Spacing::SM)
+        .align_y(iced::Alignment::Center);
+        list = list.push(
+            button(row_content)
+                .padding([Spacing::SM, Spacing::MD])
+                .width(Length::Fill)
+                .on_press(Message::CommandPaletteRun(command.spec.id))
+                .style(move |_, status| {
+                    let class = if selected {
+                        Class::MenuButton
+                    } else {
+                        Class::MenuItem
+                    };
+                    button_style(tokens, class, status)
+                }),
+        );
+    }
+    if commands.is_empty() {
+        list = list.push(
+            container(
+                text("No commands found")
+                    .size(FontSize::MD)
+                    .font(ui_font(FontWeight::REGULAR))
+                    .color(tokens.text_secondary),
+            )
+            .padding(Spacing::MD),
+        );
+    }
+
+    let list_scroll = scrollable(list)
+        .direction(Direction::Vertical(
+            Scrollbar::new()
+                .width(tokens.primitives.scrollbar_width)
+                .scroller_width(tokens.primitives.scrollbar_scroller_width)
+                .anchor(Anchor::End),
+        ))
+        .height(list_height)
+        .width(Length::Fill)
+        .style(move |_, status| scrollable_style(tokens, Class::MenuPanel, status));
+
+    let panel = column![
+        text("Command Palette")
+            .size(FontSize::HEADING)
+            .font(display_font(FontWeight::MEDIUM))
+            .color(tokens.text_primary),
+        input,
+        list_scroll,
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::LG)
+    .width(panel_width);
+
+    pin(container(
+        container(panel)
+            .width(panel_width)
+            .style(move |_| container_style(tokens, Class::MenuPanel)),
+    )
+    .center(Length::Fill))
+    .into()
 }
 
 fn view_signed_out(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
@@ -1350,7 +1513,7 @@ fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Message> {
         mouse_area(container("").width(Length::Fill).height(Length::Fill))
             .on_press(Message::CloseZoomMenu),
     )
-    .y(app_menu_bar_height(app) + app.layout().toolbar_height)
+    .y(app.layout().toolbar_height)
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
@@ -1359,7 +1522,7 @@ fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Message> {
 fn view_zoom_menu_dropdown(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     pin(zoom_menu(app, tokens))
         .x(viewer_zoom_menu_x(app))
-        .y(app_menu_bar_height(app) + app.layout().toolbar_height)
+        .y(app.layout().toolbar_height)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

@@ -2789,6 +2789,20 @@ impl Db {
         Ok(())
     }
 
+    /// Updates the most recent open timestamp for an entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot update the entry.
+    pub fn mark_entry_opened(&self, entry_id: &EntryId) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "UPDATE entries SET opened_at = ?1 WHERE id = ?2",
+            params![Utc::now().timestamp(), entry_id.as_str()],
+        )?;
+        Ok(())
+    }
+
     /// Saves the result of one author attribution attempt for an entry.
     ///
     /// # Errors

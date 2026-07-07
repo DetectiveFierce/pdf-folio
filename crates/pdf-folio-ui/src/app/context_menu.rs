@@ -13,9 +13,6 @@ struct ContextMenuItemSpec {
 
 impl PDFolioApp {
     pub(super) fn open_context_menu(&mut self, target: ContextMenuTarget) {
-        self.chrome.open_app_menu = None;
-        self.chrome.open_view_menu_flyout = None;
-        self.chrome.open_selection_menu = None;
         self.viewer.zoom_menu_open = false;
 
         match &target {
@@ -70,6 +67,31 @@ impl PDFolioApp {
                 _ => None,
             },
             ContextMenuAction::MoveTo => Some(Message::OpenMoveSelectionDialog),
+            ContextMenuAction::Export => match target {
+                ContextMenuTarget::LibraryEntry(entry_id) => {
+                    if self.library.selected_library_entries.len() > 1
+                        && self.library.selected_library_entries.contains(entry_id)
+                    {
+                        Some(Message::OpenExportDialog(ExportSource::SelectedEntries))
+                    } else {
+                        Some(Message::OpenExportDialog(ExportSource::SingleEntry(
+                            entry_id.clone(),
+                        )))
+                    }
+                }
+                ContextMenuTarget::Folder(Some(folder_id)) => Some(Message::OpenExportDialog(
+                    ExportSource::Folder(folder_id.clone()),
+                )),
+                ContextMenuTarget::Tag(tag) => {
+                    Some(Message::OpenExportDialog(ExportSource::Tag(tag.clone())))
+                }
+                ContextMenuTarget::LibraryBackground
+                    if !self.library.selected_library_entries.is_empty() =>
+                {
+                    Some(Message::OpenExportDialog(ExportSource::SelectedEntries))
+                }
+                _ => None,
+            },
             ContextMenuAction::RevealInFileManager => match target {
                 ContextMenuTarget::LibraryEntry(entry_id) => {
                     Some(Message::RevealEntryInFileManager(entry_id.clone()))
@@ -283,6 +305,7 @@ fn library_entry_context_groups(
         vec![
             spec("Add Tag...", "", true, ContextMenuAction::AddTag),
             spec("Move To...", "", has_selection, ContextMenuAction::MoveTo),
+            spec("Export...", "", true, ContextMenuAction::Export),
             spec(
                 "Save Details",
                 "Enter",
@@ -405,6 +428,12 @@ fn folder_context_groups(
                 ContextMenuAction::MoveFolderTo,
             ),
             spec(
+                "Export Folder...",
+                "",
+                has_folder,
+                ContextMenuAction::Export,
+            ),
+            spec(
                 "Move To Root",
                 "",
                 has_parent,
@@ -463,6 +492,12 @@ fn library_background_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuIte
                 ContextMenuAction::MoveTo,
             ),
             spec(
+                "Export Selection...",
+                "",
+                !app.library.selected_library_entries.is_empty(),
+                ContextMenuAction::Export,
+            ),
+            spec(
                 if app.library.compact_view_mode {
                     "Switch To Grid"
                 } else {
@@ -481,6 +516,12 @@ fn library_background_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuIte
 fn tag_context_groups(app: &PDFolioApp, tag: &str) -> Vec<Vec<ContextMenuItemSpec>> {
     let exists = app.all_tags().iter().any(|candidate| candidate == tag);
     vec![vec![
+        spec(
+            "Export Tagged PDFs...",
+            "",
+            exists,
+            ContextMenuAction::Export,
+        ),
         spec("Rename Tag", "", exists, ContextMenuAction::RenameTag),
         destructive_spec("Delete Tag", "", exists, ContextMenuAction::DeleteTag),
     ]]

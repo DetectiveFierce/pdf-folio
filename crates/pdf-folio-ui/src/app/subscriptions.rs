@@ -63,6 +63,19 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
     } else {
         Subscription::none()
     };
+    let inspector_resize = if app.library.resizing_library_inspector {
+        event::listen_with(|event, _status, _window| match event {
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                Some(Message::LibraryInspectorResizeDragged(position.x))
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                Some(Message::EndLibraryInspectorResize)
+            }
+            _ => None,
+        })
+    } else {
+        Subscription::none()
+    };
 
     let library_drag = if app.library.library_drag.is_some() {
         Subscription::batch([
@@ -162,6 +175,7 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
         watcher,
         style_watcher,
         sidebar_resize,
+        inspector_resize,
         library_drag,
         folder_drag,
         animations,

@@ -25,6 +25,8 @@
 pub use pdf_folio_style as style;
 pub use pdf_folio_style::theme;
 
+#[path = "app/commands.rs"]
+pub(crate) mod app_commands;
 #[path = "app/context_menu.rs"]
 mod app_context_menu;
 #[path = "app/libraries.rs"]
@@ -59,8 +61,6 @@ mod app_viewer_navigation;
 mod app_viewer_state;
 #[path = "library/mod.rs"]
 mod library;
-#[path = "app/menu.rs"]
-mod menu;
 #[path = "app/messages.rs"]
 pub mod messages;
 #[path = "app/platform.rs"]
@@ -140,11 +140,12 @@ use crate::library::tasks::{
     bulk_delete_metadata_task, bulk_operation_task, bulk_permanently_delete_entries_task,
     bulk_refresh_metadata_task, bulk_reindex_task, bulk_reset_metadata_task,
     bulk_restore_trash_items_task, create_folder_task, delete_folder_task, delete_tag_task,
-    edit_metadata_task, import_folder_with_index, import_pdf_with_index,
-    move_entries_to_folder_task, move_folder_task, paste_library_clipboard_task,
-    permanently_delete_folder_from_trash_task, persist_manual_entry_order_task,
-    persist_manual_folder_order_task, relink_entry_task, rename_folder_task, rename_tag_task,
-    reset_metadata_task, restore_library_history_snapshot_task, search_library_task,
+    edit_metadata_task, export_library_entries_task, import_folder_with_index,
+    import_pdf_with_index, move_entries_to_folder_task, move_folder_task,
+    paste_library_clipboard_task, permanently_delete_folder_from_trash_task,
+    persist_manual_entry_order_task, persist_manual_folder_order_task, relink_entry_task,
+    rename_folder_task, rename_tag_task, reset_metadata_task,
+    restore_library_history_snapshot_task, search_library_task,
 };
 #[cfg(test)]
 use crate::library::tasks::{clean_import_title, title_from_path};
@@ -160,10 +161,8 @@ use crate::library::view::{
     folder_cards_per_row, folder_cards_section_height, format_count, masonry_target_index,
     parent_directory_drop_box_height, scroll_library_to_offset_task, shortest_column_index,
 };
-use crate::menu::{app_menu_action_message, app_menu_bar_height};
 use crate::messages::{
-    AppMenu, AppMenuAction, ConfirmationAction, ContextMenuAction, ContextMenuTarget,
-    LibrarySidebarTab, Message, SelectionMenu, SelectionToolbarAction, Shortcut, ViewMenuFlyout,
+    ConfirmationAction, ContextMenuAction, ContextMenuTarget, LibrarySidebarTab, Message, Shortcut,
     ViewerSidebarTab,
 };
 use crate::platform::file_manager_commands;
@@ -174,8 +173,8 @@ use crate::style::{
     mix_color, progress_bar, scrollable_style, search_input_with_class, section_heading,
     selection_checkbox, side_border, side_border_for_class, sidebar_scrollable_style, tag_pill,
     text_input_style, toc_entry, toolbar_button, ui_font, viewer_primitives, Class, ComponentState,
-    FontSize, FontWeight, LabelSection, MasterCheckboxState, Spacing, StyleBook, ThemeTokens,
-    VisualOverride, UI_FONT_FAMILY,
+    FontSize, FontWeight, MasterCheckboxState, Spacing, StyleBook, ThemeTokens, VisualOverride,
+    UI_FONT_FAMILY,
 };
 #[cfg(test)]
 use crate::subscriptions::style_watch_event_should_reload;
@@ -248,28 +247,6 @@ const LIBRARY_METADATA_DENSITY_OPTIONS: [LibraryMetadataDensity; 3] = [
     LibraryMetadataDensity::Minimal,
     LibraryMetadataDensity::Standard,
     LibraryMetadataDensity::Detailed,
-];
-const BULK_TAG_ACTIONS: [SelectionToolbarAction; 2] = [
-    SelectionToolbarAction::AddTag,
-    SelectionToolbarAction::RemoveTag,
-];
-const BULK_FOLDER_ACTIONS: [SelectionToolbarAction; 2] = [
-    SelectionToolbarAction::AddToFolder,
-    SelectionToolbarAction::RemoveFromFolder,
-];
-const BULK_METADATA_ACTIONS: [SelectionToolbarAction; 4] = [
-    SelectionToolbarAction::SortTitles,
-    SelectionToolbarAction::RefreshMetadata,
-    SelectionToolbarAction::ResetMetadata,
-    SelectionToolbarAction::Reindex,
-];
-const BULK_MAINTENANCE_ACTIONS: [SelectionToolbarAction; 2] = [
-    SelectionToolbarAction::RebuildThumbnails,
-    SelectionToolbarAction::DeleteMetadata,
-];
-const SINGLE_MORE_ACTIONS: [SelectionToolbarAction; 2] = [
-    SelectionToolbarAction::ResetDetails,
-    SelectionToolbarAction::RefreshMetadata,
 ];
 
 /// Primary app mode.
@@ -415,14 +392,19 @@ pub struct LibraryRuntime {
     pub library_tag_sidebar_width: f32,
     pub library_tag_sidebar_open: bool,
     pub resizing_library_tag_sidebar: bool,
+    pub library_inspector_width: f32,
+    pub library_inspector_open: bool,
+    pub resizing_library_inspector: bool,
     pub library_sidebar_tab: LibrarySidebarTab,
     pub library_tree_root_expanded: bool,
+    pub library_tags_expanded: bool,
     pub collapsed_library_tree_folders: HashSet<FolderId>,
     pub folder_details_sidebar_open: bool,
     pub thumbnails: HashMap<ThumbnailCacheKey, ThumbnailView>,
     pub pending_thumbnails: HashSet<ThumbnailCacheKey>,
     pub active_tag_filter: Option<String>,
     pub active_reading_filter: Option<LibraryReadingFilter>,
+    pub active_recently_opened_filter: bool,
     pub missing_filter_active: bool,
     pub previous_tag_pill_view: Option<LibraryViewSnapshot>,
     pub tag_entry_id: Option<EntryId>,
@@ -432,6 +414,9 @@ pub struct LibraryRuntime {
     pub selected_library_entries: HashSet<EntryId>,
     pub library_selection_anchor: Option<EntryId>,
     pub bulk_tag_input: String,
+    pub inspector_tag_input: String,
+    pub inspector_tag_suggestions_open: bool,
+    pub inspector_tag_highlighted_index: usize,
     pub details_entry_id: Option<EntryId>,
     pub details_title_input: String,
     pub details_author_input: String,
@@ -453,6 +438,14 @@ pub struct LibraryRuntime {
     pub raindrop_import_new_folder_active: bool,
     pub raindrop_import_new_folder_name: String,
     pub raindrop_import_progress: Option<RaindropImportProgressView>,
+    pub import_menu_open: bool,
+    pub import_review: Option<ImportReviewState>,
+    pub tag_manager_open: bool,
+    pub tag_manager_filter: String,
+    pub tag_manager_merge_destination: String,
+    pub export_dialog: Option<LibraryExportDialog>,
+    pub export_progress: Option<LibraryExportProgress>,
+    pub last_export_summary: Option<LibraryExportSummary>,
     pub raindrop_rollback_recovery_active: bool,
     pub raindrop_rollback_recovery_status: Option<String>,
     pub dismissed_library_errors: HashSet<String>,
@@ -524,6 +517,123 @@ pub enum LibraryMoveTarget {
     Folder(FolderId),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportReviewState {
+    pub title: String,
+    pub imported_entry_ids: Vec<EntryId>,
+    pub imported_count: usize,
+    pub duplicate_count: usize,
+    pub failed_count: usize,
+    pub destination_label: String,
+    pub suggested_tags: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryExportDialog {
+    pub source: ExportSource,
+    pub destination: Option<PathBuf>,
+    pub mode: ExportMode,
+    pub filename_template: ExportFilenameTemplate,
+    pub include_metadata_csv: bool,
+    pub include_metadata_json: bool,
+    pub include_tags: bool,
+    pub include_reading_progress: bool,
+    pub conflict_behavior: ExportConflictBehavior,
+}
+
+impl LibraryExportDialog {
+    fn new(source: ExportSource) -> Self {
+        Self {
+            source,
+            destination: None,
+            mode: ExportMode::CopyFlat,
+            filename_template: ExportFilenameTemplate::OriginalFilename,
+            include_metadata_csv: true,
+            include_metadata_json: false,
+            include_tags: true,
+            include_reading_progress: true,
+            conflict_behavior: ExportConflictBehavior::KeepBoth,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportSource {
+    SelectedEntries,
+    SingleEntry(EntryId),
+    Folder(FolderId),
+    Tag(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportMode {
+    CopyFlat,
+    PreserveFolders,
+    Zip,
+}
+
+impl ExportMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::CopyFlat => "Copy PDFs to folder",
+            Self::PreserveFolders => "Preserve folder structure",
+            Self::Zip => "Export as ZIP",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportFilenameTemplate {
+    OriginalFilename,
+    Title,
+    AuthorTitle,
+    YearAuthorTitle,
+}
+
+impl ExportFilenameTemplate {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OriginalFilename => "Original filename",
+            Self::Title => "{title}.pdf",
+            Self::AuthorTitle => "{author} - {title}.pdf",
+            Self::YearAuthorTitle => "{year} - {author} - {title}.pdf",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportConflictBehavior {
+    Skip,
+    Overwrite,
+    KeepBoth,
+}
+
+impl ExportConflictBehavior {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Skip => "Skip existing",
+            Self::Overwrite => "Overwrite",
+            Self::KeepBoth => "Keep both",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryExportProgress {
+    pub label: String,
+    pub total: usize,
+    pub started_at: Instant,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryExportSummary {
+    pub destination: PathBuf,
+    pub exported: usize,
+    pub skipped: usize,
+    pub errors: Vec<String>,
+}
+
 /// Restorable library view state captured before drilling into a tag pill.
 #[derive(Debug, Clone)]
 pub struct LibraryViewSnapshot {
@@ -532,6 +642,7 @@ pub struct LibraryViewSnapshot {
     pub search_hit_pages: HashMap<EntryId, u16>,
     pub active_tag_filter: Option<String>,
     pub active_reading_filter: Option<LibraryReadingFilter>,
+    pub active_recently_opened_filter: bool,
     pub missing_filter_active: bool,
     pub selected_folder: Option<FolderId>,
     pub details_folder_id: Option<FolderId>,
@@ -544,10 +655,10 @@ pub struct ChromeRuntime {
     pub pending_confirmation: Option<ConfirmationAction>,
     pub folder_delete_warning_suppressed: bool,
     pub folder_delete_skip_warning_checked: bool,
-    pub open_app_menu: Option<AppMenu>,
-    pub open_view_menu_flyout: Option<ViewMenuFlyout>,
-    pub open_selection_menu: Option<SelectionMenu>,
     pub open_context_menu: Option<ContextMenu>,
+    pub command_palette_open: bool,
+    pub command_palette_query: String,
+    pub command_palette_selected_index: usize,
     pub cursor_position: Point,
 }
 
@@ -699,8 +810,12 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
         .default_font(iced::Font::with_name(UI_FONT_FAMILY))
         .subscription(subscription)
         .scale_factor(|app| app.viewer.scale_factor)
-        .window_size(initial_size)
-        .centered()
+        .window(iced::window::Settings {
+            size: Size::new(initial_size[0], initial_size[1]),
+            maximized: true,
+            position: iced::window::Position::Centered,
+            ..iced::window::Settings::default()
+        })
         .run()?;
 
     Ok(())
@@ -806,6 +921,23 @@ fn import_pdf_dialog_task() -> Task<Message> {
                 .map(|file| file.path().to_path_buf())
         },
         |path| path.map_or(Message::FileDialogCanceled, Message::ImportPdfSelected),
+    )
+}
+
+fn export_destination_dialog_task() -> Task<Message> {
+    Task::perform(
+        async {
+            rfd::AsyncFileDialog::new()
+                .pick_folder()
+                .await
+                .map(|folder| folder.path().to_path_buf())
+        },
+        |path| {
+            path.map_or(
+                Message::FileDialogCanceled,
+                Message::ExportDestinationSelected,
+            )
+        },
     )
 }
 

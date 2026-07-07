@@ -111,8 +111,6 @@ impl PDFolioApp {
     pub(super) fn open_library_switcher(&mut self) {
         self.mode = AppMode::LibrarySwitcher;
         self.clear_library_transient_interactions();
-        self.chrome.open_app_menu = None;
-        self.chrome.open_selection_menu = None;
         self.chrome.open_context_menu = None;
         self.viewer.zoom_menu_open = false;
         self.libraries.open_menu_library_id = None;
@@ -201,6 +199,7 @@ impl PDFolioApp {
         self.library.pending_thumbnails.clear();
         self.library.active_tag_filter = None;
         self.library.active_reading_filter = None;
+        self.library.active_recently_opened_filter = false;
         self.library.missing_filter_active = false;
         self.library.previous_tag_pill_view = None;
         self.library.selected_library_entries.clear();

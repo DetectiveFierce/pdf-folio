@@ -38,7 +38,7 @@ impl PDFolioApp {
             .as_ref()
             .unwrap_or_else(|| self.active_library_entries());
         let filter_by_selected_folder = self.library.active_tag_filter.is_none();
-        source
+        let mut entries = source
             .iter()
             .filter(|entry| {
                 self.library
@@ -55,9 +55,23 @@ impl PDFolioApp {
                     .active_reading_filter
                     .is_none_or(|filter| library_entry_reading_state(entry) == filter)
             })
+            .filter(|entry| {
+                !self.library.active_recently_opened_filter || entry.opened_at.is_some()
+            })
             .filter(|entry| !self.library.missing_filter_active || entry.missing)
             .cloned()
-            .collect()
+            .collect::<Vec<_>>();
+
+        if self.library.active_recently_opened_filter {
+            entries.sort_by(|left, right| {
+                right
+                    .opened_at
+                    .cmp(&left.opened_at)
+                    .then_with(|| left.manual_order.cmp(&right.manual_order))
+            });
+        }
+
+        entries
     }
 
     pub(super) fn active_library_entries(&self) -> &Vec<LibraryEntry> {
@@ -87,8 +101,14 @@ impl PDFolioApp {
         } else {
             0.0
         };
+        let inspector_width = if self.library.library_inspector_open {
+            self.library.library_inspector_width + self.layout().sidebar_resize_handle_width
+        } else {
+            0.0
+        };
         let estimated_width =
-            (self.viewer.viewport_width - sidebar_width - Spacing::LG * 2.0).max(1.0);
+            (self.viewer.viewport_width - sidebar_width - inspector_width - Spacing::LG * 2.0)
+                .max(1.0);
         let viewport_width = self.library.library_viewport_width.min(estimated_width);
         (viewport_width - self.layout().library_scrollbar_gutter).max(1.0)
     }
@@ -99,8 +119,14 @@ impl PDFolioApp {
         } else {
             0.0
         };
+        let inspector_width = if self.library.library_inspector_open {
+            self.library.library_inspector_width + self.layout().sidebar_resize_handle_width
+        } else {
+            0.0
+        };
         self.library.library_viewport_width =
-            (self.viewer.viewport_width - sidebar_width - Spacing::LG * 2.0).max(1.0);
+            (self.viewer.viewport_width - sidebar_width - inspector_width - Spacing::LG * 2.0)
+                .max(1.0);
     }
 
     pub(super) fn fit_library_grid_zoom_to_columns(&mut self, columns: usize) {

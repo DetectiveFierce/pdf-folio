@@ -1,7 +1,7 @@
 //! Library view rendering.
 
+use crate::app_commands::{command_message, command_visible, CommandId, CommandSurface};
 use crate::app_view::dismissible_error_banner;
-use crate::menu::library_sidebar_tab_label;
 use crate::*;
 use iced::widget::{column, row, stack};
 use pdf_folio_ui_components::library::view::{
@@ -25,12 +25,15 @@ mod dialogs;
 mod entries;
 #[path = "view/folders.rs"]
 mod folders;
+#[path = "view/inspector.rs"]
+mod inspector;
 #[path = "view/sidebar.rs"]
 mod sidebar;
 
 pub(crate) use dialogs::*;
 pub(crate) use entries::*;
 pub(crate) use folders::*;
+pub(crate) use inspector::*;
 pub(crate) use sidebar::*;
 
 pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
@@ -41,109 +44,17 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let folder_section_height = folder_cards_section_height(app, child_folders.len());
     let entry_scroll_offset = (app.library.library_scroll_offset - folder_section_height).max(0.0);
     let window = app.visible_library_entry_window_at(entries.len(), entry_scroll_offset);
-    let toolbar_width = library_toolbar_available_width(app);
-    let compact_toolbar = toolbar_width
-        < app
-            .layout()
-            .metric("LibraryToolbar", "compact_width", 760.0);
-    let narrow_toolbar =
-        toolbar_width < app.layout().metric("LibraryToolbar", "narrow_width", 600.0);
-    let mut search_row = row![];
-    if !app.library.library_tag_sidebar_open {
-        search_row = search_row.push(sidebar_chevron_button(
-            CHEVRON_RIGHT_SVG,
-            "Expand Sidebar",
-            Message::ExpandLibrarySidebar,
-            tokens,
-        ));
-    }
-    search_row = search_row
-        .push(library_search_input(app, tokens))
-        .spacing(Spacing::MD)
-        .align_y(iced::Alignment::Center)
-        .width(Length::Fill);
-
-    let mut controls_row = row![]
-        .push(library_history_icon_button(
-            UNDO_SVG,
-            "Undo",
-            app.library.history.can_undo(),
-            Message::UndoLibraryAction,
-            tokens,
-        ))
-        .push(library_history_icon_button(
-            REDO_SVG,
-            "Redo",
-            app.library.history.can_redo(),
-            Message::RedoLibraryAction,
-            tokens,
-        ))
-        .push(component_library_sort_picker(
-            app.library.library_sort_mode,
-            &LIBRARY_SORT_OPTIONS,
-            tokens,
-            Message::LibrarySortChanged,
-        ))
-        .push(component_library_layout_toggle_button(
-            app.library.compact_view_mode,
-            tokens,
-            GRID_LAYOUT_SVG,
-            LIST_LAYOUT_SVG,
-            Message::ToggleViewMode,
-        ));
-    if !narrow_toolbar {
-        controls_row = controls_row.push(component_library_metadata_density_picker(
-            app.library.library_metadata_density,
-            &LIBRARY_METADATA_DENSITY_OPTIONS,
-            tokens,
-            Message::LibraryMetadataDensityChanged,
-        ));
-    }
-    if app.viewer.doc.is_some() {
-        controls_row =
-            controls_row.push(toolbar_button("Viewer", tokens).on_press(Message::BackToViewer));
-    }
-    if !app.library.trash_view_active {
-        controls_row = controls_row.push(
-            library_new_folder_button(tokens, narrow_toolbar)
-                .on_press(Message::OpenCreateFolderDialog),
-        );
-    }
-    controls_row = controls_row
-        .spacing(Spacing::MD)
-        .align_y(iced::Alignment::Center)
-        .width(if compact_toolbar {
-            Length::Shrink
-        } else {
-            Length::Fill
-        });
-    let header_content: Element<'_, Message> = if compact_toolbar {
-        column![search_row, controls_row]
-            .spacing(Spacing::SM)
-            .width(Length::Fill)
-            .into()
-    } else {
-        row![search_row, controls_row]
-            .spacing(Spacing::MD)
-            .align_y(iced::Alignment::Center)
-            .width(Length::Fill)
-            .into()
-    };
-    let header = container(header_content)
-        .width(Length::Fill)
-        .padding(Spacing::SM)
-        .style(move |_| container_style(tokens, Class::LibraryControlBar));
-
     let reorder_hint = if app.can_drag_reorder_library() {
         "Manual reorder enabled"
     } else {
         "Reordering requires unfiltered Manual sort"
     };
-    let context_row = if app.library.selected_library_entries.is_empty() {
-        view_library_breadcrumb_row(app, tokens, reorder_hint)
+    let header = if app.library.selected_library_entries.is_empty() {
+        view_library_header(app, tokens)
     } else {
-        view_library_selection_status_row(app, tokens, reorder_hint)
+        view_library_selection_toolbar(app, tokens)
     };
+    let context_row = view_library_breadcrumb_row(app, tokens, reorder_hint);
     let mut content = column![header, context_row,]
         .spacing(Spacing::MD)
         .padding(Spacing::LG);
@@ -292,7 +203,267 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         layout = layout.push(view_library_tag_sidebar(app));
     }
     layout = layout.push(main_content);
+    if library_inspector_visible(app) {
+        layout = layout.push(view_library_inspector(app));
+    }
     layout.height(Length::Fill).into()
+}
+
+fn view_library_header(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let toolbar_width = library_toolbar_available_width(app);
+    let compact_toolbar = toolbar_width
+        < app
+            .layout()
+            .metric("LibraryToolbar", "compact_width", 760.0);
+    let narrow_toolbar =
+        toolbar_width < app.layout().metric("LibraryToolbar", "narrow_width", 600.0);
+
+    let mut title_row = row![];
+    if !app.library.library_tag_sidebar_open {
+        title_row = title_row.push(sidebar_chevron_button(
+            CHEVRON_RIGHT_SVG,
+            "Expand Sidebar",
+            Message::ExpandLibrarySidebar,
+            tokens,
+        ));
+    }
+    title_row = title_row
+        .push(
+            text(library_header_title(app))
+                .size(FontSize::HEADING)
+                .font(display_font(FontWeight::MEDIUM))
+                .color(tokens.text_primary)
+                .wrapping(Wrapping::None)
+                .width(Length::Shrink),
+        )
+        .spacing(Spacing::MD)
+        .align_y(iced::Alignment::Center)
+        .width(if compact_toolbar {
+            Length::Fill
+        } else {
+            Length::FillPortion(2)
+        });
+
+    let search = container(library_search_input(app, tokens)).width(if compact_toolbar {
+        Length::Fill
+    } else {
+        Length::FillPortion(3)
+    });
+
+    let mut controls_row = row![
+        library_history_icon_button(
+            UNDO_SVG,
+            "Undo",
+            app.library.history.can_undo(),
+            Message::UndoLibraryAction,
+            tokens,
+        ),
+        library_history_icon_button(
+            REDO_SVG,
+            "Redo",
+            app.library.history.can_redo(),
+            Message::RedoLibraryAction,
+            tokens,
+        ),
+        component_library_sort_picker(
+            app.library.library_sort_mode,
+            &LIBRARY_SORT_OPTIONS,
+            tokens,
+            Message::LibrarySortChanged,
+        ),
+        component_library_layout_toggle_button(
+            app.library.compact_view_mode,
+            tokens,
+            GRID_LAYOUT_SVG,
+            LIST_LAYOUT_SVG,
+            Message::ToggleViewMode,
+        ),
+    ];
+    if !narrow_toolbar {
+        controls_row = controls_row.push(component_library_metadata_density_picker(
+            app.library.library_metadata_density,
+            &LIBRARY_METADATA_DENSITY_OPTIONS,
+            tokens,
+            Message::LibraryMetadataDensityChanged,
+        ));
+    }
+    if app.viewer.doc.is_some() {
+        controls_row =
+            controls_row.push(toolbar_button("Viewer", tokens).on_press(Message::BackToViewer));
+    }
+    if !app.library.trash_view_active
+        && command_visible(app, CommandId::CreateFolder, CommandSurface::HeaderMore)
+    {
+        controls_row = controls_row.push(
+            library_new_folder_button(tokens, narrow_toolbar).on_press(
+                command_message(app, CommandId::CreateFolder)
+                    .unwrap_or(Message::OpenCreateFolderDialog),
+            ),
+        );
+    }
+    let import_available = [
+        CommandId::ImportPdf,
+        CommandId::ImportFolder,
+        CommandId::ImportRaindrop,
+    ]
+    .into_iter()
+    .any(|id| command_visible(app, id, CommandSurface::ImportMenu));
+    if import_available {
+        controls_row = controls_row
+            .push(library_header_button("Import", tokens).on_press(Message::OpenImportMenu));
+    }
+    let has_more_commands = [
+        CommandId::RefreshLibrary,
+        CommandId::SelectAllVisible,
+        CommandId::ClearFilters,
+        CommandId::RebuildThumbnails,
+        CommandId::ReindexFullText,
+        CommandId::ResetDisplayMetadata,
+        CommandId::ApplyTitleSortCleanup,
+        CommandId::ToggleMissingFiles,
+    ]
+    .into_iter()
+    .any(|id| command_visible(app, id, CommandSurface::HeaderMore));
+    if has_more_commands {
+        controls_row = controls_row
+            .push(library_header_button("More", tokens).on_press(Message::OpenCommandPalette));
+    }
+    controls_row = controls_row
+        .spacing(Spacing::MD)
+        .align_y(iced::Alignment::Center)
+        .width(Length::Shrink);
+
+    let header_content: Element<'_, Message> = if compact_toolbar {
+        column![title_row, search, controls_row]
+            .spacing(Spacing::SM)
+            .width(Length::Fill)
+            .into()
+    } else {
+        row![title_row, search, controls_row]
+            .spacing(Spacing::MD)
+            .align_y(iced::Alignment::Center)
+            .width(Length::Fill)
+            .into()
+    };
+
+    container(header_content)
+        .width(Length::Fill)
+        .padding(Spacing::SM)
+        .style(move |_| container_style(tokens, Class::LibraryControlBar))
+        .into()
+}
+
+fn library_header_title(app: &PDFolioApp) -> String {
+    if app.library.trash_view_active {
+        return String::from("Trash Can");
+    }
+    if let Some(tag) = app.library.active_tag_filter.as_ref() {
+        return format!("Tag: {tag}");
+    }
+    let breadcrumbs = app.folder_breadcrumbs();
+    if breadcrumbs.len() > 1 {
+        return breadcrumbs
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect::<Vec<_>>()
+            .join(" / ");
+    }
+    app.active_library_name().to_owned()
+}
+
+fn view_library_selection_toolbar(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+    let selected_count = app.library.selected_library_entries.len();
+    let label = format!("{} selected", format_count(selected_count, "PDF"));
+    let mut actions = row![
+        master_checkbox(
+            app.master_checkbox_state(),
+            tokens,
+            Message::MasterCheckboxClicked,
+        ),
+        text(label)
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::SEMIBOLD))
+            .color(tokens.text_primary)
+            .wrapping(Wrapping::None),
+    ]
+    .spacing(Spacing::MD)
+    .align_y(iced::Alignment::Center)
+    .width(Length::Fill);
+
+    if command_visible(
+        app,
+        CommandId::MoveSelectionToFolder,
+        CommandSurface::SelectionToolbar,
+    ) {
+        actions = actions.push(
+            toolbar_button("Move", tokens).on_press(
+                command_message(app, CommandId::MoveSelectionToFolder)
+                    .unwrap_or(Message::OpenMoveSelectionDialog),
+            ),
+        );
+    }
+    if command_visible(
+        app,
+        CommandId::RefreshMetadata,
+        CommandSurface::SelectionToolbar,
+    ) {
+        actions = actions.push(
+            toolbar_button("Refresh Metadata", tokens).on_press(
+                command_message(app, CommandId::RefreshMetadata)
+                    .unwrap_or(Message::BulkRefreshPdfMetadata),
+            ),
+        );
+    }
+    if command_visible(
+        app,
+        CommandId::ExportSelectedPdfs,
+        CommandSurface::SelectionToolbar,
+    ) {
+        actions = actions.push(
+            toolbar_button("Export", tokens).on_press(
+                command_message(app, CommandId::ExportSelectedPdfs)
+                    .unwrap_or(Message::OpenExportDialog(ExportSource::SelectedEntries)),
+            ),
+        );
+    }
+    actions = actions.push(toolbar_button("More", tokens).on_press(Message::OpenCommandPalette));
+
+    if app.library.trash_view_active {
+        actions = actions
+            .push(toolbar_button("Restore", tokens).on_press(Message::RestoreSelectedFromTrash))
+            .push(
+                toolbar_button("Delete", tokens).on_press(Message::RequestConfirmation(
+                    ConfirmationAction::PermanentlyDeleteFromTrash,
+                )),
+            );
+    } else {
+        actions = actions.push(toolbar_button("Trash", tokens).on_press(
+            Message::RequestConfirmation(ConfirmationAction::BulkDeleteFromLibrary),
+        ));
+    }
+    actions =
+        actions.push(toolbar_button("Clear", tokens).on_press(Message::ClearLibrarySelection));
+
+    container(actions)
+        .width(Length::Fill)
+        .padding(Spacing::SM)
+        .style(move |_| container_style(tokens, Class::LibraryControlBar))
+        .into()
+}
+
+fn library_header_button<'a>(
+    label: &'a str,
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
+    button(
+        text(label)
+            .size(FontSize::MD)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary)
+            .wrapping(Wrapping::None),
+    )
+    .padding([Spacing::SM, Spacing::LG])
+    .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
 }
 
 pub(crate) fn view_library_breadcrumb_row<'a>(
@@ -450,7 +621,17 @@ pub(crate) fn library_toolbar_available_width(app: &PDFolioApp) -> f32 {
     } else {
         0.0
     };
-    (app.viewer.viewport_width - sidebar_width - Spacing::LG * 2.0 - Spacing::SM * 2.0).max(1.0)
+    let inspector_width = if app.library.library_inspector_open {
+        app.library.library_inspector_width + app.layout().sidebar_resize_handle_width
+    } else {
+        0.0
+    };
+    (app.viewer.viewport_width
+        - sidebar_width
+        - inspector_width
+        - Spacing::LG * 2.0
+        - Spacing::SM * 2.0)
+        .max(1.0)
 }
 
 pub(crate) fn library_new_folder_button<'a>(
@@ -535,6 +716,9 @@ pub(crate) fn library_filter_summary<'a>(
     if let Some(filter) = app.library.active_reading_filter {
         labels.push(format!("Reading: {}", filter.label()));
     }
+    if app.library.active_recently_opened_filter {
+        labels.push(String::from("Recently Opened"));
+    }
     if app.library.missing_filter_active {
         labels.push(String::from("Missing files"));
     }
@@ -578,6 +762,7 @@ pub(crate) fn library_filter_summary<'a>(
     row.into()
 }
 
+#[allow(dead_code)]
 pub(crate) fn view_library_selection_status_row<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,

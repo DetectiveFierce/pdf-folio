@@ -1,6 +1,7 @@
 //! Async task constructors and blocking helpers for library operations.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -15,7 +16,11 @@ use pdf_folio_db::{
 use crate::library::filters::entry_matches_query;
 use crate::library::metadata::{entry_author, entry_title, file_size};
 use crate::messages::Message;
-use crate::{LibraryClipboard, LibraryClipboardMode, LibraryClipboardTarget, LibraryHistoryAction};
+use crate::{
+    ExportConflictBehavior, ExportFilenameTemplate, ExportMode, LibraryClipboard,
+    LibraryClipboardMode, LibraryClipboardTarget, LibraryExportDialog, LibraryExportSummary,
+    LibraryHistoryAction,
+};
 
 pub(crate) fn persist_manual_entry_order_task(
     db: Arc<Db>,
@@ -933,6 +938,416 @@ pub(crate) fn bulk_reindex_task(entries: Vec<LibraryEntry>) -> Task<Message> {
             Err(error) => Message::LibraryError(error.to_string()),
         },
     )
+}
+
+pub(crate) fn export_library_entries_task(
+    entries: Vec<LibraryEntry>,
+    dialog: LibraryExportDialog,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || export_library_entries(entries, dialog)).await?
+        },
+        |result| Message::ExportFinished(result.map_err(|error| error.to_string())),
+    )
+}
+
+fn export_library_entries(
+    entries: Vec<LibraryEntry>,
+    dialog: LibraryExportDialog,
+) -> anyhow::Result<LibraryExportSummary> {
+    let destination = dialog
+        .destination
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("Choose an export destination folder."))?;
+    std::fs::create_dir_all(&destination)?;
+
+    if dialog.mode == ExportMode::Zip {
+        return export_library_entries_zip(entries, dialog, destination);
+    }
+
+    let mut exported = 0;
+    let mut skipped = 0;
+    let mut errors = Vec::new();
+    let mut metadata_rows = Vec::new();
+
+    for entry in &entries {
+        let target_dir = match dialog.mode {
+            ExportMode::CopyFlat | ExportMode::Zip => destination.clone(),
+            ExportMode::PreserveFolders => {
+                let mut folder_dir = destination.clone();
+                if entry.folders.is_empty() {
+                    folder_dir.push("Unfiled");
+                } else {
+                    for folder in &entry.folders {
+                        folder_dir.push(sanitize_filename(&folder.name));
+                    }
+                }
+                folder_dir
+            }
+        };
+        if let Err(error) = std::fs::create_dir_all(&target_dir) {
+            errors.push(format!("{}: {error}", entry_title(entry)));
+            continue;
+        }
+        let filename = export_filename(entry, dialog.filename_template);
+        let target_path = match export_target_path(&target_dir, &filename, dialog.conflict_behavior)
+        {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                skipped += 1;
+                continue;
+            }
+            Err(error) => {
+                errors.push(format!("{}: {error}", entry_title(entry)));
+                continue;
+            }
+        };
+        match std::fs::copy(&entry.path, &target_path) {
+            Ok(_) => {
+                exported += 1;
+                metadata_rows.push((entry.clone(), target_path));
+            }
+            Err(error) => errors.push(format!("{}: {error}", entry.path.display())),
+        }
+    }
+
+    if dialog.include_metadata_csv {
+        if let Err(error) = write_export_metadata_csv(
+            &destination.join("metadata.csv"),
+            &metadata_rows,
+            dialog.include_tags,
+            dialog.include_reading_progress,
+        ) {
+            errors.push(format!("metadata.csv: {error}"));
+        }
+    }
+    if dialog.include_metadata_json {
+        if let Err(error) = write_export_metadata_json(
+            &destination.join("metadata.json"),
+            &metadata_rows,
+            dialog.include_tags,
+            dialog.include_reading_progress,
+        ) {
+            errors.push(format!("metadata.json: {error}"));
+        }
+    }
+
+    Ok(LibraryExportSummary {
+        destination,
+        exported,
+        skipped,
+        errors,
+    })
+}
+
+fn export_library_entries_zip(
+    entries: Vec<LibraryEntry>,
+    dialog: LibraryExportDialog,
+    destination: PathBuf,
+) -> anyhow::Result<LibraryExportSummary> {
+    let zip_path = export_target_path(
+        &destination,
+        "pdf-folio-export.zip",
+        dialog.conflict_behavior,
+    )?
+    .ok_or_else(|| anyhow::anyhow!("Export ZIP already exists."))?;
+    let file = std::fs::File::create(&zip_path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let mut exported = 0;
+    let skipped = 0;
+    let mut errors = Vec::new();
+    let mut metadata_rows = Vec::new();
+    let mut used_names = HashSet::new();
+
+    for entry in &entries {
+        let filename = export_filename(entry, dialog.filename_template);
+        let mut archive_name = archive_path_for_entry(entry, &filename);
+        archive_name = unique_archive_name(archive_name, &mut used_names);
+        match std::fs::read(&entry.path) {
+            Ok(bytes) => {
+                if let Err(error) = zip.start_file(&archive_name, options) {
+                    errors.push(format!("{}: {error}", entry_title(entry)));
+                    continue;
+                }
+                if let Err(error) = zip.write_all(&bytes) {
+                    errors.push(format!("{}: {error}", entry_title(entry)));
+                    continue;
+                }
+                exported += 1;
+                metadata_rows.push((entry.clone(), PathBuf::from(archive_name)));
+            }
+            Err(error) => errors.push(format!("{}: {error}", entry.path.display())),
+        }
+    }
+
+    if dialog.include_metadata_csv {
+        let csv = export_metadata_csv_string(
+            &metadata_rows,
+            dialog.include_tags,
+            dialog.include_reading_progress,
+        );
+        zip.start_file("metadata.csv", options)?;
+        zip.write_all(csv.as_bytes())?;
+    }
+    if dialog.include_metadata_json {
+        let json = export_metadata_json_bytes(
+            &metadata_rows,
+            dialog.include_tags,
+            dialog.include_reading_progress,
+        )?;
+        zip.start_file("metadata.json", options)?;
+        zip.write_all(&json)?;
+    }
+    zip.finish()?;
+
+    Ok(LibraryExportSummary {
+        destination: zip_path,
+        exported,
+        skipped,
+        errors,
+    })
+}
+
+fn export_target_path(
+    target_dir: &Path,
+    filename: &str,
+    conflict_behavior: ExportConflictBehavior,
+) -> anyhow::Result<Option<PathBuf>> {
+    let mut path = target_dir.join(filename);
+    if !path.exists() {
+        return Ok(Some(path));
+    }
+    match conflict_behavior {
+        ExportConflictBehavior::Skip => Ok(None),
+        ExportConflictBehavior::Overwrite => Ok(Some(path)),
+        ExportConflictBehavior::KeepBoth => {
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("document")
+                .to_owned();
+            let extension = path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(ToOwned::to_owned);
+            for index in 2..10_000 {
+                let candidate = match extension.as_deref() {
+                    Some(extension) => format!("{stem} ({index}).{extension}"),
+                    None => format!("{stem} ({index})"),
+                };
+                path = target_dir.join(candidate);
+                if !path.exists() {
+                    return Ok(Some(path));
+                }
+            }
+            anyhow::bail!("Could not find an available filename for {filename}.")
+        }
+    }
+}
+
+fn export_filename(entry: &LibraryEntry, template: ExportFilenameTemplate) -> String {
+    let original = entry
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("document.pdf");
+    if template == ExportFilenameTemplate::OriginalFilename {
+        return sanitize_pdf_filename(original);
+    }
+    let title = entry_title(entry);
+    let author = entry_author(entry);
+    let year = entry.added_at.format("%Y").to_string();
+    let raw = match template {
+        ExportFilenameTemplate::OriginalFilename => original.to_owned(),
+        ExportFilenameTemplate::Title => title,
+        ExportFilenameTemplate::AuthorTitle => format!("{author} - {title}"),
+        ExportFilenameTemplate::YearAuthorTitle => format!("{year} - {author} - {title}"),
+    };
+    sanitize_pdf_filename(&raw)
+}
+
+fn sanitize_pdf_filename(value: &str) -> String {
+    let stem = value.strip_suffix(".pdf").unwrap_or(value);
+    let stem = sanitize_filename(stem);
+    if stem.is_empty() {
+        String::from("document.pdf")
+    } else {
+        format!("{stem}.pdf")
+    }
+}
+
+fn sanitize_filename(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            character if character.is_control() => ' ',
+            character => character,
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches('.')
+        .trim()
+        .to_owned()
+}
+
+fn archive_path_for_entry(entry: &LibraryEntry, filename: &str) -> String {
+    let mut parts = if entry.folders.is_empty() {
+        vec![String::from("Unfiled")]
+    } else {
+        entry
+            .folders
+            .iter()
+            .map(|folder| sanitize_filename(&folder.name))
+            .collect::<Vec<_>>()
+    };
+    parts.push(filename.to_owned());
+    parts.join("/")
+}
+
+fn unique_archive_name(mut name: String, used_names: &mut HashSet<String>) -> String {
+    if used_names.insert(name.clone()) {
+        return name;
+    }
+    let path = Path::new(&name);
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("document")
+        .to_owned();
+    let parent = path
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .unwrap_or("");
+    let parent = parent.to_owned();
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("pdf")
+        .to_owned();
+    for index in 2..10_000 {
+        name = if parent.is_empty() {
+            format!("{stem} ({index}).{extension}")
+        } else {
+            format!("{parent}/{stem} ({index}).{extension}")
+        };
+        if used_names.insert(name.clone()) {
+            return name;
+        }
+    }
+    name
+}
+
+fn write_export_metadata_csv(
+    path: &Path,
+    rows: &[(LibraryEntry, PathBuf)],
+    include_tags: bool,
+    include_reading_progress: bool,
+) -> anyhow::Result<()> {
+    let csv = export_metadata_csv_string(rows, include_tags, include_reading_progress);
+    std::fs::write(path, csv)?;
+    Ok(())
+}
+
+fn export_metadata_csv_string(
+    rows: &[(LibraryEntry, PathBuf)],
+    include_tags: bool,
+    include_reading_progress: bool,
+) -> String {
+    let mut csv = String::from("file,title,author,pages,source_path");
+    if include_tags {
+        csv.push_str(",tags");
+    }
+    if include_reading_progress {
+        csv.push_str(",last_page,progress_percent");
+    }
+    csv.push('\n');
+    for (entry, exported_path) in rows {
+        csv.push_str(&csv_cell(&exported_path.display().to_string()));
+        csv.push(',');
+        csv.push_str(&csv_cell(&entry_title(entry)));
+        csv.push(',');
+        csv.push_str(&csv_cell(&entry_author(entry)));
+        csv.push(',');
+        csv.push_str(
+            &entry
+                .page_count
+                .map_or(String::new(), |pages| pages.to_string()),
+        );
+        csv.push(',');
+        csv.push_str(&csv_cell(&entry.path.display().to_string()));
+        if include_tags {
+            csv.push(',');
+            csv.push_str(&csv_cell(&entry.tags.join("; ")));
+        }
+        if include_reading_progress {
+            csv.push(',');
+            csv.push_str(&(u32::from(entry.last_page) + 1).to_string());
+            csv.push(',');
+            let progress = entry.page_count.map_or(0.0, |page_count| {
+                (f32::from(entry.last_page.saturating_add(1)) / f32::from(page_count.max(1)))
+                    * 100.0
+            });
+            csv.push_str(&format!("{progress:.0}"));
+        }
+        csv.push('\n');
+    }
+    csv
+}
+
+fn csv_cell(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+fn write_export_metadata_json(
+    path: &Path,
+    rows: &[(LibraryEntry, PathBuf)],
+    include_tags: bool,
+    include_reading_progress: bool,
+) -> anyhow::Result<()> {
+    std::fs::write(
+        path,
+        export_metadata_json_bytes(rows, include_tags, include_reading_progress)?,
+    )?;
+    Ok(())
+}
+
+fn export_metadata_json_bytes(
+    rows: &[(LibraryEntry, PathBuf)],
+    include_tags: bool,
+    include_reading_progress: bool,
+) -> anyhow::Result<Vec<u8>> {
+    let items = rows
+        .iter()
+        .map(|(entry, exported_path)| {
+            let mut item = serde_json::json!({
+                "file": exported_path,
+                "title": entry_title(entry),
+                "author": entry_author(entry),
+                "pages": entry.page_count,
+                "source_path": entry.path,
+            });
+            if include_tags {
+                item["tags"] = serde_json::json!(entry.tags);
+            }
+            if include_reading_progress {
+                item["last_page"] = serde_json::json!(u32::from(entry.last_page) + 1);
+                item["progress_percent"] =
+                    serde_json::json!(entry.page_count.map_or(0.0, |page_count| {
+                        (f32::from(entry.last_page.saturating_add(1))
+                            / f32::from(page_count.max(1)))
+                            * 100.0
+                    }));
+            }
+            item
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_vec_pretty(&items)?)
 }
 
 pub(crate) fn attribute_pending_metadata_task(db: Arc<Db>) -> Task<Message> {

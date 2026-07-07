@@ -10,19 +10,7 @@ const ACTIVE_TRASH_CAN_CONTENT_OFFSET: f32 = 4.0;
 pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let sidebar_width = app.library.library_tag_sidebar_width;
-    let sidebar_body = if let Some(entry) = app.primary_selected_entry() {
-        view_selected_pdf_sidebar(app, entry, sidebar_width, tokens)
-    } else if !app.library.selected_library_entries.is_empty() {
-        view_multi_selection_sidebar(app, sidebar_width, tokens)
-    } else if app.library.folder_details_sidebar_open {
-        if let Some(folder) = app.details_folder().cloned() {
-            view_selected_folder_sidebar(app, folder, sidebar_width, tokens)
-        } else {
-            view_library_navigation_sidebar(app, sidebar_width, tokens)
-        }
-    } else {
-        view_library_navigation_sidebar(app, sidebar_width, tokens)
-    };
+    let sidebar_body = view_library_navigation_sidebar(app, sidebar_width, tokens);
 
     let sidebar_content = column![
         container(sidebar_body).height(Length::Fill),
@@ -146,50 +134,11 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
     )
     .padding(Spacing::MD);
 
-    let sidebar_tab_component = tokens.class_styles[Class::SidebarTab.index()];
-    let sidebar_tab_layout = sidebar_tab_component.layout;
     let file_tree_component = tokens.class_styles[Class::FileTree.index()];
     let file_tree_layout = file_tree_component.layout;
     let file_tree_style = file_tree_component.resolve(ComponentState::Normal);
-    let content_background = file_tree_style
-        .background
-        .or_else(|| {
-            sidebar_tab_component
-                .resolve(ComponentState::Active)
-                .background
-        })
-        .unwrap_or(tokens.surface);
-    let tabs = container(
-        row![
-            sidebar_tab_button(
-                LibrarySidebarTab::Files,
-                app.library.library_sidebar_tab,
-                tokens,
-                app.labels(),
-            ),
-            sidebar_tab_button(
-                LibrarySidebarTab::Tags,
-                app.library.library_sidebar_tab,
-                tokens,
-                app.labels(),
-            ),
-        ]
-        .spacing(sidebar_tab_layout.spacing.unwrap_or(Spacing::XS))
-        .width(Length::Fill),
-    )
-    .width(Length::Fill)
-    .padding(iced::Padding {
-        top: sidebar_tab_layout.margin_top(Spacing::XS),
-        right: sidebar_tab_layout.margin_right(Spacing::SM),
-        bottom: sidebar_tab_layout.margin_bottom(Spacing::XS),
-        left: sidebar_tab_layout.margin_left(Spacing::SM),
-    })
-    .style(move |_| container_style(tokens, Class::SidebarSection));
-
-    let body = match app.library.library_sidebar_tab {
-        LibrarySidebarTab::Files => view_file_tree_sidebar(app, sidebar_width, tokens),
-        LibrarySidebarTab::Tags => view_tag_tree_sidebar(app, sidebar_width, tokens),
-    };
+    let content_background = file_tree_style.background.unwrap_or(tokens.surface);
+    let body = view_stacked_library_navigation_sidebar(app, sidebar_width, tokens);
 
     let body_scroll = scrollable(body)
         .direction(sidebar_scroll_direction(tokens))
@@ -205,7 +154,7 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
             left: 0.0,
         });
 
-    let tabbed_body = container(column![tabs, padded_body].spacing(0).height(Length::Fill))
+    let tabbed_body = container(padded_body)
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_| {
@@ -222,52 +171,170 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
     container(content).height(Length::Fill).into()
 }
 
-pub(crate) fn sidebar_tab_button<'a>(
-    tab: LibrarySidebarTab,
-    active_tab: LibrarySidebarTab,
+fn view_stacked_library_navigation_sidebar<'a>(
+    app: &'a PDFolioApp,
+    sidebar_width: f32,
     tokens: ThemeTokens,
-    labels: &'a crate::style::AppLabelTokens,
-) -> iced::widget::Button<'a, Message> {
-    let active = tab == active_tab;
-    let component = tokens.class_styles[Class::SidebarTab.index()];
-    let layout = component.layout;
-    let text_style = component.text;
-    let normal_style = component.resolve(ComponentState::Normal);
-    let active_style = component.resolve(ComponentState::Active);
-    button(
-        text(library_sidebar_tab_label(labels, tab))
-            .size(text_style.size.unwrap_or(FontSize::MD))
-            .font(ui_font(text_style.weight.unwrap_or(FontWeight::MEDIUM)))
-            .color(if active {
-                active_style.text_color.unwrap_or(tokens.text_primary)
-            } else {
-                normal_style.text_color.unwrap_or(tokens.text_secondary)
-            }),
+) -> Element<'a, Message> {
+    let all_active = !app.library.trash_view_active
+        && app.library.selected_folder.is_none()
+        && app.library.details_folder_id.is_none()
+        && app.library.active_tag_filter.is_none()
+        && app.library.active_reading_filter.is_none()
+        && !app.library.active_recently_opened_filter
+        && !app.library.missing_filter_active
+        && app.library.search_query.trim().is_empty();
+    let recently_opened_count = app
+        .library
+        .library_entries
+        .iter()
+        .filter(|entry| entry.opened_at.is_some())
+        .count();
+    let unfiled_count = app
+        .library
+        .library_entries
+        .iter()
+        .filter(|entry| entry.folders.is_empty())
+        .count();
+    let missing_count = app
+        .library
+        .library_entries
+        .iter()
+        .filter(|entry| entry.missing)
+        .count();
+
+    let library_section = column![
+        sidebar_section_heading("Library", tokens),
+        file_tree_row(
+            "All PDFs",
+            Some(format_count(app.library.library_entries.len(), "PDF")),
+            0,
+            all_active,
+            false,
+            false,
+            Message::ClearLibraryFilters,
+            Message::ClearLibraryFilters,
+            sidebar_width,
+            tokens,
+            false,
+        ),
+        file_tree_row(
+            "Recently Opened",
+            Some(format_count(recently_opened_count, "PDF")),
+            0,
+            app.library.active_recently_opened_filter,
+            false,
+            false,
+            Message::RecentlyOpenedFilterChanged(true),
+            Message::RecentlyOpenedFilterChanged(true),
+            sidebar_width,
+            tokens,
+            false,
+        ),
+        file_tree_row(
+            "Unfiled",
+            Some(format_count(unfiled_count, "PDF")),
+            0,
+            !app.library.trash_view_active
+                && app.library.selected_folder.is_none()
+                && app.library.details_folder_id.is_none()
+                && app.library.active_tag_filter.is_none()
+                && app.library.active_reading_filter.is_none()
+                && !app.library.active_recently_opened_filter
+                && !app.library.missing_filter_active
+                && !all_active,
+            false,
+            false,
+            Message::FolderSelected(None),
+            Message::FolderSelected(None),
+            sidebar_width,
+            tokens,
+            false,
+        ),
+        file_tree_row(
+            "Missing",
+            Some(format_count(missing_count, "PDF")),
+            0,
+            app.library.missing_filter_active,
+            false,
+            false,
+            Message::MissingFilterChanged(!app.library.missing_filter_active),
+            Message::MissingFilterChanged(!app.library.missing_filter_active),
+            sidebar_width,
+            tokens,
+            false,
+        ),
+        trash_can_sidebar_row(app, sidebar_width, tokens),
+    ]
+    .spacing(0);
+
+    let mut content = column![
+        library_section,
+        sidebar_section_heading_with_toggle(
+            "Folders",
+            app.library.library_tree_root_expanded,
+            Message::ToggleLibraryTreeRoot,
+            tokens,
+        ),
+    ]
+    .spacing(Spacing::SM);
+
+    if app.library.library_tree_root_expanded {
+        content = content.push(view_file_tree_sidebar(app, sidebar_width, tokens));
+    }
+
+    content = content.push(sidebar_section_heading_with_toggle(
+        "Tags",
+        app.library.library_tags_expanded,
+        Message::ToggleLibraryTags,
+        tokens,
+    ));
+    if app.library.library_tags_expanded {
+        content = content.push(view_tag_tree_sidebar(app, sidebar_width, tokens));
+    }
+
+    content
+        .padding(iced::Padding {
+            top: Spacing::SM,
+            right: 0.0,
+            bottom: Spacing::MD,
+            left: 0.0,
+        })
+        .into()
+}
+
+fn sidebar_section_heading(label: &str, tokens: ThemeTokens) -> Element<'_, Message> {
+    container(section_heading(label, tokens))
+        .padding(iced::Padding {
+            top: Spacing::SM,
+            right: Spacing::SM,
+            bottom: Spacing::XS,
+            left: Spacing::SM,
+        })
+        .into()
+}
+
+fn sidebar_section_heading_with_toggle(
+    label: &str,
+    expanded: bool,
+    toggle_message: Message,
+    tokens: ThemeTokens,
+) -> Element<'_, Message> {
+    container(
+        row![
+            section_heading(label, tokens),
+            file_tree_fold_button(expanded, toggle_message, tokens),
+        ]
+        .spacing(Spacing::XS)
+        .align_y(iced::Alignment::Center),
     )
-    .height(layout.height.unwrap_or(30.0))
-    .width(Length::FillPortion(layout.width_portion.unwrap_or(1)))
     .padding(iced::Padding {
-        top: layout.padding_top(Spacing::XS),
-        right: layout.padding_right(Spacing::MD),
-        bottom: layout.padding_bottom(Spacing::XS),
-        left: layout.padding_left(Spacing::MD),
+        top: Spacing::SM,
+        right: Spacing::SM,
+        bottom: Spacing::XS,
+        left: Spacing::SM,
     })
-    .style(move |_, status| {
-        let style = crate::style::button_style(tokens, Class::SidebarTab, status);
-        let state = if active {
-            ComponentState::Active
-        } else {
-            match status {
-                iced::widget::button::Status::Active => ComponentState::Normal,
-                iced::widget::button::Status::Hovered => ComponentState::Hovered,
-                iced::widget::button::Status::Pressed => ComponentState::Pressed,
-                iced::widget::button::Status::Disabled => ComponentState::Disabled,
-            }
-        };
-        let state_style = component.resolve(state);
-        style.with_visual_override(state_style)
-    })
-    .on_press(Message::LibrarySidebarTabChanged(tab))
+    .into()
 }
 
 pub(crate) fn view_file_tree_sidebar<'a>(
@@ -275,34 +342,7 @@ pub(crate) fn view_file_tree_sidebar<'a>(
     sidebar_width: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let library_counts = app.normal_folder_smart_counts(None);
-    let root_row = file_tree_row(
-        "Library",
-        Some(folder_sidebar_count_label(library_counts)),
-        0,
-        !app.library.trash_view_active
-            && app.library.selected_folder.is_none()
-            && app.library.details_folder_id.is_none(),
-        true,
-        app.library.library_tree_root_expanded,
-        Message::ToggleLibraryTreeRoot,
-        Message::FolderTreeClicked(None),
-        sidebar_width,
-        tokens,
-        false,
-    );
-    let mut tree = column![mouse_area(root_row)
-        .on_right_press(Message::ContextMenuOpened(ContextMenuTarget::Folder(None),)),]
-    .spacing(0);
-
-    if app.library.library_tree_root_expanded {
-        tree = tree.push(folder_sidebar_rows(app, None, 1, sidebar_width, tokens));
-    }
-
-    tree = tree.push(container("").height(Spacing::LG));
-    tree = tree.push(trash_can_sidebar_row(app, sidebar_width, tokens));
-
-    tree.into()
+    folder_sidebar_rows(app, None, 0, sidebar_width, tokens)
 }
 
 pub(crate) fn trash_can_sidebar_row<'a>(
@@ -537,6 +577,9 @@ pub(crate) fn view_selected_folder_sidebar<'a>(
         sidebar_detail_row("Missing", counts.missing.to_string(), details_width, tokens),
         sidebar_action_button("Open folder", tokens)
             .on_press(Message::FolderSelected(Some(folder.id.clone()))),
+        sidebar_action_button("Export folder", tokens).on_press(Message::OpenExportDialog(
+            ExportSource::Folder(folder.id.clone())
+        )),
     ]
     .spacing(Spacing::SM)
     .padding(Spacing::MD);
@@ -567,41 +610,7 @@ pub(crate) fn view_tag_tree_sidebar<'a>(
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     let all_tags = app.all_tags();
-    let fold_button_width = tokens.class_styles[Class::FileTreeFoldButton.index()]
-        .layout
-        .width
-        .unwrap_or(16.0);
-    let tag_label_left_offset = tokens
-        .primitives
-        .file_tree_indent_width
-        .min(tokens.primitives.file_tree_max_indent)
-        + fold_button_width
-        + Spacing::XS;
-    let mut tags = column![
-        file_tree_row(
-            "All tags",
-            Some(format_count(app.library.library_entries.len(), "PDF")),
-            0,
-            app.library.active_tag_filter.is_none(),
-            !all_tags.is_empty(),
-            true,
-            Message::TagFilterChanged(None),
-            Message::TagFilterChanged(None),
-            sidebar_width,
-            tokens,
-            false,
-        ),
-        mouse_area(
-            container(section_heading("Tags", tokens)).padding(iced::Padding {
-                top: 0.0,
-                right: 0.0,
-                bottom: 0.0,
-                left: tag_label_left_offset,
-            })
-        )
-        .on_press(Message::CancelTagRename),
-    ]
-    .spacing(Spacing::SM);
+    let mut tags = column![].spacing(Spacing::SM);
 
     for tag in all_tags {
         let count = app
@@ -617,7 +626,7 @@ pub(crate) fn view_tag_tree_sidebar<'a>(
             let row = file_tree_row(
                 tag.clone(),
                 Some(format_count(count, "PDF")),
-                1,
+                0,
                 active,
                 false,
                 false,
@@ -635,6 +644,46 @@ pub(crate) fn view_tag_tree_sidebar<'a>(
     }
 
     tags.into()
+}
+
+fn file_tree_fold_button<'a>(
+    expanded: bool,
+    toggle_message: Message,
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
+    let fold_button_component = tokens.class_styles[Class::FileTreeFoldButton.index()];
+    let fold_button_layout = fold_button_component.layout;
+    let fold_button_normal_style = fold_button_component.resolve(ComponentState::Normal);
+    let fold_button_hovered_style = fold_button_component.resolve(ComponentState::Hovered);
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(if expanded {
+        FILE_TREE_CHEVRON_DOWN_SVG
+    } else {
+        FILE_TREE_CHEVRON_RIGHT_SVG
+    }))
+    .width(tokens.primitives.sidebar_chevron_icon_size)
+    .height(tokens.primitives.sidebar_chevron_icon_size)
+    .style(move |_, status| iced::widget::svg::Style {
+        color: Some(match status {
+            iced::widget::svg::Status::Hovered => fold_button_hovered_style
+                .text_color
+                .unwrap_or(tokens.text_primary),
+            iced::widget::svg::Status::Idle => fold_button_normal_style
+                .text_color
+                .unwrap_or(tokens.text_secondary),
+        }),
+    });
+
+    button(
+        container(icon)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill),
+    )
+    .width(fold_button_layout.width.unwrap_or(16.0))
+    .height(fold_button_layout.height.unwrap_or(20.0))
+    .padding(fold_button_layout.padding_top(0.0))
+    .style(move |_, status| crate::style::button_style(tokens, Class::FileTreeFoldButton, status))
+    .on_press(toggle_message)
 }
 
 fn tag_rename_row<'a>(
@@ -703,11 +752,6 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let tags_label = if entry.tags.is_empty() {
-        String::from("No tags")
-    } else {
-        entry.tags.join(", ")
-    };
     let progress_label = selected_pdf_progress_label(&entry);
     let status_label = if app.library.trash_view_active {
         "In Trash"
@@ -733,6 +777,24 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
     let mut content = column![
         heading,
         thumbnail_element(app, &entry.id, tokens, details_width.min(160.0), 1.0),
+        text_input("Title", &app.library.details_title_input)
+            .on_input(Message::DetailsTitleChanged)
+            .on_submit(Message::SaveDetailsMetadata)
+            .id(Id::new(LIBRARY_DETAILS_TITLE_INPUT_ID))
+            .style(move |_, status| folder_sidebar_text_input_style(tokens, status))
+            .width(Length::Fill),
+        text_input("Author", &app.library.details_author_input)
+            .on_input(Message::DetailsAuthorChanged)
+            .on_submit(Message::SaveDetailsMetadata)
+            .style(move |_, status| folder_sidebar_text_input_style(tokens, status))
+            .width(Length::Fill),
+        row![
+            sidebar_action_button("Save", tokens).on_press(Message::SaveDetailsMetadata),
+            sidebar_action_button("Reset", tokens).on_press(Message::RequestConfirmation(
+                ConfirmationAction::ResetDetailsMetadata(entry.id.clone()),
+            )),
+        ]
+        .spacing(Spacing::XS),
         text(truncate_for_width(&title, details_width, 0.0))
             .size(FontSize::HEADING)
             .font(display_font(FontWeight::MEDIUM))
@@ -757,13 +819,22 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
         ),
         sidebar_detail_row("File", path_label.to_owned(), details_width, tokens),
         sidebar_detail_row("Folders", folder_label, details_width, tokens),
-        sidebar_detail_row("Tags", tags_label, details_width, tokens),
+        inspector_tag_editor(app, Some(entry.clone()), details_width, tokens),
         sidebar_action_button("Open PDF", tokens)
             .on_press(Message::OpenLibraryEntry(entry.id.clone())),
+        sidebar_action_button("Export PDF", tokens).on_press(Message::OpenExportDialog(
+            ExportSource::SingleEntry(entry.id.clone(),)
+        )),
         sidebar_action_button("Reveal in file manager", tokens)
             .on_press(Message::RevealEntryInFileManager(entry.id.clone())),
         sidebar_action_button("Open containing folder", tokens)
             .on_press(Message::OpenEntryContainingFolder(entry.id.clone())),
+        sidebar_action_button("Copy file path", tokens)
+            .on_press(Message::CopyEntryFilePath(entry.id.clone())),
+        sidebar_action_button("Move to folder", tokens).on_press(Message::OpenMoveSelectionDialog),
+        sidebar_action_button("Refresh metadata", tokens).on_press(Message::BulkRefreshPdfMetadata),
+        sidebar_action_button("Rebuild thumbnail", tokens).on_press(Message::BulkRebuildThumbnails),
+        sidebar_action_button("Reindex full text", tokens).on_press(Message::BulkReindex),
     ];
     if entry.missing && !app.library.trash_view_active {
         content = content.push(
@@ -772,6 +843,9 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
         );
     }
     let content = content
+        .push(sidebar_action_button("Move to Trash", tokens).on_press(
+            Message::RequestConfirmation(ConfirmationAction::BulkDeleteFromLibrary),
+        ))
         .push(
             sidebar_action_button("Clear selection", tokens)
                 .on_press(Message::ClearLibrarySelection),
@@ -852,6 +926,17 @@ pub(crate) fn view_multi_selection_sidebar<'a>(
             tokens,
         ),
         sidebar_detail_row("Total size", total_size_label, details_width, tokens),
+        inspector_tag_editor(app, None, details_width, tokens),
+        sidebar_action_button("Move to folder", tokens).on_press(Message::OpenMoveSelectionDialog),
+        sidebar_action_button("Export selected", tokens)
+            .on_press(Message::OpenExportDialog(ExportSource::SelectedEntries)),
+        sidebar_action_button("Refresh metadata", tokens).on_press(Message::BulkRefreshPdfMetadata),
+        sidebar_action_button("Rebuild thumbnails", tokens)
+            .on_press(Message::BulkRebuildThumbnails),
+        sidebar_action_button("Reindex full text", tokens).on_press(Message::BulkReindex),
+        sidebar_action_button("Move to Trash", tokens).on_press(Message::RequestConfirmation(
+            ConfirmationAction::BulkDeleteFromLibrary,
+        )),
         sidebar_action_button("Clear selection", tokens).on_press(Message::ClearLibrarySelection),
     ]
     .spacing(Spacing::SM)
@@ -861,6 +946,120 @@ pub(crate) fn view_multi_selection_sidebar<'a>(
         .height(Length::Fill)
         .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
         .into()
+}
+
+fn inspector_tag_editor<'a>(
+    app: &'a PDFolioApp,
+    entry: Option<LibraryEntry>,
+    width: f32,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let selected_entries = app.selected_entries();
+    let tags = if let Some(entry) = entry.as_ref() {
+        entry.tags.clone()
+    } else {
+        common_tags(&selected_entries)
+    };
+    let current_tags = tags.clone();
+    let mut chip_row = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
+    if tags.is_empty() {
+        chip_row = chip_row.push(
+            text("No tags")
+                .size(FontSize::SM)
+                .font(ui_font(FontWeight::REGULAR))
+                .color(sidebar_detail_secondary_color(tokens)),
+        );
+    } else {
+        for tag in tags.into_iter().take(8) {
+            let message = if let Some(entry) = entry.as_ref() {
+                Message::InspectorRemoveTag {
+                    entry_id: entry.id.clone(),
+                    tag: tag.clone(),
+                }
+            } else {
+                Message::InspectorRemoveTagFromSelection(tag.clone())
+            };
+            chip_row = chip_row.push(
+                button(
+                    text(format!("{tag} x"))
+                        .size(FontSize::SM)
+                        .font(ui_font(FontWeight::MEDIUM))
+                        .color(tokens.text_secondary)
+                        .wrapping(Wrapping::None),
+                )
+                .padding([Spacing::XS, Spacing::SM])
+                .on_press(message)
+                .style(move |_, status| button_style(tokens, Class::TagPill, status)),
+            );
+        }
+    }
+
+    let input_width = (width - Spacing::SM * 2.0).max(80.0);
+    let mut editor = column![
+        text("Tags")
+            .size(FontSize::SM)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(sidebar_detail_secondary_color(tokens)),
+        chip_row,
+        text_input("Add tag", &app.library.inspector_tag_input)
+            .on_input(Message::InspectorTagInputChanged)
+            .on_submit(Message::InspectorAddTag)
+            .style(move |_, status| folder_sidebar_text_input_style(tokens, status))
+            .width(input_width),
+        sidebar_action_button("Add tag", tokens).on_press(Message::InspectorAddTag),
+    ]
+    .spacing(Spacing::XS);
+
+    if app.library.inspector_tag_suggestions_open {
+        let query = app.library.inspector_tag_input.trim().to_lowercase();
+        if !query.is_empty() {
+            let mut suggestions = row![].spacing(Spacing::XS).align_y(iced::Alignment::Center);
+            let mut suggestion_count = 0;
+            for tag in app
+                .all_tags()
+                .into_iter()
+                .filter(|tag| {
+                    tag.to_lowercase().contains(&query)
+                        && !current_tags.iter().any(|current| current == tag)
+                })
+                .take(5)
+            {
+                suggestion_count += 1;
+                let label = tag.clone();
+                suggestions = suggestions.push(
+                    button(
+                        text(label)
+                            .size(FontSize::SM)
+                            .font(ui_font(FontWeight::MEDIUM))
+                            .color(tokens.text_secondary)
+                            .wrapping(Wrapping::None),
+                    )
+                    .padding([Spacing::XS, Spacing::SM])
+                    .on_press(Message::InspectorApplyTag(tag))
+                    .style(move |_, status| button_style(tokens, Class::TagPill, status)),
+                );
+            }
+            if suggestion_count > 0 {
+                editor = editor.push(suggestions);
+            }
+        }
+    }
+
+    container(editor)
+        .width(Length::Fill)
+        .padding([Spacing::XS, Spacing::SM])
+        .style(move |_| container_style(tokens, Class::SidebarDetailRow))
+        .into()
+}
+
+fn common_tags(entries: &[LibraryEntry]) -> Vec<String> {
+    let Some((first, rest)) = entries.split_first() else {
+        return Vec::new();
+    };
+    let mut tags = first.tags.clone();
+    tags.retain(|tag| rest.iter().all(|entry| entry.tags.contains(tag)));
+    tags.sort();
+    tags
 }
 
 pub(crate) fn sidebar_detail_row<'a>(

@@ -5,10 +5,6 @@ impl PDFolioApp {
         self.appearance.style_book.layout()
     }
 
-    pub(super) fn labels(&self) -> &crate::style::AppLabelTokens {
-        self.appearance.style_book.labels()
-    }
-
     pub(super) fn estimated_viewer_viewport_width(&self) -> f32 {
         let sidebar_width = if self.viewer.toc_open {
             self.layout().viewer_sidebar_width
@@ -19,8 +15,7 @@ impl PDFolioApp {
     }
 
     pub(super) fn estimated_viewer_viewport_height(&self) -> f32 {
-        (self.viewer.viewport_height - app_menu_bar_height(self) - self.layout().toolbar_height)
-            .max(1.0)
+        (self.viewer.viewport_height - self.layout().toolbar_height).max(1.0)
     }
 
     pub(super) fn apply_active_dimension_zoom(&mut self) -> Task<Message> {
@@ -156,8 +151,15 @@ impl PDFolioApp {
                 ),
                 library_tag_sidebar_open: true,
                 resizing_library_tag_sidebar: false,
+                library_inspector_width: layout.metric("LibraryInspector", "width", 320.0).clamp(
+                    layout.metric("LibraryInspector", "min_width", 260.0),
+                    layout.metric("LibraryInspector", "max_width", 480.0),
+                ),
+                library_inspector_open: true,
+                resizing_library_inspector: false,
                 library_sidebar_tab: LibrarySidebarTab::Files,
                 library_tree_root_expanded: preferences.library_tree_root_expanded,
+                library_tags_expanded: true,
                 collapsed_library_tree_folders: preferences
                     .collapsed_folder_ids
                     .into_iter()
@@ -167,6 +169,7 @@ impl PDFolioApp {
                 pending_thumbnails: HashSet::new(),
                 active_tag_filter: None,
                 active_reading_filter: None,
+                active_recently_opened_filter: false,
                 missing_filter_active: false,
                 previous_tag_pill_view: None,
                 tag_entry_id: None,
@@ -176,6 +179,9 @@ impl PDFolioApp {
                 selected_library_entries: HashSet::new(),
                 library_selection_anchor: None,
                 bulk_tag_input: String::new(),
+                inspector_tag_input: String::new(),
+                inspector_tag_suggestions_open: false,
+                inspector_tag_highlighted_index: 0,
                 details_entry_id: None,
                 details_title_input: String::new(),
                 details_author_input: String::new(),
@@ -198,6 +204,14 @@ impl PDFolioApp {
                 raindrop_import_new_folder_active: false,
                 raindrop_import_new_folder_name: String::new(),
                 raindrop_import_progress: None,
+                import_menu_open: false,
+                import_review: None,
+                tag_manager_open: false,
+                tag_manager_filter: String::new(),
+                tag_manager_merge_destination: String::new(),
+                export_dialog: None,
+                export_progress: None,
+                last_export_summary: None,
                 raindrop_rollback_recovery_active: false,
                 raindrop_rollback_recovery_status: None,
                 dismissed_library_errors: HashSet::new(),
@@ -221,10 +235,10 @@ impl PDFolioApp {
                 pending_confirmation: None,
                 folder_delete_warning_suppressed: false,
                 folder_delete_skip_warning_checked: false,
-                open_app_menu: None,
-                open_view_menu_flyout: None,
-                open_selection_menu: None,
                 open_context_menu: None,
+                command_palette_open: false,
+                command_palette_query: String::new(),
+                command_palette_selected_index: 0,
                 cursor_position: Point::ORIGIN,
             },
             appearance: AppearanceRuntime {
@@ -596,8 +610,6 @@ impl PDFolioApp {
         }
 
         self.viewer.viewer_find.open = true;
-        self.chrome.open_app_menu = None;
-        self.chrome.open_selection_menu = None;
         self.viewer.zoom_menu_open = false;
         self.refresh_viewer_find_matches();
 
