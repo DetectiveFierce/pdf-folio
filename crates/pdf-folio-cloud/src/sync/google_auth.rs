@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use url::Url;
 
-use crate::session::{save_session, Session};
+use super::session::{save_session, Session};
 
 const GOOGLE_AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const OAUTH_REDIRECT_PORT: u16 = 53149;

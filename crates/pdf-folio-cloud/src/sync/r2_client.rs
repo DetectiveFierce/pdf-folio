@@ -6,7 +6,7 @@ use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::session::Session;
+use super::session::Session;
 
 /// Upload URL returned by the sync server.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

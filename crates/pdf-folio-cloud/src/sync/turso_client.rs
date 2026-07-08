@@ -4,7 +4,7 @@ use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::session::Session;
+use super::session::Session;
 
 /// Short-lived Turso access details returned by the sync server.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

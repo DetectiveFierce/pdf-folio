@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use pdf_folio_sync::turso_client::{TursoRemote, TursoToken};
+use pdf_folio_cloud::sync::turso_client::{TursoRemote, TursoToken};
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -3,16 +3,16 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use pdf_folio_db::{
+use pdf_folio_core::{
     hash_file, Db, LibraryEntry, SyncCrdtOperation, SyncCrdtPrepareSummary, SyncEntryFolderRow,
     SyncEntryRow, SyncFolderRow,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::blob_cache::BlobCache;
-use crate::r2_client::R2Client;
-use crate::session::Session;
-use crate::turso_client::{TursoClient, TursoRemote, TursoValue};
+use super::blob_cache::BlobCache;
+use super::r2_client::R2Client;
+use super::session::Session;
+use super::turso_client::{TursoClient, TursoRemote, TursoValue};
 
 const ENTITY_ENTRY: &str = "entry";
 const ENTITY_FOLDER: &str = "folder";
@@ -390,7 +390,7 @@ impl SyncClient {
     pub async fn ensure_remote_schema(&self) -> Result<()> {
         let remote = self.turso.remote().await?;
         remote
-            .execute_batch(include_str!("../turso_schema.sql"))
+            .execute_batch(include_str!("../../turso_schema.sql"))
             .await
             .context("Could not create PDF-Folio sync schema in Turso.")?;
         Ok(())
@@ -1042,8 +1042,8 @@ fn crdt_operation_id(
 }
 
 fn entry_folder_entity_id(
-    entry_id: &pdf_folio_db::EntryId,
-    folder_id: &pdf_folio_db::FolderId,
+    entry_id: &pdf_folio_core::EntryId,
+    folder_id: &pdf_folio_core::FolderId,
 ) -> String {
     format!("{}\x1f{}", entry_id.as_str(), folder_id.as_str())
 }
@@ -1076,7 +1076,7 @@ fn winning_entry_payload(
 }
 
 fn apply_entry_payload_to_local(db: &Db, payload: &EntryPayload) -> Result<()> {
-    let entry_id = pdf_folio_db::EntryId::new(payload.id.clone());
+    let entry_id = pdf_folio_core::EntryId::new(payload.id.clone());
     if payload.purged {
         db.delete_entry(&entry_id)?;
         return Ok(());
@@ -1177,7 +1177,7 @@ fn materialize_crdt_winner(
             let payload = serde_json::from_str::<EntryPayload>(&operation.payload)
                 .context("Could not decode entry CRDT payload.")?;
             db.upsert_sync_entry(&SyncEntryRow {
-                id: pdf_folio_db::EntryId::new(payload.id.clone()),
+                id: pdf_folio_core::EntryId::new(payload.id.clone()),
                 library_id: payload.library_id.clone(),
                 title: payload
                     .display_title
@@ -1198,21 +1198,21 @@ fn materialize_crdt_winner(
             let payload = serde_json::from_str::<FolderPayload>(&operation.payload)
                 .context("Could not decode folder CRDT payload.")?;
             if payload.purged {
-                db.delete_folder(&pdf_folio_db::FolderId::new(payload.id.clone()))?;
+                db.delete_folder(&pdf_folio_core::FolderId::new(payload.id.clone()))?;
             }
             db.upsert_sync_folder(&SyncFolderRow {
-                id: pdf_folio_db::FolderId::new(payload.id.clone()),
+                id: pdf_folio_core::FolderId::new(payload.id.clone()),
                 library_id: payload.library_id.clone(),
                 name: payload.name.clone(),
-                parent_id: payload.parent_id.clone().map(pdf_folio_db::FolderId::new),
+                parent_id: payload.parent_id.clone().map(pdf_folio_core::FolderId::new),
                 updated_at: payload.updated_at,
                 deleted_at: payload.deleted_at,
             })?;
             db.apply_synced_folder_state(&SyncFolderRow {
-                id: pdf_folio_db::FolderId::new(payload.id),
+                id: pdf_folio_core::FolderId::new(payload.id),
                 library_id: payload.library_id,
                 name: payload.name,
-                parent_id: payload.parent_id.map(pdf_folio_db::FolderId::new),
+                parent_id: payload.parent_id.map(pdf_folio_core::FolderId::new),
                 updated_at: payload.updated_at,
                 deleted_at: payload.deleted_at,
             })?;
@@ -1223,8 +1223,8 @@ fn materialize_crdt_winner(
             let payload = serde_json::from_str::<EntryFolderPayload>(&operation.payload)
                 .context("Could not decode entry-folder CRDT payload.")?;
             let row = SyncEntryFolderRow {
-                entry_id: pdf_folio_db::EntryId::new(payload.entry_id),
-                folder_id: pdf_folio_db::FolderId::new(payload.folder_id),
+                entry_id: pdf_folio_core::EntryId::new(payload.entry_id),
+                folder_id: pdf_folio_core::FolderId::new(payload.folder_id),
                 updated_at: payload.updated_at,
                 deleted_at: payload.deleted_at,
             };
@@ -1526,7 +1526,7 @@ async fn remote_entries_updated_since(
     let mut output = Vec::new();
     for row in rows {
         output.push(SyncEntryRow {
-            id: pdf_folio_db::EntryId::new(row[0].as_string()?),
+            id: pdf_folio_core::EntryId::new(row[0].as_string()?),
             library_id: row[1].as_string()?,
             title: row[2].as_optional_string()?,
             author: row[3].as_optional_string()?,
@@ -1555,12 +1555,12 @@ async fn remote_folders_updated_since(
     let mut output = Vec::new();
     for row in rows {
         output.push(SyncFolderRow {
-            id: pdf_folio_db::FolderId::new(row[0].as_string()?),
+            id: pdf_folio_core::FolderId::new(row[0].as_string()?),
             library_id: row[1].as_string()?,
             name: row[2].as_string()?,
             parent_id: row[3]
                 .as_optional_string()?
-                .map(pdf_folio_db::FolderId::new),
+                .map(pdf_folio_core::FolderId::new),
             updated_at: row[4].as_i64()?,
             deleted_at: row[5].as_optional_i64()?,
         });
@@ -1586,8 +1586,8 @@ async fn remote_entry_folders_updated_since(
     let mut output = Vec::new();
     for row in rows {
         output.push(SyncEntryFolderRow {
-            entry_id: pdf_folio_db::EntryId::new(row[0].as_string()?),
-            folder_id: pdf_folio_db::FolderId::new(row[1].as_string()?),
+            entry_id: pdf_folio_core::EntryId::new(row[0].as_string()?),
+            folder_id: pdf_folio_core::FolderId::new(row[1].as_string()?),
             updated_at: row[2].as_i64()?,
             deleted_at: row[3].as_optional_i64()?,
         });
