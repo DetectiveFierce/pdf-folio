@@ -19,7 +19,9 @@ pub mod db;
 pub mod pdf;
 
 pub use annotations::{Annotation, AnnotationId, AnnotationKind, ColorRgba, PagePoint, PageRect};
-pub use pdf::{OutlineNode, PageTextChar, PageTextLayer, PdfDoc, RenderedPage, TileCache, TileKey};
+pub use pdf::{
+    OutlineNode, PageTextChar, PageTextLayer, PdfDoc, RenderedPage, TextRect, TileCache, TileKey,
+};
 
 // Re-export the database public surface at the crate root so that callers can
 // reach it as `pdf_folio_core::{Db, EntryId, ...}` mirroring the old standalone
