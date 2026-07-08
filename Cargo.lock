@@ -4270,20 +4270,9 @@ name = "pdf-folio-sync-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
- "base64",
- "chrono",
- "hex",
- "hmac",
- "jsonwebtoken",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
+ "pdf-folio-cloud",
  "tokio",
- "tracing",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]
