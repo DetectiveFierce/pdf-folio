@@ -4273,20 +4273,7 @@ dependencies = [
 name = "pdf-folio-sync"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "base64",
- "blake3",
- "chrono",
- "directories",
- "pdf-folio-db",
- "rand 0.9.4",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "url",
- "webbrowser",
+ "pdf-folio-cloud",
 ]
 
 [[package]]

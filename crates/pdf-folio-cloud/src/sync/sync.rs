@@ -9,10 +9,10 @@ use pdf_folio_core::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::blob_cache::BlobCache;
-use super::r2_client::R2Client;
+use super::blobs::BlobCache;
+use super::blobs::R2Client;
 use super::session::Session;
-use super::turso_client::{TursoClient, TursoRemote, TursoValue};
+use super::remote::{TursoClient, TursoRemote, TursoValue};
 
 const ENTITY_ENTRY: &str = "entry";
 const ENTITY_FOLDER: &str = "folder";
