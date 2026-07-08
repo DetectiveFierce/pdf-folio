@@ -1,7 +1,7 @@
 //! Library view rendering.
 
-use crate::app::commands::{command_message, command_visible, CommandId, CommandSurface};
-use crate::app::view::dismissible_error_banner;
+use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
+use crate::shell::view::dismissible_error_banner;
 use crate::viewer::canvas::HistoryRestoreSpinner;
 use crate::*;
 use chrono::{DateTime, Local};

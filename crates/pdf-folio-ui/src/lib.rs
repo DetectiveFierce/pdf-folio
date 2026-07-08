@@ -25,7 +25,7 @@
 pub use pdf_folio_style as style;
 pub use pdf_folio_style::theme;
 
-mod app;
+mod shell;
 mod library;
 mod ui_components_library;
 mod viewer;
@@ -118,22 +118,22 @@ use crate::library::view::{
     folder_cards_per_row, folder_cards_section_height, format_count, masonry_target_index,
     parent_directory_drop_box_height, scroll_library_to_offset_task, shortest_column_index,
 };
-pub(crate) use app::constants::*;
-pub(crate) use app::icons::*;
-pub use app::messages;
+pub(crate) use shell::constants::*;
+pub(crate) use shell::icons::*;
+pub use shell::messages;
 #[cfg(test)]
-pub(crate) use app::viewer_layout::*;
+pub(crate) use shell::viewer_layout::*;
 
-use crate::app::messages::{
+use crate::shell::messages::{
     ConfirmationAction, ContextMenuAction, ContextMenuTarget, LibrarySidebarTab, Message, Shortcut,
     ViewerSidebarTab,
 };
-use crate::app::platform::file_manager_commands;
+use crate::shell::platform::file_manager_commands;
 #[cfg(test)]
-use crate::app::platform::{file_manager_command, file_uri};
+use crate::shell::platform::{file_manager_command, file_uri};
 #[cfg(test)]
-use crate::app::subscriptions::style_watch_event_should_reload;
-use crate::app::subscriptions::subscription;
+use crate::shell::subscriptions::style_watch_event_should_reload;
+use crate::shell::subscriptions::subscription;
 use crate::style::{
     button_style, container_style, display_font, empty_state, icon_button, master_checkbox,
     mix_color, progress_bar, scrollable_style, search_input_with_class, section_heading,
@@ -158,16 +158,16 @@ use crate::viewer::zoom::{
 #[cfg(test)]
 use notify::EventKind;
 
-use app::libraries::{
+use shell::libraries::{
     load_library_registry, LibraryNameDialog, LibraryProfile, LibraryRegistryRuntime,
 };
-use app::session::{load_app_session, save_app_session, AppSession};
-use app::sync_auth::{SyncAuthRuntime, SyncAuthState};
-use app::update::{pending_raindrop_rollback_check_task, update};
-use app::view::view;
+use shell::session::{load_app_session, save_app_session, AppSession};
+use shell::sync_auth::{SyncAuthRuntime, SyncAuthState};
+use shell::update::{pending_raindrop_rollback_check_task, update};
+use shell::view::view;
 use crate::ui_components_library::view::with_alpha;
 
-pub use app::state::*;
+pub use shell::state::*;
 
 /// Launches the PDF-Folio UI.
 ///

@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::libraries::{
+use crate::shell::libraries::{
     load_library_preview, sync_library_registry_profiles, sync_library_rows_for_registry,
     LibraryProfile,
 };

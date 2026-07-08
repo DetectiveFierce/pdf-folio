@@ -1,7 +1,7 @@
 //! App shell and viewer-surface rendering.
 
-use crate::app::commands::{command_matches, library_commands, CommandDanger};
-use crate::app::context_menu::{context_menu_capture_layer, view_context_menu_dropdown};
+use crate::shell::commands::{command_matches, library_commands, CommandDanger};
+use crate::shell::context_menu::{context_menu_capture_layer, view_context_menu_dropdown};
 use crate::library::view::{
     chevron_button, floating_folder_drag_preview, floating_library_drag_preview,
     view_confirmation_dialog, view_create_folder_dialog, view_export_dialog,
@@ -313,15 +313,15 @@ fn view_command_palette(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Me
         };
         let shortcut = command.spec.shortcut.unwrap_or("");
         let target_label = match command.spec.target {
-            crate::app::commands::CommandTargetKind::None => "",
-            crate::app::commands::CommandTargetKind::Library => "Library",
-            crate::app::commands::CommandTargetKind::Folder => "Folder",
-            crate::app::commands::CommandTargetKind::Tag => "Tag",
-            crate::app::commands::CommandTargetKind::SinglePdf => "PDF",
-            crate::app::commands::CommandTargetKind::MultiplePdfs => "Selection",
-            crate::app::commands::CommandTargetKind::SearchResult => "Visible",
-            crate::app::commands::CommandTargetKind::Viewer => "Viewer",
-            crate::app::commands::CommandTargetKind::Document => "Document",
+            crate::shell::commands::CommandTargetKind::None => "",
+            crate::shell::commands::CommandTargetKind::Library => "Library",
+            crate::shell::commands::CommandTargetKind::Folder => "Folder",
+            crate::shell::commands::CommandTargetKind::Tag => "Tag",
+            crate::shell::commands::CommandTargetKind::SinglePdf => "PDF",
+            crate::shell::commands::CommandTargetKind::MultiplePdfs => "Selection",
+            crate::shell::commands::CommandTargetKind::SearchResult => "Visible",
+            crate::shell::commands::CommandTargetKind::Viewer => "Viewer",
+            crate::shell::commands::CommandTargetKind::Document => "Document",
         };
         let icon_slot = if command.spec.icon.is_some() {
             "•"

@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::libraries::{
+use crate::shell::libraries::{
     create_library_profile, delete_library_profile, rename_library_profile,
 };
 
@@ -281,11 +281,11 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.chrome.command_palette_selected_index = 0;
         }
         Message::CommandPaletteMoveSelection(delta) => {
-            let visible_count = crate::app::commands::library_commands(app)
+            let visible_count = crate::shell::commands::library_commands(app)
                 .into_iter()
                 .filter(|command| {
                     command.visible
-                        && crate::app::commands::command_matches(
+                        && crate::shell::commands::command_matches(
                             command.spec,
                             &app.chrome.command_palette_query,
                         )
@@ -298,11 +298,11 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             }
         }
         Message::CommandPaletteRunSelected => {
-            let selected = crate::app::commands::library_commands(app)
+            let selected = crate::shell::commands::library_commands(app)
                 .into_iter()
                 .filter(|command| {
                     command.visible
-                        && crate::app::commands::command_matches(
+                        && crate::shell::commands::command_matches(
                             command.spec,
                             &app.chrome.command_palette_query,
                         )
@@ -317,7 +317,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.chrome.command_palette_open = false;
             app.chrome.command_palette_query.clear();
             app.chrome.command_palette_selected_index = 0;
-            if let Some(message) = crate::app::commands::command_message(app, command_id) {
+            if let Some(message) = crate::shell::commands::command_message(app, command_id) {
                 return Task::done(message);
             }
         }
