@@ -7,7 +7,7 @@ use crate::classes::{
     button_style, container_style, progress_bar_style, side_border_for_class, text_input_style,
     Class, ComponentState,
 };
-use crate::side_border::side_border;
+use crate::borders::side_border;
 use crate::tokens::{
     display_font, ui_font, ContentAlignment, FontSize, FontWeight, Spacing, TextAlignment,
     ThemeTokens,

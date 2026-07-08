@@ -18,9 +18,9 @@
 //! crate can register them with iced at startup.
 
 pub mod book;
+pub mod borders;
 pub mod classes;
 pub mod components;
-pub mod side_border;
 pub mod theme;
 pub mod tokens;
 
@@ -69,7 +69,7 @@ pub use components::{
     progress_bar, search_input, search_input_with_class, section_heading, selection_checkbox,
     sidebar_button, tag_pill, toc_entry, toolbar_button, MasterCheckboxState,
 };
-pub use side_border::side_border;
+pub use borders::side_border;
 pub use tokens::{
     display_font, ui_font, AppLabelTokens, AppLayoutTokens, BorderWidth, BoxShadow,
     ContentAlignment, FontSize, FontWeight, IconSize, LabelSection, Radius, Spacing, TextAlignment,
