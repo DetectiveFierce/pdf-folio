@@ -167,7 +167,7 @@ use shell::update::{pending_raindrop_rollback_check_task, update};
 use shell::view::view;
 use crate::ui_components_library::view::with_alpha;
 
-pub use shell::state::*;
+pub use shell::app::*;
 
 /// Launches the PDF-Folio UI.
 ///
