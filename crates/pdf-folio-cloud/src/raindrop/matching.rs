@@ -35,8 +35,6 @@ pub(crate) fn choose_import_strategy(raindrops: &[Raindrop]) -> RaindropImportSt
     }
 }
 
-
-
 pub(crate) fn extract_selected_pdfs_from_zip(
     storage_dir: &Path,
     archive: &[u8],

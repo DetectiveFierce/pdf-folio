@@ -3,8 +3,6 @@
 //! This crate keeps Raindrop-specific HTTP, OAuth, download, and metadata
 //! mirroring logic out of the UI and database crates.
 
-
-
 pub(crate) const API_BASE: &str = "https://api.raindrop.io/rest/v1";
 pub(crate) const MAX_PER_PAGE: u16 = 50;
 pub(crate) const ZIP_IMPORT_THRESHOLD: usize = 12;
@@ -26,8 +24,6 @@ pub use import::{
 };
 pub use types::*;
 
-
-
 /// Returns true when the importer can run without asking the user for OAuth app credentials.
 pub fn can_import_without_prompt() -> bool {
     std::env::var("PDF_FOLIO_RAINDROP_TOKEN")
@@ -36,9 +32,6 @@ pub fn can_import_without_prompt() -> bool {
         || cached_access_token().is_ok_and(|token| !token.trim().is_empty())
         || bundled_or_env_oauth_config().is_some()
 }
-
-
-
 
 #[cfg(test)]
 mod tests;

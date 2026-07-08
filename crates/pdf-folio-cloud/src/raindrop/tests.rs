@@ -1,4 +1,3 @@
-use super::*;
 use super::client::{
     zip_download_progress_basis_points, Raindrop, RaindropCollection, RaindropFile, RaindropRef,
 };
@@ -7,6 +6,7 @@ use super::import::{
     PROGRESS_BASIS_POINTS_MAX,
 };
 use super::matching::{choose_import_strategy, RaindropImportStrategy, ZipMatchIndex};
+use super::*;
 use pdf_folio_core::Db;
 use std::collections::{HashMap, HashSet};
 

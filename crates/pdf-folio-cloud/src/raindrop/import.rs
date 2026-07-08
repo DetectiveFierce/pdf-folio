@@ -428,7 +428,10 @@ fn zip_import_progress_basis_points_for_units(completed_units: u32, total_units:
         .min(u32::from(PROGRESS_BASIS_POINTS_MAX)) as u16
 }
 
-pub(crate) fn zip_extract_progress_basis_points(processed_entries: usize, total_entries: usize) -> u16 {
+pub(crate) fn zip_extract_progress_basis_points(
+    processed_entries: usize,
+    total_entries: usize,
+) -> u16 {
     if total_entries == 0 {
         return ZIP_EXTRACTED_PROGRESS_BASIS_POINTS;
     }
@@ -441,8 +444,6 @@ pub(crate) fn zip_extract_progress_basis_points(processed_entries: usize, total_
     (base + extracting * processed_entries / total_entries)
         .min(u32::from(ZIP_EXTRACTED_PROGRESS_BASIS_POINTS)) as u16
 }
-
-
 
 pub(crate) fn report_raindrop_progress(
     progress: &mut Option<&mut (dyn FnMut(RaindropImportProgress) + Send)>,
@@ -1060,4 +1061,3 @@ fn safe_path_component(value: &str) -> String {
         cleaned.chars().take(180).collect()
     }
 }
-

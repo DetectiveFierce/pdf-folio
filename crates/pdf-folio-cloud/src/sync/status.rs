@@ -128,4 +128,3 @@ pub struct SyncHydrationReport {
     /// Remote rows skipped because they are deleted, invalid, already local, or unavailable.
     pub skipped_entries: usize,
 }
-

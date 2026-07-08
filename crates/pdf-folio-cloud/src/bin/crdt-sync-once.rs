@@ -2,8 +2,8 @@ use std::env;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use pdf_folio_core::Db;
 use pdf_folio_cloud::sync::{cached_session, BlobCache, SyncClient};
+use pdf_folio_core::Db;
 
 #[tokio::main]
 async fn main() -> Result<()> {

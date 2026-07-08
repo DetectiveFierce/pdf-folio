@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use directories::ProjectDirs;
 use chrono::{DateTime, Utc};
+use directories::ProjectDirs;
 use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

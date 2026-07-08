@@ -135,7 +135,10 @@ impl RaindropClient {
         self.download_pdf(raindrop.download_link()).await
     }
 
-    pub(crate) async fn download_pdf_export_zip(&self, mut progress: impl FnMut(u16)) -> Result<Vec<u8>> {
+    pub(crate) async fn download_pdf_export_zip(
+        &self,
+        mut progress: impl FnMut(u16),
+    ) -> Result<Vec<u8>> {
         let mut url = Url::parse(&format!("{API_BASE}/raindrops/0/export.zip"))?;
         url.query_pairs_mut().append_pair("search", "file:true");
         let response = self
@@ -369,7 +372,10 @@ impl Raindrop {
             .unwrap_or_else(|| format!("Raindrop {}", self.id))
     }
 
-    pub(crate) fn to_candidate(&self, collection_titles: &HashMap<i64, String>) -> RaindropPdfCandidate {
+    pub(crate) fn to_candidate(
+        &self,
+        collection_titles: &HashMap<i64, String>,
+    ) -> RaindropPdfCandidate {
         let collection_id = self.collection_id();
         RaindropPdfCandidate {
             id: self.id,
