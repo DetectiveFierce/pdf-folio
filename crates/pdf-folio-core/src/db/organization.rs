@@ -5,9 +5,10 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
 use super::naming::{clean_folder_name, next_folder_suffix, MANUAL_ORDER_GAP};
+use super::library::row_to_entry;
 use super::{
     Db, EntryFolderMembership, EntryId, EntryTagSnapshot, EntryTrashState, Folder, FolderId,
-    LibraryEntry, LibraryFolderSnapshot, LibraryOrganizationSnapshot, row_to_entry,
+    LibraryEntry, LibraryFolderSnapshot, LibraryOrganizationSnapshot,
 };
 
 impl Db {
@@ -824,6 +825,31 @@ impl Db {
         })
     }
 
+    pub(super) fn next_folder_manual_order_with_connection(
+        &self,
+        connection: &Connection,
+        parent_id: Option<&FolderId>,
+    ) -> Result<i64> {
+        let max_order: Option<i64> = connection.query_row(
+            "SELECT MAX(manual_order) FROM folders WHERE parent_id IS ?1 AND trashed_at IS NULL",
+            params![parent_id.map(FolderId::as_str)],
+            |row| row.get(0),
+        )?;
+        Ok(max_order.unwrap_or(0) + MANUAL_ORDER_GAP)
+    }
+
+    pub(super) fn next_folder_entry_manual_order_with_connection(
+        &self,
+        connection: &Connection,
+        folder_id: &FolderId,
+    ) -> Result<i64> {
+        let max_order: Option<i64> = connection.query_row(
+            "SELECT MAX(manual_order) FROM entry_folders WHERE folder_id = ?1",
+            params![folder_id.as_str()],
+            |row| row.get(0),
+        )?;
+        Ok(max_order.unwrap_or(0) + MANUAL_ORDER_GAP)
+    }
 }
 
 pub(super) fn row_to_folder(row: &rusqlite::Row<'_>) -> rusqlite::Result<Folder> {
