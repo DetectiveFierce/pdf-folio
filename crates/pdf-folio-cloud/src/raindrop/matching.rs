@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::client::{ensure_pdf_response, Raindrop};
-use super::{
+use super::import::{
     report_raindrop_progress, safe_pdf_file_name, zip_extract_progress_basis_points,
+};
+use super::{
     RaindropImportPhase, RaindropImportProgress, ZIP_EXTRACTED_PROGRESS_BASIS_POINTS,
     ZIP_IMPORT_THRESHOLD,
 };
@@ -149,7 +151,7 @@ pub(crate) struct ZipMatchIndex {
 }
 
 impl ZipMatchIndex {
-    fn new(raindrops: &[Raindrop]) -> Self {
+    pub(crate) fn new(raindrops: &[Raindrop]) -> Self {
         let mut names: HashMap<String, Vec<usize>> = HashMap::new();
         let mut stems: HashMap<String, Vec<usize>> = HashMap::new();
         let mut sizes: HashMap<u64, Vec<usize>> = HashMap::new();
@@ -187,7 +189,7 @@ impl ZipMatchIndex {
         }
     }
 
-    fn match_entry(
+    pub(crate) fn match_entry(
         &self,
         remaining: &HashSet<usize>,
         entry_name: &str,
@@ -282,4 +284,3 @@ pub(crate) fn normalized_zip_file_stem(name: &str) -> String {
         .trim_end_matches(".pdf")
         .to_owned()
 }
-

@@ -1,4 +1,14 @@
 use super::*;
+use super::client::{
+    zip_download_progress_basis_points, Raindrop, RaindropCollection, RaindropFile, RaindropRef,
+};
+use super::import::{
+    mirror_collections, zip_extract_progress_basis_points, zip_import_progress_basis_points,
+    PROGRESS_BASIS_POINTS_MAX,
+};
+use super::matching::{choose_import_strategy, RaindropImportStrategy, ZipMatchIndex};
+use pdf_folio_core::Db;
+use std::collections::{HashMap, HashSet};
 
 #[test]
 fn import_strategy_uses_zip_only_for_large_uploaded_file_batches() {

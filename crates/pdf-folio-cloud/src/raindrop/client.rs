@@ -35,7 +35,7 @@ impl RaindropPdfCandidate {
     }
 }
 
-fn zip_download_progress_basis_points(downloaded: u64, total: u64) -> u16 {
+pub(crate) fn zip_download_progress_basis_points(downloaded: u64, total: u64) -> u16 {
     if total == 0 {
         return ZIP_PREPARING_PROGRESS_BASIS_POINTS;
     }
@@ -249,7 +249,7 @@ pub(crate) struct RaindropCollection {
     #[serde(deserialize_with = "i64_or_default")]
     pub(crate) sort: i64,
     #[serde(default, deserialize_with = "optional_ref")]
-    parent: Option<RaindropRef>,
+    pub(crate) parent: Option<RaindropRef>,
 }
 
 impl RaindropCollection {
@@ -284,22 +284,22 @@ pub(crate) struct Raindrop {
     #[serde(default)]
     pub(crate) title: Option<String>,
     #[serde(default)]
-    link: String,
+    pub(crate) link: String,
     #[serde(default)]
-    cover: Option<String>,
+    pub(crate) cover: Option<String>,
     #[serde(default)]
-    media: Vec<RaindropMedia>,
+    pub(crate) media: Vec<RaindropMedia>,
     #[serde(rename = "type")]
-    item_type: Option<String>,
+    pub(crate) item_type: Option<String>,
     #[serde(default, deserialize_with = "optional_ref")]
-    collection: Option<RaindropRef>,
+    pub(crate) collection: Option<RaindropRef>,
     #[serde(default)]
     pub(crate) tags: Vec<String>,
-    file: Option<RaindropFile>,
+    pub(crate) file: Option<RaindropFile>,
     #[serde(rename = "lastUpdate")]
     pub(crate) last_update: Option<String>,
     #[serde(skip)]
-    uploaded_file: bool,
+    pub(crate) uploaded_file: bool,
 }
 
 impl Raindrop {
@@ -388,24 +388,24 @@ impl Raindrop {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RaindropRef {
+pub(crate) struct RaindropRef {
     #[serde(rename = "$id", deserialize_with = "i64_from_json")]
     pub(crate) id: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RaindropFile {
-    name: Option<String>,
+pub(crate) struct RaindropFile {
+    pub(crate) name: Option<String>,
     #[serde(default)]
-    link: Option<String>,
+    pub(crate) link: Option<String>,
     #[serde(default, deserialize_with = "optional_u64")]
-    size: Option<u64>,
+    pub(crate) size: Option<u64>,
     #[serde(rename = "type")]
-    mime_type: Option<String>,
+    pub(crate) mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RaindropMedia {
+pub(crate) struct RaindropMedia {
     #[serde(default)]
     link: Option<String>,
 }
