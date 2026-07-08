@@ -216,13 +216,12 @@ pub fn can_drag_reorder_library(
     search_query: &str,
     search_active: bool,
     tag_filter_active: bool,
-    folder_selected: bool,
+    _folder_selected: bool,
 ) -> bool {
     sort_mode == LibrarySortMode::Manual
         && search_query.trim().is_empty()
         && !search_active
         && !tag_filter_active
-        && !folder_selected
 }
 
 pub fn active_folder_drop_target<'a>(

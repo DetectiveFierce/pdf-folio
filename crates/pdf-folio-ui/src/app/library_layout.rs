@@ -1,37 +1,46 @@
 use super::*;
 
+fn entry_folder_manual_order(entry: &LibraryEntry, folder_id: &FolderId) -> i64 {
+    entry
+        .folder_orders
+        .iter()
+        .find(|membership| &membership.folder_id == folder_id)
+        .map(|membership| membership.manual_order)
+        .unwrap_or(entry.manual_order)
+}
+
 impl PDFolioApp {
-    pub(super) fn library_grid_zoom_min(&self) -> f32 {
+    pub(crate) fn library_grid_zoom_min(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "grid_zoom_min", 0.25)
     }
 
-    pub(super) fn library_grid_zoom_limit(&self) -> f32 {
+    pub(crate) fn library_grid_zoom_limit(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "grid_zoom_max", 12.0)
     }
 
-    pub(super) fn library_grid_zoom_step(&self) -> f32 {
+    pub(crate) fn library_grid_zoom_step(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "grid_zoom_step", 0.05)
     }
 
-    pub(super) fn library_grid_dense_column_cap(&self) -> usize {
+    pub(crate) fn library_grid_dense_column_cap(&self) -> usize {
         self.layout()
             .count("LibraryInteraction", "grid_zoom_dense_column_cap", 28)
     }
 
-    pub(super) fn library_card_hover_lift(&self) -> f32 {
+    pub(crate) fn library_card_hover_lift(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "card_hover_lift", 2.0)
     }
 
-    pub(super) fn library_row_hover_lift(&self) -> f32 {
+    pub(crate) fn library_row_hover_lift(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "row_hover_lift", 1.0)
     }
 
-    pub(super) fn visible_library_entries(&self) -> Vec<LibraryEntry> {
+    pub(crate) fn visible_library_entries(&self) -> Vec<LibraryEntry> {
         let source = self
             .library
             .search_results
@@ -69,12 +78,20 @@ impl PDFolioApp {
                     .cmp(&left.opened_at)
                     .then_with(|| left.manual_order.cmp(&right.manual_order))
             });
+        } else if self.library.library_sort_mode == LibrarySortMode::Manual {
+            if let Some(folder_id) = self.library.selected_folder.as_ref() {
+                entries.sort_by(|left, right| {
+                    entry_folder_manual_order(left, folder_id)
+                        .cmp(&entry_folder_manual_order(right, folder_id))
+                        .then_with(|| left.manual_order.cmp(&right.manual_order))
+                });
+            }
         }
 
         entries
     }
 
-    pub(super) fn active_library_entries(&self) -> &Vec<LibraryEntry> {
+    pub(crate) fn active_library_entries(&self) -> &Vec<LibraryEntry> {
         if self.library.trash_view_active {
             &self.library.library_trash_entries
         } else {
@@ -82,20 +99,20 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn library_grid_zoom(&self) -> f32 {
+    pub(crate) fn library_grid_zoom(&self) -> f32 {
         self.library
             .library_grid_zoom
             .clamp(self.library_grid_zoom_min(), self.library_grid_zoom_max())
     }
 
-    pub(super) fn library_grid_zoom_max(&self) -> f32 {
+    pub(crate) fn library_grid_zoom_max(&self) -> f32 {
         let width = self.library_available_grid_width();
         (width / self.layout().library_grid_card_width)
             .max(1.0)
             .clamp(1.0, self.library_grid_zoom_limit())
     }
 
-    pub(super) fn library_available_grid_width(&self) -> f32 {
+    pub(crate) fn library_available_grid_width(&self) -> f32 {
         let sidebar_width = if self.library.library_tag_sidebar_open {
             self.library.library_tag_sidebar_width + self.layout().sidebar_resize_handle_width
         } else {
@@ -113,7 +130,7 @@ impl PDFolioApp {
         (viewport_width - self.layout().library_scrollbar_gutter).max(1.0)
     }
 
-    pub(super) fn recalculate_library_viewport_width(&mut self) {
+    pub(crate) fn recalculate_library_viewport_width(&mut self) {
         let sidebar_width = if self.library.library_tag_sidebar_open {
             self.library.library_tag_sidebar_width + self.layout().sidebar_resize_handle_width
         } else {
@@ -129,7 +146,7 @@ impl PDFolioApp {
                 .max(1.0);
     }
 
-    pub(super) fn fit_library_grid_zoom_to_columns(&mut self, columns: usize) {
+    pub(crate) fn fit_library_grid_zoom_to_columns(&mut self, columns: usize) {
         if self.library.compact_view_mode || columns == 0 {
             return;
         }
@@ -141,15 +158,15 @@ impl PDFolioApp {
             .clamp(self.library_grid_zoom_min(), self.library_grid_zoom_max());
     }
 
-    pub(super) fn library_grid_column_gap(&self) -> f32 {
+    pub(crate) fn library_grid_column_gap(&self) -> f32 {
         self.layout().library_masonry_gap
     }
 
-    pub(super) fn library_grid_target_card_width(&self) -> f32 {
+    pub(crate) fn library_grid_target_card_width(&self) -> f32 {
         self.layout().library_grid_card_width * self.library_grid_zoom()
     }
 
-    pub(super) fn library_grid_card_width(&self) -> f32 {
+    pub(crate) fn library_grid_card_width(&self) -> f32 {
         if self.library.compact_view_mode {
             return self.library_grid_target_card_width();
         }
@@ -159,41 +176,41 @@ impl PDFolioApp {
         ((self.library_available_grid_width() - total_gap) / columns as f32).max(1.0)
     }
 
-    pub(super) fn library_card_info_height(&self) -> f32 {
+    pub(crate) fn library_card_info_height(&self) -> f32 {
         (self.layout().library_card_info_height * self.library_grid_zoom()).clamp(88.0, 176.0)
     }
 
-    pub(super) fn library_card_media_max_height(&self) -> f32 {
+    pub(crate) fn library_card_media_max_height(&self) -> f32 {
         self.layout().library_card_media_max_height * self.library_grid_zoom()
     }
 
-    pub(super) fn library_card_title_width(&self) -> f32 {
+    pub(crate) fn library_card_title_width(&self) -> f32 {
         self.layout().library_card_title_width * self.library_grid_zoom()
     }
 
-    pub(super) fn library_card_text_scale(&self) -> f32 {
+    pub(crate) fn library_card_text_scale(&self) -> f32 {
         self.library_grid_zoom().clamp(0.55, 1.35)
     }
 
-    pub(super) fn library_card_font_size(&self, base_size: u32) -> u32 {
+    pub(crate) fn library_card_font_size(&self, base_size: u32) -> u32 {
         ((base_size as f32) * self.library_card_text_scale())
             .round()
             .clamp(8.0, 28.0) as u32
     }
 
-    pub(super) fn library_card_padding(&self) -> f32 {
+    pub(crate) fn library_card_padding(&self) -> f32 {
         (Spacing::LG * self.library_card_text_scale()).clamp(4.0, 24.0)
     }
 
-    pub(super) fn library_card_spacing(&self) -> f32 {
+    pub(crate) fn library_card_spacing(&self) -> f32 {
         (Spacing::SM * self.library_card_text_scale()).clamp(2.0, Spacing::SM)
     }
 
-    pub(super) fn library_card_title_font_size(&self) -> u32 {
+    pub(crate) fn library_card_title_font_size(&self) -> u32 {
         self.library_card_font_size(16)
     }
 
-    pub(super) fn thumbnail_size_for_grid_zoom(&self) -> ThumbnailSize {
+    pub(crate) fn thumbnail_size_for_grid_zoom(&self) -> ThumbnailSize {
         let width = self.library_grid_card_width();
         if width <= 140.0 {
             ThumbnailSize::Small
@@ -204,7 +221,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn thumbnail_for_entry(
+    pub(crate) fn thumbnail_for_entry(
         &self,
         entry_id: &EntryId,
         preferred_size: ThumbnailSize,
@@ -224,7 +241,7 @@ impl PDFolioApp {
         })
     }
 
-    pub(super) fn library_grid_zoom_label(&self) -> String {
+    pub(crate) fn library_grid_zoom_label(&self) -> String {
         format!("{:.0}%", self.library_grid_zoom() * 100.0)
     }
 }

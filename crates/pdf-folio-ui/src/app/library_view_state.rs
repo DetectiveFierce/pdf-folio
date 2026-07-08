@@ -1,7 +1,7 @@
 use super::*;
 
 impl PDFolioApp {
-    pub(super) fn visible_library_entry_window_at(
+    pub(crate) fn visible_library_entry_window_at(
         &self,
         entries_len: usize,
         scroll_offset: f32,
@@ -27,7 +27,7 @@ impl PDFolioApp {
         start..end
     }
 
-    pub(super) fn visible_library_masonry_layout_items_at<'a>(
+    pub(crate) fn visible_library_masonry_layout_items_at<'a>(
         &self,
         layout: &'a LibraryMasonryLayout,
         scroll_offset: f32,
@@ -47,7 +47,7 @@ impl PDFolioApp {
         items
     }
 
-    pub(super) fn library_entries_per_row(&self) -> usize {
+    pub(crate) fn library_entries_per_row(&self) -> usize {
         if self.library.compact_view_mode {
             1
         } else {
@@ -61,7 +61,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn library_row_height(&self) -> f32 {
+    pub(crate) fn library_row_height(&self) -> f32 {
         if self.library.compact_view_mode {
             self.layout().library_list_row_height + self.library_row_hover_lift()
         } else {
@@ -69,7 +69,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn library_masonry_layout(&self, entries: &[LibraryEntry]) -> LibraryMasonryLayout {
+    pub(crate) fn library_masonry_layout(&self, entries: &[LibraryEntry]) -> LibraryMasonryLayout {
         let column_count = self.library_entries_per_row().max(1);
         let mut columns = vec![Vec::new(); column_count];
         let mut column_heights = vec![0.0; column_count];
@@ -93,7 +93,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn library_render_item_masonry_layout(
+    pub(crate) fn library_render_item_masonry_layout(
         &self,
         items: &[LibraryRenderItem],
     ) -> LibraryMasonryLayout {
@@ -105,7 +105,7 @@ impl PDFolioApp {
         self.library_masonry_layout(&entries)
     }
 
-    pub(super) fn library_card_estimated_height(&self, entry_id: &EntryId) -> f32 {
+    pub(crate) fn library_card_estimated_height(&self, entry_id: &EntryId) -> f32 {
         let thumbnail_height = self
             .thumbnail_for_entry(entry_id, self.thumbnail_size_for_grid_zoom())
             .map(|thumbnail| {
@@ -118,7 +118,7 @@ impl PDFolioApp {
         thumbnail_height + self.library_card_info_height() + self.library_card_hover_lift()
     }
 
-    pub(super) fn library_card_hover_progress(&self, entry_id: &EntryId) -> f32 {
+    pub(crate) fn library_card_hover_progress(&self, entry_id: &EntryId) -> f32 {
         self.library
             .library_card_hover_animations
             .get(entry_id)
@@ -127,7 +127,7 @@ impl PDFolioApp {
             .clamp(0.0, 1.0)
     }
 
-    pub(super) fn set_library_card_hover(&mut self, entry_id: EntryId, hovered: bool) {
+    pub(crate) fn set_library_card_hover(&mut self, entry_id: EntryId, hovered: bool) {
         self.library.animation_now = Instant::now();
         let animation = self
             .library
@@ -137,7 +137,7 @@ impl PDFolioApp {
         animation.go_mut(hovered, self.library.animation_now);
     }
 
-    pub(super) fn tick_animations(&mut self, now: Instant) {
+    pub(crate) fn tick_animations(&mut self, now: Instant) {
         self.library.animation_now = now;
         let visible_entry_ids = self
             .visible_library_entries()
@@ -153,7 +153,7 @@ impl PDFolioApp {
         self.expire_viewer_page_fades(now);
     }
 
-    pub(super) fn start_bulk_operation_progress(&mut self, label: impl Into<String>, total: usize) {
+    pub(crate) fn start_bulk_operation_progress(&mut self, label: impl Into<String>, total: usize) {
         let label = label.into();
         self.library.library_status = Some(format!("{label} {total} PDFs..."));
         self.library.bulk_operation_progress = Some(BulkOperationProgress {
@@ -163,12 +163,12 @@ impl PDFolioApp {
         });
     }
 
-    pub(super) fn start_folder_drop_flash(&mut self, folder_id: FolderId, now: Instant) {
+    pub(crate) fn start_folder_drop_flash(&mut self, folder_id: FolderId, now: Instant) {
         self.library.folder_drop_flash = Some((folder_id, now));
         self.library.animation_now = now;
     }
 
-    pub(super) fn expire_folder_drop_flash(&mut self, now: Instant) {
+    pub(crate) fn expire_folder_drop_flash(&mut self, now: Instant) {
         if self
             .library
             .folder_drop_flash
@@ -182,7 +182,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn folder_drop_flash_active(&self, folder_id: &FolderId) -> bool {
+    pub(crate) fn folder_drop_flash_active(&self, folder_id: &FolderId) -> bool {
         folder_drop_flash_active_at(
             folder_id,
             self.library
@@ -193,30 +193,31 @@ impl PDFolioApp {
         )
     }
 
-    pub(super) fn library_card_hover_animation() -> Animation<bool> {
+    pub(crate) fn library_card_hover_animation() -> Animation<bool> {
         Animation::new(false)
             .duration(Duration::from_millis(LIBRARY_CARD_HOVER_DURATION_MS))
             .easing(animation::Easing::EaseOutCubic)
     }
 
-    pub(super) fn library_card_hover_animation_active(&self) -> bool {
+    pub(crate) fn library_card_hover_animation_active(&self) -> bool {
         self.library
             .library_card_hover_animations
             .values()
             .any(|animation| animation.is_animating(self.library.animation_now))
     }
 
-    pub(super) fn expire_viewer_page_fades(&mut self, now: Instant) {
+    pub(crate) fn expire_viewer_page_fades(&mut self, now: Instant) {
+        let fade_ms = self.layout().viewer_page_fade_ms;
         self.viewer.page_fade_started.retain(|_, started_at| {
-            now.saturating_duration_since(*started_at) < Duration::from_millis(VIEWER_PAGE_FADE_MS)
+            now.saturating_duration_since(*started_at) < Duration::from_millis(fade_ms)
         });
     }
 
-    pub(super) fn viewer_page_fade_active(&self) -> bool {
+    pub(crate) fn viewer_page_fade_active(&self) -> bool {
         !self.viewer.page_fade_started.is_empty()
     }
 
-    pub(super) fn clear_library_transient_interactions(&mut self) {
+    pub(crate) fn clear_library_transient_interactions(&mut self) {
         self.library.library_card_hover_animations.clear();
         self.library.folder_drop_flash = None;
         self.library.library_drag = None;

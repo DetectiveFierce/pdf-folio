@@ -184,5 +184,4 @@ fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "tests/importer.rs"]
 mod tests;

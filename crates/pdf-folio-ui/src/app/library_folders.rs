@@ -1,7 +1,7 @@
 use super::*;
 
 impl PDFolioApp {
-    pub(super) fn active_library_folders(&self) -> &Vec<Folder> {
+    pub(crate) fn active_library_folders(&self) -> &Vec<Folder> {
         if self.library.trash_view_active {
             &self.library.library_trash_folders
         } else {
@@ -9,7 +9,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn child_folders(&self) -> Vec<Folder> {
+    pub(crate) fn child_folders(&self) -> Vec<Folder> {
         if self.library.active_tag_filter.is_some() {
             return Vec::new();
         }
@@ -24,18 +24,18 @@ impl PDFolioApp {
         folders
     }
 
-    pub(super) fn folder_smart_counts(&self, folder_id: Option<&FolderId>) -> FolderSmartCounts {
+    pub(crate) fn folder_smart_counts(&self, folder_id: Option<&FolderId>) -> FolderSmartCounts {
         self.folder_smart_counts_for(folder_id, self.library.trash_view_active)
     }
 
-    pub(super) fn normal_folder_smart_counts(
+    pub(crate) fn normal_folder_smart_counts(
         &self,
         folder_id: Option<&FolderId>,
     ) -> FolderSmartCounts {
         self.folder_smart_counts_for(folder_id, false)
     }
 
-    pub(super) fn folder_smart_counts_for(
+    pub(crate) fn folder_smart_counts_for(
         &self,
         folder_id: Option<&FolderId>,
         trash: bool,
@@ -78,7 +78,7 @@ impl PDFolioApp {
         counts
     }
 
-    pub(super) fn rebuild_folder_smart_count_cache(&mut self) {
+    pub(crate) fn rebuild_folder_smart_count_cache(&mut self) {
         let mut cache = HashMap::new();
         cache.extend(Self::build_folder_smart_count_cache_for(
             false,
@@ -135,11 +135,11 @@ impl PDFolioApp {
         cache
     }
 
-    pub(super) fn folder_subtree_ids(&self, folder_id: &FolderId) -> HashSet<FolderId> {
+    pub(crate) fn folder_subtree_ids(&self, folder_id: &FolderId) -> HashSet<FolderId> {
         self.folder_subtree_ids_for(folder_id, self.library.trash_view_active)
     }
 
-    pub(super) fn folder_subtree_ids_for(
+    pub(crate) fn folder_subtree_ids_for(
         &self,
         folder_id: &FolderId,
         trash: bool,
@@ -149,7 +149,7 @@ impl PDFolioApp {
         folder_ids
     }
 
-    pub(super) fn move_picker_expanded_folders(&self) -> HashSet<FolderId> {
+    pub(crate) fn move_picker_expanded_folders(&self) -> HashSet<FolderId> {
         self.library
             .library_folders
             .iter()
@@ -163,7 +163,7 @@ impl PDFolioApp {
             .collect()
     }
 
-    pub(super) fn collect_folder_subtree_ids_for(
+    pub(crate) fn collect_folder_subtree_ids_for(
         &self,
         folder_id: &FolderId,
         trash: bool,
@@ -185,11 +185,11 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn selected_folder_name(&self) -> Option<String> {
+    pub(crate) fn selected_folder_name(&self) -> Option<String> {
         self.selected_folder().map(|folder| folder.name.clone())
     }
 
-    pub(super) fn selected_folder(&self) -> Option<&Folder> {
+    pub(crate) fn selected_folder(&self) -> Option<&Folder> {
         self.library.selected_folder.as_ref().and_then(|selected| {
             self.active_library_folders()
                 .iter()
@@ -197,7 +197,7 @@ impl PDFolioApp {
         })
     }
 
-    pub(super) fn details_folder(&self) -> Option<&Folder> {
+    pub(crate) fn details_folder(&self) -> Option<&Folder> {
         self.library
             .details_folder_id
             .as_ref()
@@ -208,7 +208,7 @@ impl PDFolioApp {
             })
     }
 
-    pub(super) fn selected_folder_sibling_order(
+    pub(crate) fn selected_folder_sibling_order(
         &self,
     ) -> Option<(Option<FolderId>, Vec<FolderId>, usize)> {
         let folder = self.details_folder()?;
@@ -229,7 +229,7 @@ impl PDFolioApp {
         Some((parent_id, folder_ids, index))
     }
 
-    pub(super) fn selected_folder_manual_reorder(
+    pub(crate) fn selected_folder_manual_reorder(
         &self,
         direction: isize,
     ) -> Option<(Option<FolderId>, Vec<FolderId>)> {
@@ -242,7 +242,7 @@ impl PDFolioApp {
         Some((parent_id, folder_ids))
     }
 
-    pub(super) fn folder_drag_manual_reorder(
+    pub(crate) fn folder_drag_manual_reorder(
         &self,
         folder_id: &FolderId,
         target_id: &FolderId,
@@ -273,13 +273,13 @@ impl PDFolioApp {
         (next_order != folder_ids).then_some((folder.parent_id.clone(), next_order))
     }
 
-    pub(super) fn sync_folder_rename_input(&mut self) {
+    pub(crate) fn sync_folder_rename_input(&mut self) {
         self.library.folder_rename_input = self
             .details_folder()
             .map_or_else(String::new, |folder| folder.name.clone());
     }
 
-    pub(super) fn folder_breadcrumbs(&self) -> Vec<(String, Option<FolderId>)> {
+    pub(crate) fn folder_breadcrumbs(&self) -> Vec<(String, Option<FolderId>)> {
         let mut breadcrumbs = vec![(
             if self.library.trash_view_active {
                 String::from("Trash Can")

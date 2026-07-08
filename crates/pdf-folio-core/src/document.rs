@@ -348,5 +348,4 @@ impl PdfDoc {
 }
 
 #[cfg(test)]
-#[path = "tests/document.rs"]
 mod tests;

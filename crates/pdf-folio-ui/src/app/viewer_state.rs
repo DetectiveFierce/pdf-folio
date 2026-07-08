@@ -1,11 +1,11 @@
 use super::*;
 
 impl PDFolioApp {
-    pub(super) fn layout(&self) -> &crate::style::AppLayoutTokens {
+    pub(crate) fn layout(&self) -> &crate::style::AppLayoutTokens {
         self.appearance.style_book.layout()
     }
 
-    pub(super) fn estimated_viewer_viewport_width(&self) -> f32 {
+    pub(crate) fn estimated_viewer_viewport_width(&self) -> f32 {
         let sidebar_width = if self.viewer.toc_open {
             self.layout().viewer_sidebar_width
         } else {
@@ -14,11 +14,11 @@ impl PDFolioApp {
         (self.viewer.viewport_width - sidebar_width).max(1.0)
     }
 
-    pub(super) fn estimated_viewer_viewport_height(&self) -> f32 {
+    pub(crate) fn estimated_viewer_viewport_height(&self) -> f32 {
         (self.viewer.viewport_height - self.layout().toolbar_height).max(1.0)
     }
 
-    pub(super) fn apply_active_dimension_zoom(&mut self) -> Task<Message> {
+    pub(crate) fn apply_active_dimension_zoom(&mut self) -> Task<Message> {
         let Some(preset) = self.viewer.active_zoom_preset else {
             return Task::none();
         };
@@ -272,7 +272,7 @@ impl PDFolioApp {
         Self::with_initial_file_and_session(initial_file, None)
     }
 
-    pub(super) fn with_initial_file_and_session(
+    pub(crate) fn with_initial_file_and_session(
         initial_file: Option<PathBuf>,
         session: Option<AppSession>,
     ) -> Result<Self> {
@@ -314,12 +314,12 @@ impl PDFolioApp {
         Ok(app)
     }
 
-    #[allow(dead_code)]
-    pub(super) fn open_document(&mut self, doc: Arc<PdfDoc>) -> Task<Message> {
+    #[cfg(test)]
+    pub(crate) fn open_document(&mut self, doc: Arc<PdfDoc>) -> Task<Message> {
         self.open_document_with_path(doc, None)
     }
 
-    pub(super) fn open_document_with_path(
+    pub(crate) fn open_document_with_path(
         &mut self,
         doc: Arc<PdfDoc>,
         path: Option<PathBuf>,
@@ -370,7 +370,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn return_to_library(&mut self) -> Task<Message> {
+    pub(crate) fn return_to_library(&mut self) -> Task<Message> {
         self.mode = AppMode::Library;
         self.viewer.document_error = None;
         self.viewer.jump_dialog_open = false;
@@ -383,7 +383,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn return_to_viewer(&mut self) -> Task<Message> {
+    pub(crate) fn return_to_viewer(&mut self) -> Task<Message> {
         if self.viewer.doc.is_none() {
             return Task::none();
         }
@@ -393,7 +393,7 @@ impl PDFolioApp {
         self.request_visible_pages()
     }
 
-    pub(super) fn open_library_document(
+    pub(crate) fn open_library_document(
         &mut self,
         entry_id: EntryId,
         doc: Arc<PdfDoc>,
@@ -430,7 +430,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn request_visible_pages(&mut self) -> Task<Message> {
+    pub(crate) fn request_visible_pages(&mut self) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
         };
@@ -492,7 +492,7 @@ impl PDFolioApp {
         Task::batch([Task::batch(tasks), self.request_visible_text_layers()])
     }
 
-    pub(super) fn request_viewer_thumbnail_pages(&mut self) -> Task<Message> {
+    pub(crate) fn request_viewer_thumbnail_pages(&mut self) -> Task<Message> {
         if self.viewer.viewer_sidebar_tab != ViewerSidebarTab::Thumbnails {
             return Task::none();
         }
@@ -505,7 +505,7 @@ impl PDFolioApp {
         for page in 0..doc.page_count() {
             let key = TileKey {
                 page,
-                width_px: VIEWER_THUMBNAIL_WIDTH_PX,
+                width_px: self.layout().viewer_thumbnail_width_px,
             };
 
             if self.viewer.rendered_pages.contains_key(&key)
@@ -559,7 +559,7 @@ impl PDFolioApp {
         Task::batch(tasks)
     }
 
-    pub(super) fn request_visible_text_layers(&mut self) -> Task<Message> {
+    pub(crate) fn request_visible_text_layers(&mut self) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
         };
@@ -569,7 +569,7 @@ impl PDFolioApp {
         self.request_text_layers(pages, doc)
     }
 
-    pub(super) fn request_all_text_layers(&mut self) -> Task<Message> {
+    pub(crate) fn request_all_text_layers(&mut self) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
         };
@@ -579,7 +579,7 @@ impl PDFolioApp {
         self.request_text_layers(0..page_count, doc)
     }
 
-    pub(super) fn request_text_layers(
+    pub(crate) fn request_text_layers(
         &mut self,
         pages: std::ops::Range<u16>,
         doc: Arc<PdfDoc>,
@@ -616,7 +616,7 @@ impl PDFolioApp {
         Task::batch(tasks)
     }
 
-    pub(super) fn refresh_viewer_find_matches(&mut self) {
+    pub(crate) fn refresh_viewer_find_matches(&mut self) {
         self.viewer.viewer_find.refresh_matches(
             self.viewer
                 .viewer_text_layers
@@ -625,7 +625,7 @@ impl PDFolioApp {
         );
     }
 
-    pub(super) fn open_viewer_find(&mut self) -> Task<Message> {
+    pub(crate) fn open_viewer_find(&mut self) -> Task<Message> {
         if self.mode != AppMode::Viewer || self.viewer.doc.is_none() {
             return Task::none();
         }
@@ -640,7 +640,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn set_viewer_find_query(&mut self, query: String) -> Task<Message> {
+    pub(crate) fn set_viewer_find_query(&mut self, query: String) -> Task<Message> {
         self.viewer.viewer_find.query = query;
         self.refresh_viewer_find_matches();
         Task::batch([
@@ -649,7 +649,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn scroll_to_selected_viewer_find_match(&mut self) -> Task<Message> {
+    pub(crate) fn scroll_to_selected_viewer_find_match(&mut self) -> Task<Message> {
         let Some(selected) = self.viewer.viewer_find.selected_match() else {
             return Task::none();
         };
@@ -657,7 +657,7 @@ impl PDFolioApp {
         self.scroll_to_viewer_find_match(selected)
     }
 
-    pub(super) fn scroll_to_viewer_find_match(
+    pub(crate) fn scroll_to_viewer_find_match(
         &mut self,
         selected: ViewerFindMatch,
     ) -> Task<Message> {
@@ -677,14 +677,14 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn start_viewer_text_selection(&mut self, page: u16, char_index: usize) {
+    pub(crate) fn start_viewer_text_selection(&mut self, page: u16, char_index: usize) {
         self.viewer.viewer_text_selection = Some(ViewerTextSelection::new(ViewerTextAnchor::new(
             page, char_index,
         )));
         self.viewer.viewer_copy_pending = false;
     }
 
-    pub(super) fn update_viewer_text_selection(&mut self, page: u16, char_index: usize) {
+    pub(crate) fn update_viewer_text_selection(&mut self, page: u16, char_index: usize) {
         let Some(selection) = &mut self.viewer.viewer_text_selection else {
             return;
         };
@@ -693,18 +693,18 @@ impl PDFolioApp {
         self.viewer.viewer_copy_pending = false;
     }
 
-    pub(super) fn finish_viewer_text_selection(&mut self) {
+    pub(crate) fn finish_viewer_text_selection(&mut self) {
         if let Some(selection) = &mut self.viewer.viewer_text_selection {
             selection.dragging = false;
         }
     }
 
-    pub(super) fn clear_viewer_text_selection(&mut self) {
+    pub(crate) fn clear_viewer_text_selection(&mut self) {
         self.viewer.viewer_text_selection = None;
         self.viewer.viewer_copy_pending = false;
     }
 
-    pub(super) fn selected_text_layers_ready(&self) -> bool {
+    pub(crate) fn selected_text_layers_ready(&self) -> bool {
         let Some(selection) = self.viewer.viewer_text_selection else {
             return false;
         };
@@ -713,7 +713,7 @@ impl PDFolioApp {
         (start.page..=end.page).all(|page| self.viewer.viewer_text_layers.contains_key(&page))
     }
 
-    pub(super) fn selected_viewer_text(&self) -> Option<String> {
+    pub(crate) fn selected_viewer_text(&self) -> Option<String> {
         let selection = self.viewer.viewer_text_selection?;
         let (start, end) = selection.ordered();
         let mut text = String::new();
@@ -737,7 +737,7 @@ impl PDFolioApp {
         (!text.is_empty()).then_some(text)
     }
 
-    pub(super) fn copy_selected_viewer_text(&mut self) -> Task<Message> {
+    pub(crate) fn copy_selected_viewer_text(&mut self) -> Task<Message> {
         if self.viewer.viewer_text_selection.is_none() {
             return Task::none();
         }
@@ -752,7 +752,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn visible_page_range(&self) -> std::ops::Range<u16> {
+    pub(crate) fn visible_page_range(&self) -> std::ops::Range<u16> {
         let Some(doc) = &self.viewer.doc else {
             return 0..0;
         };
@@ -785,7 +785,7 @@ impl PDFolioApp {
         first.unwrap_or(0)..end.max(first.unwrap_or(0).saturating_add(1).min(page_count))
     }
 
-    pub(super) fn prefetch_page_order(&self) -> Vec<u16> {
+    pub(crate) fn prefetch_page_order(&self) -> Vec<u16> {
         let Some(doc) = &self.viewer.doc else {
             return Vec::new();
         };
@@ -801,7 +801,7 @@ impl PDFolioApp {
         )
     }
 
-    pub(super) fn page_height(&self, page: u16) -> f32 {
+    pub(crate) fn page_height(&self, page: u16) -> f32 {
         let ratio = self
             .viewer
             .page_aspect_ratios
@@ -812,24 +812,24 @@ impl PDFolioApp {
         f32::from(self.viewer.zoom_width) / ratio
     }
 
-    pub(super) fn render_width_px(&self) -> u16 {
+    pub(crate) fn render_width_px(&self) -> u16 {
         (f32::from(self.viewer.zoom_width) * self.viewer.scale_factor.max(1.0))
             .round()
             .clamp(1.0, f32::from(u16::MAX)) as u16
     }
 
-    pub(super) fn render_height_px(&self, page: u16) -> u16 {
+    pub(crate) fn render_height_px(&self, page: u16) -> u16 {
         (self.page_height(page) * self.viewer.scale_factor.max(1.0))
             .round()
             .clamp(1.0, f32::from(u16::MAX)) as u16
     }
 
-    pub(super) fn content_height(&self) -> f32 {
+    pub(crate) fn content_height(&self) -> f32 {
         self.viewer_content_size(self.viewer.viewer_viewport_width)
             .height
     }
 
-    pub(super) fn content_width(&self) -> f32 {
+    pub(crate) fn content_width(&self) -> f32 {
         self.viewer_content_size(self.viewer.viewer_viewport_width)
             .width
     }
@@ -848,13 +848,13 @@ impl PDFolioApp {
             .collect()
     }
 
-    pub(super) fn viewer_page_rect_for_page(&self, target_page: u16) -> Option<Rectangle> {
+    pub(crate) fn viewer_page_rect_for_page(&self, target_page: u16) -> Option<Rectangle> {
         self.viewer_page_rects_content(self.viewer.viewer_viewport_width)
             .into_iter()
             .find_map(|(page, rect)| (page == target_page).then_some(rect))
     }
 
-    pub(super) fn viewer_page_rects_content(&self, viewport_width: f32) -> Vec<(u16, Rectangle)> {
+    pub(crate) fn viewer_page_rects_content(&self, viewport_width: f32) -> Vec<(u16, Rectangle)> {
         let Some(doc) = &self.viewer.doc else {
             return Vec::new();
         };
@@ -876,7 +876,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn page_mode_rects(&self, page_count: u16) -> Vec<(u16, Rectangle)> {
+    pub(crate) fn page_mode_rects(&self, page_count: u16) -> Vec<(u16, Rectangle)> {
         if page_count == 0 {
             return Vec::new();
         }
@@ -901,7 +901,7 @@ impl PDFolioApp {
         )]
     }
 
-    pub(super) fn vertical_page_rects(&self, groups: &[Vec<u16>]) -> Vec<(u16, Rectangle)> {
+    pub(crate) fn vertical_page_rects(&self, groups: &[Vec<u16>]) -> Vec<(u16, Rectangle)> {
         let content_width = viewer_groups_max_width(self, groups)
             .max(self.viewer.viewer_viewport_width)
             .max(1.0);
@@ -931,7 +931,7 @@ impl PDFolioApp {
         rects
     }
 
-    pub(super) fn horizontal_page_rects(&self, groups: &[Vec<u16>]) -> Vec<(u16, Rectangle)> {
+    pub(crate) fn horizontal_page_rects(&self, groups: &[Vec<u16>]) -> Vec<(u16, Rectangle)> {
         let content_size =
             self.viewer_content_size_for_groups(groups, self.viewer.viewer_viewport_width);
         let total_width = viewer_groups_inline_width(self, groups);
@@ -958,7 +958,7 @@ impl PDFolioApp {
         rects
     }
 
-    pub(super) fn wrapped_page_rects(
+    pub(crate) fn wrapped_page_rects(
         &self,
         groups: &[Vec<u16>],
         viewport_width: f32,
@@ -1015,7 +1015,7 @@ impl PDFolioApp {
         rects
     }
 
-    pub(super) fn viewer_content_size(&self, viewport_width: f32) -> Size {
+    pub(crate) fn viewer_content_size(&self, viewport_width: f32) -> Size {
         let Some(doc) = &self.viewer.doc else {
             return Size::new(
                 viewport_width.max(1.0),
@@ -1041,7 +1041,7 @@ impl PDFolioApp {
         self.viewer_content_size_for_groups(&groups, viewport_width)
     }
 
-    pub(super) fn viewer_content_size_for_groups(
+    pub(crate) fn viewer_content_size_for_groups(
         &self,
         groups: &[Vec<u16>],
         viewport_width: f32,

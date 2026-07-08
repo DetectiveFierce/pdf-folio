@@ -106,7 +106,7 @@ impl SyncAuthRuntime {
     }
 }
 
-pub(super) fn sync_sign_in_task(expected_email: String, server_base_url: String) -> Task<Message> {
+pub(crate) fn sync_sign_in_task(expected_email: String, server_base_url: String) -> Task<Message> {
     Task::perform(
         async move {
             let client_id = load_google_client_id_from_secrets()

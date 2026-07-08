@@ -317,8 +317,8 @@ struct ExecuteResponse {
 
 #[derive(Debug, Deserialize)]
 struct StatementResult {
-    #[allow(dead_code)]
-    cols: Vec<Value>,
+    #[serde(rename = "cols")]
+    _cols: Vec<Value>,
     rows: Vec<Vec<TursoValue>>,
 }
 

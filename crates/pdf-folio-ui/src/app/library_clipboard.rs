@@ -14,31 +14,31 @@ impl Default for LibraryHistory {
 }
 
 impl LibraryHistory {
-    pub(super) fn can_undo(&self) -> bool {
+    pub(crate) fn can_undo(&self) -> bool {
         self.nodes
             .get(self.current)
             .is_some_and(|node| node.parent.is_some())
     }
 
-    pub(super) fn can_redo(&self) -> bool {
+    pub(crate) fn can_redo(&self) -> bool {
         self.nodes
             .get(self.current)
             .is_some_and(|node| !node.children.is_empty())
     }
 
-    pub(super) fn undo_target(&self) -> Option<(usize, LibraryHistoryAction)> {
+    pub(crate) fn undo_target(&self) -> Option<(usize, LibraryHistoryAction)> {
         let node = self.nodes.get(self.current)?;
         let parent = node.parent?;
         Some((parent, node.action.clone()?))
     }
 
-    pub(super) fn redo_target(&self) -> Option<(usize, LibraryHistoryAction)> {
+    pub(crate) fn redo_target(&self) -> Option<(usize, LibraryHistoryAction)> {
         let node = self.nodes.get(self.current)?;
         let child = node.children.last().copied()?;
         Some((child, self.nodes.get(child)?.action.clone()?))
     }
 
-    pub(super) fn push(&mut self, action: LibraryHistoryAction) {
+    pub(crate) fn push(&mut self, action: LibraryHistoryAction) {
         if action.before == action.after {
             return;
         }
@@ -55,7 +55,7 @@ impl LibraryHistory {
         self.current = index;
     }
 
-    pub(super) fn set_current(&mut self, index: usize) {
+    pub(crate) fn set_current(&mut self, index: usize) {
         if index < self.nodes.len() {
             self.current = index;
         }
@@ -63,7 +63,7 @@ impl LibraryHistory {
 }
 
 impl LibraryClipboard {
-    pub(super) fn label(&self) -> &'static str {
+    pub(crate) fn label(&self) -> &'static str {
         match (&self.mode, &self.target) {
             (LibraryClipboardMode::Cut, LibraryClipboardTarget::Entries(_)) => "Cut PDFs",
             (LibraryClipboardMode::Copy, LibraryClipboardTarget::Entries(_)) => "Copy PDFs",
@@ -72,7 +72,7 @@ impl LibraryClipboard {
         }
     }
 
-    pub(super) fn paste_label(&self) -> &'static str {
+    pub(crate) fn paste_label(&self) -> &'static str {
         match (&self.mode, &self.target) {
             (LibraryClipboardMode::Cut, LibraryClipboardTarget::Entries(_)) => "Move PDFs",
             (LibraryClipboardMode::Copy, LibraryClipboardTarget::Entries(_)) => "Paste PDFs",
@@ -83,13 +83,13 @@ impl LibraryClipboard {
 }
 
 impl PDFolioApp {
-    pub(super) fn can_cut_or_copy_library_selection(&self) -> bool {
+    pub(crate) fn can_cut_or_copy_library_selection(&self) -> bool {
         self.mode == AppMode::Library
             && (!self.library.selected_library_entries.is_empty()
                 || self.library.details_folder_id.is_some())
     }
 
-    pub(super) fn can_paste_library_clipboard(&self) -> bool {
+    pub(crate) fn can_paste_library_clipboard(&self) -> bool {
         self.mode == AppMode::Library
             && self.library.clipboard.as_ref().is_some_and(|clipboard| {
                 match (&clipboard.mode, &clipboard.target) {
@@ -115,7 +115,7 @@ impl PDFolioApp {
             })
     }
 
-    pub(super) fn set_library_clipboard(&mut self, mode: LibraryClipboardMode) -> bool {
+    pub(crate) fn set_library_clipboard(&mut self, mode: LibraryClipboardMode) -> bool {
         let target = if !self.library.selected_library_entries.is_empty() {
             let mut entry_ids = self
                 .library

@@ -12,14 +12,14 @@ use super::*;
 const SESSION_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(super) struct AppSession {
+pub(crate) struct AppSession {
     version: u16,
     #[serde(default = "default_session_library_id")]
-    pub(super) active_library_id: String,
+    pub(crate) active_library_id: String,
     mode: SessionMode,
     window: SessionWindow,
     appearance: SessionAppearance,
-    pub(super) viewer: SessionViewer,
+    pub(crate) viewer: SessionViewer,
     library: SessionLibrary,
 }
 
@@ -42,8 +42,8 @@ struct SessionAppearance {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(super) struct SessionViewer {
-    pub(super) document_path: Option<PathBuf>,
+pub(crate) struct SessionViewer {
+    pub(crate) document_path: Option<PathBuf>,
     entry_id: Option<String>,
     page: u16,
     scroll_offset: f32,
@@ -86,13 +86,13 @@ struct SessionLibrary {
 }
 
 impl AppSession {
-    pub(super) fn window_size(&self) -> [f32; 2] {
+    pub(crate) fn window_size(&self) -> [f32; 2] {
         [self.window.width.max(1.0), self.window.height.max(1.0)]
     }
 }
 
 impl PDFolioApp {
-    pub(super) fn snapshot_session(&self) -> AppSession {
+    pub(crate) fn snapshot_session(&self) -> AppSession {
         AppSession {
             version: SESSION_SCHEMA_VERSION,
             active_library_id: self.libraries.active_library_id.clone(),
@@ -184,7 +184,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn apply_pending_session_to_loaded_library(&mut self) -> Task<Message> {
+    pub(crate) fn apply_pending_session_to_loaded_library(&mut self) -> Task<Message> {
         let Some(session) = self.pending_session_restore.clone() else {
             return Task::none();
         };
@@ -215,7 +215,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn apply_pending_session_to_open_document(&mut self) -> Task<Message> {
+    pub(crate) fn apply_pending_session_to_open_document(&mut self) -> Task<Message> {
         let Some(session) = self.pending_session_restore.clone() else {
             return Task::none();
         };
@@ -261,7 +261,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn apply_library_session(&mut self, session: &AppSession) {
+    pub(crate) fn apply_library_session(&mut self, session: &AppSession) {
         self.appearance.theme = parse_theme(&session.appearance.theme);
         self.mode = match session.mode {
             SessionMode::Library => AppMode::Library,
@@ -353,7 +353,7 @@ impl PDFolioApp {
     }
 }
 
-pub(super) fn load_app_session() -> Result<Option<AppSession>> {
+pub(crate) fn load_app_session() -> Result<Option<AppSession>> {
     let path = session_path()?;
     if !path.exists() {
         return Ok(None);
@@ -376,7 +376,7 @@ pub(super) fn load_app_session() -> Result<Option<AppSession>> {
     }
 }
 
-pub(super) fn save_app_session(session: &AppSession) -> Result<()> {
+pub(crate) fn save_app_session(session: &AppSession) -> Result<()> {
     let path = session_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)

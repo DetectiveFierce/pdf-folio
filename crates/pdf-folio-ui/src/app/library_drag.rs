@@ -1,7 +1,15 @@
 use super::*;
 
+fn rect_distance_squared(px: f32, py: f32, x: f32, y: f32, width: f32, height: f32) -> f32 {
+    let closest_x = px.clamp(x, x + width.max(0.0));
+    let closest_y = py.clamp(y, y + height.max(0.0));
+    let dx = px - closest_x;
+    let dy = py - closest_y;
+    dx * dx + dy * dy
+}
+
 impl PDFolioApp {
-    pub(super) fn can_drag_reorder_library(&self) -> bool {
+    pub(crate) fn can_drag_reorder_library(&self) -> bool {
         if self.library.trash_view_active {
             return false;
         }
@@ -14,7 +22,7 @@ impl PDFolioApp {
         )
     }
 
-    pub(super) fn begin_library_drag(&mut self, entry_id: EntryId) {
+    pub(crate) fn begin_library_drag(&mut self, entry_id: EntryId) {
         self.library.folder_drag = None;
         let visible_entries = self.visible_library_entries();
         let Some(source_index) = visible_entries
@@ -44,7 +52,7 @@ impl PDFolioApp {
         self.adjust_scroll_for_parent_directory_drop_box(true);
     }
 
-    pub(super) fn begin_folder_drag(&mut self, folder_id: FolderId) {
+    pub(crate) fn begin_folder_drag(&mut self, folder_id: FolderId) {
         if !self
             .library
             .library_folders
@@ -60,14 +68,14 @@ impl PDFolioApp {
         self.adjust_scroll_for_parent_directory_drop_box(true);
     }
 
-    pub(super) fn begin_folder_tree_drag(&mut self, folder_id: FolderId) {
+    pub(crate) fn begin_folder_tree_drag(&mut self, folder_id: FolderId) {
         self.begin_folder_drag(folder_id);
         if self.library.folder_drag.is_some() {
             self.library.folder_drag_started_in_tree = true;
         }
     }
 
-    pub(super) fn update_library_drag_target(&mut self, cursor: Point) {
+    pub(crate) fn update_library_drag_target(&mut self, cursor: Point) {
         if self.library.library_drag.is_none() {
             return;
         }
@@ -103,7 +111,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn set_folder_drop_hover_target(
+    pub(crate) fn set_folder_drop_hover_target(
         &mut self,
         folder_id: Option<FolderId>,
         now: Instant,
@@ -150,7 +158,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn update_folder_drop_target_dwell(&mut self, now: Instant) {
+    pub(crate) fn update_folder_drop_target_dwell(&mut self, now: Instant) {
         let library_target = self
             .library
             .library_drag
@@ -192,7 +200,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn update_folder_drag_target(&mut self, cursor: Point) {
+    pub(crate) fn update_folder_drag_target(&mut self, cursor: Point) {
         let Some(drag) = &mut self.library.folder_drag else {
             return;
         };
@@ -211,7 +219,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn set_folder_drag_card_target(&mut self, folder_id: Option<FolderId>) {
+    pub(crate) fn set_folder_drag_card_target(&mut self, folder_id: Option<FolderId>) {
         let Some(drag) = &mut self.library.folder_drag else {
             return;
         };
@@ -221,7 +229,7 @@ impl PDFolioApp {
         drag.set_drop_target(target, Instant::now(), true);
     }
 
-    pub(super) fn set_library_drag_card_target(
+    pub(crate) fn set_library_drag_card_target(
         &mut self,
         folder_id: Option<FolderId>,
         now: Instant,
@@ -232,20 +240,20 @@ impl PDFolioApp {
         drag.set_pending_folder_target(folder_id, now);
     }
 
-    pub(super) fn active_folder_drop_target(&self) -> Option<&FolderId> {
+    pub(crate) fn active_folder_drop_target(&self) -> Option<&FolderId> {
         active_folder_drop_target(
             self.library.library_drag.as_ref(),
             self.library.folder_drag.as_ref(),
         )
     }
 
-    pub(super) fn parent_directory_drop_box_visible(&self) -> bool {
+    pub(crate) fn parent_directory_drop_box_visible(&self) -> bool {
         self.library.active_tag_filter.is_none()
             && self.library.selected_folder.is_some()
             && (self.library.library_drag.is_some() || self.library.folder_drag.is_some())
     }
 
-    pub(super) fn parent_directory_drop_target_active(&self) -> bool {
+    pub(crate) fn parent_directory_drop_target_active(&self) -> bool {
         self.library
             .library_drag
             .as_ref()
@@ -257,7 +265,7 @@ impl PDFolioApp {
                 .is_some_and(|drag| drag.parent_drop_target)
     }
 
-    pub(super) fn parent_directory_folder_id(&self) -> Option<FolderId> {
+    pub(crate) fn parent_directory_folder_id(&self) -> Option<FolderId> {
         let selected_folder = self.library.selected_folder.as_ref()?;
         self.library
             .library_folders
@@ -266,7 +274,7 @@ impl PDFolioApp {
             .and_then(|folder| folder.parent_id.clone())
     }
 
-    pub(super) fn set_parent_directory_drop_hover_target(&mut self, active: bool) {
+    pub(crate) fn set_parent_directory_drop_hover_target(&mut self, active: bool) {
         if let Some(drag) = &mut self.library.library_drag {
             if drag.active {
                 drag.set_parent_drop_target(active);
@@ -280,7 +288,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn adjust_scroll_for_parent_directory_drop_box(&mut self, visible: bool) {
+    pub(crate) fn adjust_scroll_for_parent_directory_drop_box(&mut self, visible: bool) {
         if self.library.selected_folder.is_none() {
             return;
         }
@@ -300,7 +308,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn folder_card_target_at_cursor(
+    pub(crate) fn folder_card_target_at_cursor(
         &self,
         cursor: Point,
         dragged_folder_id: &FolderId,
@@ -326,7 +334,7 @@ impl PDFolioApp {
         )
     }
 
-    pub(super) fn library_folder_card_target_at_cursor(&self, cursor: Point) -> Option<FolderId> {
+    pub(crate) fn library_folder_card_target_at_cursor(&self, cursor: Point) -> Option<FolderId> {
         let child_folders = self.child_folders();
         let dragged_folder_sentinel = FolderId::new("__pdf_folio_db_drag__");
         let folder_section_top = if self.parent_directory_drop_box_visible() {
@@ -349,7 +357,7 @@ impl PDFolioApp {
         )
     }
 
-    pub(super) fn collapse_drag_expanded_folders(&mut self, folders: HashSet<FolderId>) {
+    pub(crate) fn collapse_drag_expanded_folders(&mut self, folders: HashSet<FolderId>) {
         for folder_id in folders {
             self.library
                 .collapsed_library_tree_folders
@@ -357,14 +365,14 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn folder_has_children(&self, folder_id: &FolderId) -> bool {
+    pub(crate) fn folder_has_children(&self, folder_id: &FolderId) -> bool {
         self.library
             .library_folders
             .iter()
             .any(|folder| folder.parent_id.as_ref() == Some(folder_id))
     }
 
-    pub(super) fn update_library_drag_target_from_cursor(&mut self) {
+    pub(crate) fn update_library_drag_target_from_cursor(&mut self) {
         let entries = self.visible_library_entries();
         let entries_len = entries.len();
         if entries_len == 0 {
@@ -392,22 +400,37 @@ impl PDFolioApp {
             .cloned()
             .collect::<Vec<_>>();
         let compact_len = compact_entries.len();
+        let folder_section_height = folder_cards_section_height(self, self.child_folders().len());
         let content_y = (cursor.y - self.library.library_viewport_y
-            + self.library.library_scroll_offset)
+            + self.library.library_scroll_offset
+            - folder_section_height)
             .max(0.0);
         let index = if self.library.compact_view_mode {
-            let row = (content_y / self.library_row_height()).round().max(0.0) as usize;
+            let row_height = self.library_row_height();
+            let row_pitch = (row_height + Spacing::SM).max(1.0);
+            let row = ((content_y + row_height / 2.0) / row_pitch)
+                .floor()
+                .max(0.0) as usize;
             row.saturating_mul(self.library_entries_per_row())
         } else {
+            let content_x = (cursor.x - self.library.library_viewport_x).max(0.0);
             let per_row = self.library_entries_per_row().max(1);
             let column_step =
                 (self.library_grid_card_width() + self.library_grid_column_gap()).max(1.0);
-            let content_x = (cursor.x - self.library.library_viewport_x).max(0.0);
             let column = (content_x / column_step)
                 .floor()
                 .clamp(0.0, per_row.saturating_sub(1) as f32) as usize;
-            let layout = self.library_masonry_layout(&compact_entries);
-            masonry_target_index(&layout, column, content_y).unwrap_or(compact_len)
+            let compact_layout = self.library_masonry_layout(&compact_entries);
+            self.library_grid_drag_target_index_from_compact_layout(
+                &entries,
+                &compact_layout,
+                column,
+                content_x,
+                content_y,
+            )
+            .unwrap_or_else(|| {
+                masonry_target_index(&compact_layout, column, content_y).unwrap_or(compact_len)
+            })
         };
 
         let target_index = index.min(compact_len);
@@ -416,7 +439,121 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn library_content_height_for_len(&self, entries_len: usize) -> f32 {
+    fn library_grid_drag_target_index_from_compact_layout(
+        &self,
+        entries: &[LibraryEntry],
+        compact_layout: &LibraryMasonryLayout,
+        column: usize,
+        content_x: f32,
+        content_y: f32,
+    ) -> Option<usize> {
+        let drag = self.library.library_drag.as_ref()?;
+        if drag.drop_target.is_some() || entries.is_empty() {
+            return None;
+        }
+
+        let dragged_ids = drag.entry_ids.iter().cloned().collect::<HashSet<_>>();
+        let compact_len = entries
+            .iter()
+            .filter(|entry| !dragged_ids.contains(&entry.id))
+            .count();
+        if compact_len == 0 {
+            return Some(0);
+        }
+
+        let card_width = self.library_grid_card_width();
+        let column_step = (card_width + self.library_grid_column_gap()).max(1.0);
+        if !drag.multi {
+            let original_layout = self.library_masonry_layout(entries);
+            let Some(entry_index) = entries.iter().position(|entry| entry.id == drag.entry_id)
+            else {
+                return None;
+            };
+            for (column_index, column_items) in original_layout.columns.iter().enumerate() {
+                let x = column_index as f32 * column_step;
+                for item in column_items {
+                    if item.index == entry_index
+                        && rect_distance_squared(
+                            content_x,
+                            content_y,
+                            x,
+                            item.top,
+                            card_width,
+                            item.height,
+                        ) == 0.0
+                    {
+                        return Some(drag.source_index.min(compact_len));
+                    }
+                }
+            }
+        }
+
+        let current_target_index = drag.target_index.min(compact_len);
+        let mut current_drag = drag.clone();
+        current_drag.target_index = current_target_index;
+        let current_items =
+            crate::library::view::library_render_items_for_drag(entries, &current_drag);
+        let current_layout = self.library_render_item_masonry_layout(&current_items);
+        for (column_index, column_items) in current_layout.columns.iter().enumerate() {
+            let x = column_index as f32 * column_step;
+            for item in column_items {
+                if matches!(
+                    current_items.get(item.index),
+                    Some(LibraryRenderItem::DropZone(_))
+                ) && rect_distance_squared(
+                    content_x,
+                    content_y,
+                    x,
+                    item.top,
+                    card_width,
+                    item.height,
+                ) == 0.0
+                {
+                    return Some(current_target_index);
+                }
+            }
+        }
+
+        let column_items = compact_layout.columns.get(column)?;
+        if column_items.is_empty() {
+            return Some(compact_len);
+        }
+
+        let x = column as f32 * column_step;
+        if content_x < x || content_x > x + card_width {
+            return masonry_target_index(compact_layout, column, content_y);
+        }
+
+        for (position, item) in column_items.iter().enumerate() {
+            if content_y < item.top {
+                if position == 0 {
+                    return Some(item.index);
+                }
+
+                let previous = &column_items[position - 1];
+                let gap_midpoint = (previous.top + previous.height + item.top) / 2.0;
+                return Some(if content_y < gap_midpoint {
+                    item.index
+                } else {
+                    previous.index.saturating_add(1)
+                });
+            }
+
+            if content_y <= item.top + item.height {
+                return Some(if content_y < item.top + item.height / 2.0 {
+                    item.index
+                } else {
+                    item.index.saturating_add(1)
+                });
+            }
+        }
+
+        column_items
+            .last()
+            .map(|item| item.index.saturating_add(1).min(compact_len))
+    }
+
+    pub(crate) fn library_content_height_for_len(&self, entries_len: usize) -> f32 {
         if entries_len == 0 {
             return 0.0;
         }
@@ -436,14 +573,14 @@ impl PDFolioApp {
         rows as f32 * self.library_row_height() + rows.saturating_sub(1) as f32 * row_gap
     }
 
-    pub(super) fn max_library_scroll_offset(&self) -> f32 {
+    pub(crate) fn max_library_scroll_offset(&self) -> f32 {
         let content_height = self
             .library_content_height_for_len(self.visible_library_entries().len())
             + folder_cards_section_height(self, self.child_folders().len());
         (content_height - self.library.library_viewport_height.max(1.0)).max(0.0)
     }
 
-    pub(super) fn library_drag_auto_scroll_velocity(&self) -> f32 {
+    pub(crate) fn library_drag_auto_scroll_velocity(&self) -> f32 {
         let Some(cursor) = self
             .library
             .library_drag
@@ -473,7 +610,7 @@ impl PDFolioApp {
         )
     }
 
-    pub(super) fn auto_scroll_library_drag(&mut self, tick: Instant) -> Task<Message> {
+    pub(crate) fn auto_scroll_library_drag(&mut self, tick: Instant) -> Task<Message> {
         if self.library.library_drag.is_none() && self.library.folder_drag.is_none() {
             return Task::none();
         }
@@ -523,7 +660,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn finish_library_drag(&mut self) -> Task<Message> {
+    pub(crate) fn finish_library_drag(&mut self) -> Task<Message> {
         let Some(drag) = self.library.library_drag.take() else {
             return Task::none();
         };
@@ -625,13 +762,18 @@ impl PDFolioApp {
         } else {
             String::from("Saving manual PDF order...")
         });
+        let persist_order = if let Some(folder_id) = self.library.selected_folder.clone() {
+            persist_manual_folder_entry_order_task(Arc::clone(&self.db), folder_id, next_order)
+        } else {
+            persist_manual_entry_order_task(Arc::clone(&self.db), next_order)
+        };
         Task::batch([
-            persist_manual_entry_order_task(Arc::clone(&self.db), next_order),
+            persist_order,
             scroll_library_to_offset_task(self.library.library_scroll_offset),
         ])
     }
 
-    pub(super) fn finish_folder_drag(&mut self) -> Task<Message> {
+    pub(crate) fn finish_folder_drag(&mut self) -> Task<Message> {
         let Some(drag) = self.library.folder_drag.take() else {
             return Task::none();
         };
