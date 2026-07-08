@@ -1,4 +1,4 @@
-use pdf_folio_db::{FolderId, ImportSummary, ImportedEntry};
+use pdf_folio_core::{FolderId, ImportSummary, ImportedEntry};
 
 /// Summary returned after importing PDFs from Raindrop.io.
 #[derive(Debug, Clone, PartialEq, Eq)]

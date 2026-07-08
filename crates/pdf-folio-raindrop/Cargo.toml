@@ -6,15 +6,4 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-anyhow.workspace = true
-blake3.workspace = true
-directories.workspace = true
-pdf-folio-core = { path = "../pdf-folio-core" }
-pdf-folio-db = { path = "../pdf-folio-db" }
-reqwest.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
-url.workspace = true
-webbrowser.workspace = true
-zip.workspace = true
+pdf-folio-cloud = { path = "../pdf-folio-cloud" }

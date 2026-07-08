@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use url::Url;
 
-use crate::RaindropOAuthConfig;
+use super::RaindropOAuthConfig;
 
 const OAUTH_AUTHORIZE_URL: &str = "https://raindrop.io/oauth/authorize";
 const OAUTH_TOKEN_URL: &str = "https://raindrop.io/oauth/access_token";
