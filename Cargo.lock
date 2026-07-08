@@ -4264,8 +4264,6 @@ dependencies = [
  "pdf-folio-core",
  "pdf-folio-db",
  "pdf-folio-style",
- "pdf-folio-ui-components",
- "pdf-folio-viewer",
  "reqwest",
  "rfd",
  "serde",
@@ -4274,24 +4272,6 @@ dependencies = [
  "tracing",
  "webbrowser",
  "zip",
-]
-
-[[package]]
-name = "pdf-folio-ui-components"
-version = "0.1.0"
-dependencies = [
- "iced",
- "pdf-folio-core",
- "pdf-folio-db",
- "pdf-folio-style",
-]
-
-[[package]]
-name = "pdf-folio-viewer"
-version = "0.1.0"
-dependencies = [
- "iced",
- "pdf-folio-core",
 ]
 
 [[package]]

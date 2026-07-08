@@ -57,6 +57,7 @@ pub const BUNDLED_FONT_BYTES: &[&[u8]] = &[
 ];
 
 pub use book::{fallback_dark_tokens, fallback_light_tokens, StyleBook};
+pub use borders::side_border;
 pub use classes::{
     button_style, container_style, menu_style, menu_style_for_class, mix_color, pick_list_style,
     progress_bar_style, scrollable_style, side_border_for_class, side_border_for_style,
@@ -69,7 +70,6 @@ pub use components::{
     progress_bar, search_input, search_input_with_class, section_heading, selection_checkbox,
     sidebar_button, tag_pill, toc_entry, toolbar_button, MasterCheckboxState,
 };
-pub use borders::side_border;
 pub use tokens::{
     display_font, ui_font, AppLabelTokens, AppLayoutTokens, BorderWidth, BoxShadow,
     ContentAlignment, FontSize, FontWeight, IconSize, LabelSection, Radius, Spacing, TextAlignment,

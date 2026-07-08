@@ -5,8 +5,6 @@ members = [
     "crates/pdf-folio-cloud",
     "crates/pdf-folio-db",
     "crates/pdf-folio-style",
-    "crates/pdf-folio-viewer",
-    "crates/pdf-folio-ui-components",
     "crates/pdf-folio-ui",
     "crates/pdf-folio-main",
 ]

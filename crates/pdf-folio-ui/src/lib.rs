@@ -27,7 +27,9 @@ pub use pdf_folio_style::theme;
 
 mod app;
 mod library;
+mod ui_components_library;
 mod viewer;
+mod viewer_crate_state;
 pub mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -163,7 +165,7 @@ use app::session::{load_app_session, save_app_session, AppSession};
 use app::sync_auth::{SyncAuthRuntime, SyncAuthState};
 use app::update::{pending_raindrop_rollback_check_task, update};
 use app::view::view;
-use pdf_folio_ui_components::library::view::with_alpha;
+use crate::ui_components_library::view::with_alpha;
 
 pub use app::state::*;
 
