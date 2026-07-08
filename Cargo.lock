@@ -4246,18 +4246,7 @@ dependencies = [
 name = "pdf-folio-raindrop"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "blake3",
- "directories",
- "pdf-folio-core",
- "pdf-folio-db",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "url",
- "webbrowser",
- "zip",
+ "pdf-folio-cloud",
 ]
 
 [[package]]
