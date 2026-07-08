@@ -11,8 +11,8 @@
 //!   toolbars, tags, icons) that close over theme tokens.
 //! - [`tokens`] defines strongly-typed spacing, font-size, radius, and
 //!   weight constants so the rest of the app avoids magic numbers.
-//! - [`layout`] holds shared layout constants such as window size, card grid
-//!   dimensions, and scroll increment.
+//! - [`StyleBook::layout`] exposes KDL-backed layout values such as window size,
+//!   card grid dimensions, and scroll increment.
 //!
 //! Bundled IBM Plex Sans and Vollkorn font bytes are re-exported so the UI
 //! crate can register them with iced at startup.
@@ -20,7 +20,6 @@
 pub mod book;
 pub mod classes;
 pub mod components;
-pub mod layout;
 pub mod side_border;
 pub mod theme;
 pub mod tokens;
@@ -69,10 +68,6 @@ pub use components::{
     empty_state, error_banner, icon_button, library_card, library_row, master_checkbox,
     progress_bar, search_input, search_input_with_class, section_heading, selection_checkbox,
     sidebar_button, tag_pill, toc_entry, toolbar_button, MasterCheckboxState,
-};
-pub use layout::{
-    CARD_GRID_COLUMNS, LIBRARY_GRID_CARD_WIDTH, LIBRARY_OVERSCAN_ROWS, LINE_SCROLL_PIXELS,
-    WINDOW_SIZE,
 };
 pub use side_border::side_border;
 pub use tokens::{

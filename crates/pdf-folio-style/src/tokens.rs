@@ -937,6 +937,8 @@ pub struct PrimitiveTokens {
     pub sidebar_chevron_icon_size: f32,
     /// Sidebar chevron button size.
     pub sidebar_chevron_button_size: f32,
+    /// Sidebar chevron button padding.
+    pub sidebar_chevron_button_padding: f32,
     /// File tree indent width per depth level.
     pub file_tree_indent_width: f32,
     /// File tree maximum indentation.
@@ -1008,6 +1010,7 @@ impl Default for PrimitiveTokens {
             library_switcher_sidebar_text_width: 170.0,
             sidebar_chevron_icon_size: 18.0,
             sidebar_chevron_button_size: 28.0,
+            sidebar_chevron_button_padding: 0.0,
             file_tree_indent_width: 12.0,
             file_tree_max_indent: 72.0,
             file_tree_meta_char_width: 6.0,

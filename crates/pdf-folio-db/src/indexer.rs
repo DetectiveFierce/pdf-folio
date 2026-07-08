@@ -283,5 +283,4 @@ fn has_tantivy_meta(path: &Path) -> bool {
 }
 
 #[cfg(test)]
-#[path = "tests/indexer.rs"]
 mod tests;

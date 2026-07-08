@@ -102,13 +102,13 @@ impl LibraryRegistryRuntime {
 }
 
 impl PDFolioApp {
-    pub(super) fn active_library_name(&self) -> &str {
+    pub(crate) fn active_library_name(&self) -> &str {
         self.libraries
             .active_profile()
             .map_or(DEFAULT_LIBRARY_NAME, |profile| profile.name.as_str())
     }
 
-    pub(super) fn open_library_switcher(&mut self) {
+    pub(crate) fn open_library_switcher(&mut self) {
         self.mode = AppMode::LibrarySwitcher;
         self.clear_library_transient_interactions();
         self.chrome.open_context_menu = None;
@@ -116,7 +116,7 @@ impl PDFolioApp {
         self.libraries.open_menu_library_id = None;
     }
 
-    pub(super) fn select_library(&mut self, library_id: String) -> anyhow::Result<Task<Message>> {
+    pub(crate) fn select_library(&mut self, library_id: String) -> anyhow::Result<Task<Message>> {
         let Some(profile) = self
             .libraries
             .profiles
@@ -140,7 +140,7 @@ impl PDFolioApp {
         ]))
     }
 
-    pub(super) fn apply_library_registry(
+    pub(crate) fn apply_library_registry(
         &mut self,
         registry: LibraryRegistryRuntime,
     ) -> anyhow::Result<Task<Message>> {
@@ -219,7 +219,7 @@ impl PDFolioApp {
         self.library.library_status = Some(format!("Loading {}...", self.active_library_name()));
     }
 
-    pub(super) fn set_active_library_preview_from_entries(&mut self) {
+    pub(crate) fn set_active_library_preview_from_entries(&mut self) {
         let preview = LibraryPreview {
             total_entries: self.library.library_entries.len(),
             thumbnails: self
@@ -236,7 +236,7 @@ impl PDFolioApp {
     }
 }
 
-pub(super) fn load_library_preview(profile: &LibraryProfile) -> LibraryPreview {
+pub(crate) fn load_library_preview(profile: &LibraryProfile) -> LibraryPreview {
     Db::open(profile.db_path.clone())
         .and_then(|db| db.get_entries_sorted(LibrarySortMode::RecentlyAdded))
         .map(|entries| LibraryPreview {
@@ -250,7 +250,7 @@ pub(super) fn load_library_preview(profile: &LibraryProfile) -> LibraryPreview {
         .unwrap_or_default()
 }
 
-pub(super) fn load_library_registry(
+pub(crate) fn load_library_registry(
     preferred_active_id: Option<&str>,
 ) -> anyhow::Result<LibraryRegistryRuntime> {
     let data_dir = app_data_dir()?;
@@ -285,7 +285,7 @@ pub(super) fn load_library_registry(
     Ok(registry)
 }
 
-pub(super) fn create_library_profile(
+pub(crate) fn create_library_profile(
     registry: LibraryRegistryRuntime,
     name: String,
 ) -> anyhow::Result<LibraryRegistryRuntime> {
@@ -313,7 +313,7 @@ pub(super) fn create_library_profile(
     Ok(registry)
 }
 
-pub(super) fn rename_library_profile(
+pub(crate) fn rename_library_profile(
     registry: LibraryRegistryRuntime,
     library_id: String,
     name: String,
@@ -336,7 +336,7 @@ pub(super) fn rename_library_profile(
     Ok(registry)
 }
 
-pub(super) fn delete_library_profile(
+pub(crate) fn delete_library_profile(
     registry: LibraryRegistryRuntime,
     library_id: String,
 ) -> anyhow::Result<LibraryRegistryRuntime> {
@@ -369,7 +369,7 @@ pub(super) fn delete_library_profile(
     Ok(registry)
 }
 
-pub(super) fn sync_library_registry_profiles(
+pub(crate) fn sync_library_registry_profiles(
     registry: LibraryRegistryRuntime,
     remote_libraries: Vec<SyncLibraryRow>,
 ) -> anyhow::Result<(LibraryRegistryRuntime, Vec<String>)> {
@@ -442,7 +442,7 @@ pub(super) fn sync_library_registry_profiles(
     Ok((registry, added_library_ids))
 }
 
-pub(super) fn sync_library_rows_for_registry(
+pub(crate) fn sync_library_rows_for_registry(
     registry: &LibraryRegistryRuntime,
 ) -> Vec<SyncLibraryRow> {
     let registry_updated_at = registry_path()

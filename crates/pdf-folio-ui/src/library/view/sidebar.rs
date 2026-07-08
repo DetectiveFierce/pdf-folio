@@ -1418,7 +1418,7 @@ pub(crate) fn chevron_button<'a>(
     )
     .width(tokens.primitives.sidebar_chevron_button_size)
     .height(tokens.primitives.sidebar_chevron_button_size)
-    .padding(0)
+    .padding(tokens.primitives.sidebar_chevron_button_padding)
     .style(move |_, status| {
         let _ = transparent;
         crate::style::button_style(tokens, Class::SidebarToggleButton, status)

@@ -277,39 +277,35 @@ pub fn library_new_folder_button<'a, Message: 'a>(
 pub fn library_drop_zone_card<'a, Message: 'a>(
     card_width: f32,
     estimated_height: f32,
-    font_size: u32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    container(
-        text("Drop selected PDFs here")
-            .size(font_size)
-            .font(ui_font(FontWeight::SEMIBOLD))
-            .color(tokens.text_primary)
-            .wrapping(iced::widget::text::Wrapping::None),
-    )
-    .width(card_width)
-    .height(estimated_height)
-    .center(Length::Fill)
-    .style(move |_| container_style(tokens, Class::DragInsertionMarker))
-    .into()
+    container("")
+        .width(card_width)
+        .height(estimated_height)
+        .center(Length::Fill)
+        .style(move |_| translucent_drop_zone_style(tokens))
+        .into()
 }
 
 pub fn library_drop_zone_row<'a, Message: 'a>(
     row_height: f32,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    container(
-        text("Drop selected PDFs here")
-            .size(FontSize::SM)
-            .font(ui_font(FontWeight::SEMIBOLD))
-            .color(tokens.text_primary)
-            .wrapping(iced::widget::text::Wrapping::None),
-    )
-    .width(Length::Fill)
-    .height(row_height)
-    .center(Length::Fill)
-    .style(move |_| container_style(tokens, Class::DragInsertionMarker))
-    .into()
+    container("")
+        .width(Length::Fill)
+        .height(row_height)
+        .center(Length::Fill)
+        .style(move |_| translucent_drop_zone_style(tokens))
+        .into()
+}
+
+fn translucent_drop_zone_style(tokens: ThemeTokens) -> iced::widget::container::Style {
+    let mut style = container_style(tokens, Class::DragInsertionMarker);
+    if let Some(iced::Background::Color(background)) = style.background {
+        style.background = Some(iced::Background::Color(with_alpha(background, 0.34)));
+    }
+    style.border.color = with_alpha(style.border.color, 0.52);
+    style
 }
 
 pub fn library_metadata_density_picker<'a, Message: Clone + 'a>(

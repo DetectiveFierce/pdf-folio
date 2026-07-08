@@ -1,12 +1,12 @@
 use super::*;
 
 impl PDFolioApp {
-    pub(super) fn page_top(&self, target_page: u16) -> f32 {
+    pub(crate) fn page_top(&self, target_page: u16) -> f32 {
         self.viewer_page_rect_for_page(target_page)
             .map_or(Spacing::PAGE_GUTTER, |rect| rect.y)
     }
 
-    pub(super) fn jump_to_page(&mut self, page: u16) -> Task<Message> {
+    pub(crate) fn jump_to_page(&mut self, page: u16) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
         };
@@ -40,7 +40,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn scroll_to_page_rect(&mut self, page: u16, x_fraction: f32, y_fraction: f32) {
+    pub(crate) fn scroll_to_page_rect(&mut self, page: u16, x_fraction: f32, y_fraction: f32) {
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
             self.viewer.page_scroll_page = page;
         }
@@ -63,15 +63,15 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn max_horizontal_offset(&self) -> f32 {
+    pub(crate) fn max_horizontal_offset(&self) -> f32 {
         (self.content_width() - self.viewer.viewer_viewport_width.max(1.0)).max(0.0)
     }
 
-    pub(super) fn max_scroll_offset(&self) -> f32 {
+    pub(crate) fn max_scroll_offset(&self) -> f32 {
         (self.content_height() - self.viewer.viewer_viewport_height.max(1.0)).max(0.0)
     }
 
-    pub(super) fn scroll_viewer_to_offsets_task(&self) -> Task<Message> {
+    pub(crate) fn scroll_viewer_to_offsets_task(&self) -> Task<Message> {
         operation::scroll_to(
             Id::new(VIEWER_SCROLLABLE_ID),
             operation::AbsoluteOffset {
@@ -81,21 +81,21 @@ impl PDFolioApp {
         )
     }
 
-    pub(super) fn clamp_horizontal_offset(&mut self) {
+    pub(crate) fn clamp_horizontal_offset(&mut self) {
         self.viewer.horizontal_offset = self
             .viewer
             .horizontal_offset
             .clamp(0.0, self.max_horizontal_offset());
     }
 
-    pub(super) fn clamp_scroll_offset(&mut self) {
+    pub(crate) fn clamp_scroll_offset(&mut self) {
         self.viewer.scroll_offset = self
             .viewer
             .scroll_offset
             .clamp(0.0, self.max_scroll_offset());
     }
 
-    pub(super) fn scroll_by(&mut self, delta: f32) -> Task<Message> {
+    pub(crate) fn scroll_by(&mut self, delta: f32) -> Task<Message> {
         self.viewer.last_scroll_offset = self.viewer.scroll_offset;
         self.viewer.scroll_offset =
             (self.viewer.scroll_offset + delta).clamp(0.0, self.max_scroll_offset());
@@ -105,7 +105,7 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn scroll_page_mode_by(&mut self, direction: i16) -> Task<Message> {
+    pub(crate) fn scroll_page_mode_by(&mut self, direction: i16) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
         };
@@ -122,12 +122,12 @@ impl PDFolioApp {
         ])
     }
 
-    pub(super) fn pan_horizontally_by(&mut self, delta: f32) {
+    pub(crate) fn pan_horizontally_by(&mut self, delta: f32) {
         self.viewer.horizontal_offset =
             (self.viewer.horizontal_offset + delta).clamp(0.0, self.max_horizontal_offset());
     }
 
-    pub(super) fn set_viewer_scroll_mode(&mut self, mode: ViewerScrollMode) -> Task<Message> {
+    pub(crate) fn set_viewer_scroll_mode(&mut self, mode: ViewerScrollMode) -> Task<Message> {
         if self.viewer.viewer_scroll_mode == mode {
             return Task::none();
         }
@@ -143,7 +143,7 @@ impl PDFolioApp {
         Task::batch([zoom_task, page_task])
     }
 
-    pub(super) fn set_viewer_spread_mode(&mut self, mode: ViewerSpreadMode) -> Task<Message> {
+    pub(crate) fn set_viewer_spread_mode(&mut self, mode: ViewerSpreadMode) -> Task<Message> {
         if self.viewer.viewer_spread_mode == mode {
             return Task::none();
         }
@@ -156,7 +156,7 @@ impl PDFolioApp {
         Task::batch([zoom_task, page_task])
     }
 
-    pub(super) fn zoom_to_width(
+    pub(crate) fn zoom_to_width(
         &mut self,
         width: u16,
         cursor: Option<Point>,
@@ -212,7 +212,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn rendered_page_for_draw(&self, key: TileKey) -> Option<&RenderedPageView> {
+    pub(crate) fn rendered_page_for_draw(&self, key: TileKey) -> Option<&RenderedPageView> {
         selected_render_key(
             self.viewer.rendered_pages.keys(),
             key,
@@ -222,7 +222,7 @@ impl PDFolioApp {
         .and_then(|key| self.viewer.rendered_pages.get(&key))
     }
 
-    pub(super) fn fallback_rendered_page_for_draw(
+    pub(crate) fn fallback_rendered_page_for_draw(
         &self,
         key: TileKey,
     ) -> Option<&RenderedPageView> {
@@ -235,13 +235,16 @@ impl PDFolioApp {
         .and_then(|key| self.viewer.rendered_pages.get(&key))
     }
 
-    pub(super) fn page_fade_progress(&self, key: TileKey) -> Option<f32> {
+    pub(crate) fn page_fade_progress(&self, key: TileKey) -> Option<f32> {
         let started = self.viewer.page_fade_started.get(&key)?;
         let elapsed = Instant::now().saturating_duration_since(*started);
-        Some((elapsed.as_secs_f32() / (VIEWER_PAGE_FADE_MS as f32 / 1000.0)).clamp(0.0, 1.0))
+        Some(
+            (elapsed.as_secs_f32() / (self.layout().viewer_page_fade_ms as f32 / 1000.0))
+                .clamp(0.0, 1.0),
+        )
     }
 
-    pub(super) fn all_visible_pages_rendered_at_current_zoom(&self) -> bool {
+    pub(crate) fn all_visible_pages_rendered_at_current_zoom(&self) -> bool {
         self.visible_page_range().all(|page| {
             self.viewer.rendered_pages.contains_key(&TileKey {
                 page,
@@ -250,7 +253,7 @@ impl PDFolioApp {
         })
     }
 
-    pub(super) fn title(&self) -> String {
+    pub(crate) fn title(&self) -> String {
         if matches!(self.mode, AppMode::Library | AppMode::LibrarySwitcher) {
             return String::from("PDF-Folio");
         }

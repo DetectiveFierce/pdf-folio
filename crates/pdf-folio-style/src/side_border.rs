@@ -226,5 +226,4 @@ where
 }
 
 #[cfg(test)]
-#[path = "tests/style/side_border.rs"]
 mod tests;

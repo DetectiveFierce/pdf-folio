@@ -54,6 +54,42 @@ fn inserts_entries_with_gapped_manual_order_and_reorders_them() {
 }
 
 #[test]
+fn reorders_entries_inside_folder_without_changing_root_order() {
+    let db = test_db();
+    db.insert_entry(&entry("a", "Alpha")).unwrap();
+    db.insert_entry(&entry("b", "Beta")).unwrap();
+    db.insert_entry(&entry("c", "Gamma")).unwrap();
+    let folder = db.create_folder("Folder", None).unwrap();
+    db.add_entry_to_folder(&EntryId::new("a"), &folder).unwrap();
+    db.add_entry_to_folder(&EntryId::new("b"), &folder).unwrap();
+    db.add_entry_to_folder(&EntryId::new("c"), &folder).unwrap();
+
+    db.set_manual_folder_entry_order(
+        &folder,
+        &[EntryId::new("c"), EntryId::new("a"), EntryId::new("b")],
+    )
+    .unwrap();
+
+    let folder_entries = db.entries_in_folder(&folder).unwrap();
+    assert_eq!(
+        folder_entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["c", "a", "b"]
+    );
+
+    let root_entries = db.get_entries_sorted(LibrarySortMode::Manual).unwrap();
+    assert_eq!(
+        root_entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a", "b", "c"]
+    );
+}
+
+#[test]
 fn updates_and_resets_display_metadata() {
     let db = test_db();
     let id = EntryId::new("book");

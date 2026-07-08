@@ -14,7 +14,7 @@ use pdf_folio_raindrop::{
     RaindropImportDestination, RaindropImportPreview, RaindropImportProgress, RaindropImportSummary,
 };
 
-use crate::app_commands::CommandId;
+use crate::app::commands::CommandId;
 use crate::library::state::{LibraryMetadataDensity, LibraryReadingFilter};
 use crate::library::thumbnails::ThumbnailSize;
 use crate::style::StyleBook;
@@ -195,14 +195,14 @@ pub enum Message {
         /// Whether this registry sync should catch up every known library afterward.
         sync_all_after: bool,
         /// Updated registry after merging remote library profiles.
-        result: Result<(crate::app_libraries::LibraryRegistryRuntime, Vec<String>), String>,
+        result: Result<(crate::app::libraries::LibraryRegistryRuntime, Vec<String>), String>,
     },
     /// A library switcher preview was refreshed.
     LibraryPreviewRefreshed {
         /// Library whose preview was loaded.
         library_id: String,
         /// New preview payload.
-        preview: crate::app_libraries::LibraryPreview,
+        preview: crate::app::libraries::LibraryPreview,
     },
     /// The native file picker was dismissed without choosing a file.
     FileDialogCanceled,
@@ -405,7 +405,7 @@ pub enum Message {
     /// Create a new discrete library.
     CreateLibrary,
     /// A library registry mutation finished.
-    LibraryRegistryUpdated(crate::app_libraries::LibraryRegistryRuntime),
+    LibraryRegistryUpdated(crate::app::libraries::LibraryRegistryRuntime),
     /// Existing-library rename input changed.
     LibraryRenameInputChanged { library_id: String, value: String },
     /// Rename an existing discrete library.

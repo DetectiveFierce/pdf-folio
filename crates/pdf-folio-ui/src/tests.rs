@@ -333,6 +333,36 @@ fn root_library_scope_shows_only_unfiled_entries() {
 }
 
 #[test]
+fn selected_folder_manual_view_uses_folder_entry_order() {
+    let db = test_db("selected-folder-manual-order");
+    db.insert_entry(&test_new_entry("a")).unwrap();
+    db.insert_entry(&test_new_entry("b")).unwrap();
+    db.insert_entry(&test_new_entry("c")).unwrap();
+    let folder = db.create_folder("Reading", None).unwrap();
+    db.add_entry_to_folder(&EntryId::new("a"), &folder).unwrap();
+    db.add_entry_to_folder(&EntryId::new("b"), &folder).unwrap();
+    db.add_entry_to_folder(&EntryId::new("c"), &folder).unwrap();
+    db.set_manual_folder_entry_order(
+        &folder,
+        &[EntryId::new("c"), EntryId::new("a"), EntryId::new("b")],
+    )
+    .unwrap();
+
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.library.library_entries = db.get_entries_sorted(LibrarySortMode::Manual).unwrap();
+    app.library.library_sort_mode = LibrarySortMode::Manual;
+    app.library.selected_folder = Some(folder);
+
+    assert_eq!(
+        app.visible_library_entries()
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["c", "a", "b"]
+    );
+}
+
+#[test]
 fn library_history_keeps_redo_branches_after_undo() {
     fn snapshot(label: &str) -> LibraryOrganizationSnapshot {
         let db = test_db(label);
@@ -434,6 +464,261 @@ fn multi_drag_placeholder_count_matches_visible_selection_size() {
     let dragged = ["b", "d", "missing"].map(EntryId::new);
 
     assert_eq!(dragged_placeholder_count(&entries, &dragged), 2);
+}
+
+#[test]
+fn single_drag_renders_original_ghost_and_target_drop_zone() {
+    let db = test_db("single-drag-render-items");
+    db.insert_entry(&test_new_entry("a")).unwrap();
+    db.insert_entry(&test_new_entry("b")).unwrap();
+    db.insert_entry(&test_new_entry("c")).unwrap();
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.library.library_entries = db.get_entries_sorted(LibrarySortMode::Manual).unwrap();
+    app.library.selected_folder = None;
+    app.library.active_tag_filter = None;
+    app.library.search_results = None;
+    app.library.search_query.clear();
+    app.library.library_folders.clear();
+    let entries = app.visible_library_entries();
+    let mut drag = LibraryDragState::new(EntryId::new("a"), vec![EntryId::new("a")], 0, false);
+    drag.active = true;
+    drag.target_index = 2;
+    app.library.library_drag = Some(drag);
+
+    let items = crate::library::view::library_render_items(&app, &entries);
+
+    assert_eq!(items.len(), 4);
+    assert!(matches!(items[0], LibraryRenderItem::Ghost(_)));
+    assert!(matches!(items[3], LibraryRenderItem::DropZone(_)));
+}
+
+#[test]
+fn single_drag_omits_drop_zone_for_unchanged_position() {
+    let db = test_db("single-drag-noop-render-items");
+    db.insert_entry(&test_new_entry("a")).unwrap();
+    db.insert_entry(&test_new_entry("b")).unwrap();
+    db.insert_entry(&test_new_entry("c")).unwrap();
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.library.library_entries = db.get_entries_sorted(LibrarySortMode::Manual).unwrap();
+    app.library.selected_folder = None;
+    app.library.active_tag_filter = None;
+    app.library.search_results = None;
+    app.library.search_query.clear();
+    app.library.library_folders.clear();
+    let entries = app.visible_library_entries();
+    let mut drag = LibraryDragState::new(EntryId::new("b"), vec![EntryId::new("b")], 1, false);
+    drag.active = true;
+    drag.target_index = 1;
+    app.library.library_drag = Some(drag);
+
+    let items = crate::library::view::library_render_items(&app, &entries);
+
+    assert_eq!(items.len(), 3);
+    assert!(matches!(items[1], LibraryRenderItem::Ghost(_)));
+    assert!(!items
+        .iter()
+        .any(|item| matches!(item, LibraryRenderItem::DropZone(_))));
+}
+
+#[test]
+fn multi_drag_renders_compact_grid_with_one_target_drop_zone() {
+    let db = test_db("multi-drag-render-items");
+    for id in ["a", "b", "c", "d"] {
+        db.insert_entry(&test_new_entry(id)).unwrap();
+    }
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.library.library_entries = db.get_entries_sorted(LibrarySortMode::Manual).unwrap();
+    app.library.selected_folder = None;
+    app.library.active_tag_filter = None;
+    app.library.search_results = None;
+    app.library.search_query.clear();
+    app.library.library_folders.clear();
+    let entries = app.visible_library_entries();
+    let mut drag = LibraryDragState::new(
+        EntryId::new("a"),
+        vec![EntryId::new("a"), EntryId::new("c")],
+        0,
+        true,
+    );
+    drag.active = true;
+    drag.target_index = 2;
+    app.library.library_drag = Some(drag);
+
+    let items = crate::library::view::library_render_items(&app, &entries);
+
+    assert_eq!(items.len(), 5);
+    assert_eq!(
+        items
+            .iter()
+            .filter(|item| matches!(item, LibraryRenderItem::DropZone(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        items
+            .iter()
+            .filter(|item| matches!(item, LibraryRenderItem::Ghost(_)))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn grid_drag_target_uses_rendered_drop_zone_geometry() {
+    let db = test_db("grid-drag-rendered-geometry");
+    for id in ["a", "b", "c", "d", "e"] {
+        db.insert_entry(&test_new_entry(id)).unwrap();
+    }
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.library.library_entries = db.get_entries_sorted(LibrarySortMode::Manual).unwrap();
+    app.library.selected_folder = None;
+    app.library.active_tag_filter = None;
+    app.library.search_results = None;
+    app.library.search_query.clear();
+    app.library.library_folders.clear();
+    app.library.compact_view_mode = false;
+    app.library.library_grid_zoom = 1.0;
+    app.library.library_viewport_x = 12.0;
+    app.library.library_viewport_y = 24.0;
+    app.library.library_scroll_offset = 0.0;
+    app.library.library_viewport_width = app.layout().library_grid_card_width * 3.0
+        + app.layout().library_masonry_gap * 2.0
+        + app.layout().library_scrollbar_gutter;
+    app.library.library_viewport_height = 900.0;
+    let entries = app.visible_library_entries();
+    let mut preview_drag =
+        LibraryDragState::new(EntryId::new("a"), vec![EntryId::new("a")], 0, false);
+    preview_drag.active = true;
+    preview_drag.target_index = 3;
+    let preview_items =
+        crate::library::view::library_render_items_for_drag(&entries, &preview_drag);
+    let preview_layout = app.library_render_item_masonry_layout(&preview_items);
+    let (column_index, drop_zone) = preview_layout
+        .columns
+        .iter()
+        .enumerate()
+        .find_map(|(column_index, column)| {
+            column.iter().find_map(|item| {
+                matches!(
+                    preview_items.get(item.index),
+                    Some(LibraryRenderItem::DropZone(_))
+                )
+                .then_some((column_index, item))
+            })
+        })
+        .expect("target should render a drop zone");
+    let cursor = Point::new(
+        app.library.library_viewport_x
+            + column_index as f32 * (app.library_grid_card_width() + app.library_grid_column_gap())
+            + app.library_grid_card_width() / 2.0,
+        app.library.library_viewport_y + drop_zone.top + drop_zone.height / 2.0,
+    );
+
+    let mut drag = LibraryDragState::new(EntryId::new("a"), vec![EntryId::new("a")], 0, false);
+    drag.active = true;
+    drag.target_index = 3;
+    drag.cursor = Some(cursor);
+    app.library.library_drag = Some(drag);
+
+    app.update_library_drag_target_from_cursor();
+
+    assert_eq!(
+        app.library
+            .library_drag
+            .as_ref()
+            .map(|drag| drag.target_index),
+        Some(3)
+    );
+}
+
+#[test]
+fn grid_drag_over_original_ghost_keeps_source_position() {
+    let db = test_db("grid-drag-original-ghost-noop");
+    for id in ["a", "b", "c", "d"] {
+        db.insert_entry(&test_new_entry(id)).unwrap();
+    }
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.library.library_entries = db.get_entries_sorted(LibrarySortMode::Manual).unwrap();
+    app.library.selected_folder = None;
+    app.library.active_tag_filter = None;
+    app.library.search_results = None;
+    app.library.search_query.clear();
+    app.library.library_folders.clear();
+    app.library.compact_view_mode = false;
+    app.library.library_grid_zoom = 1.0;
+    app.library.library_viewport_x = 12.0;
+    app.library.library_viewport_y = 24.0;
+    app.library.library_scroll_offset = 0.0;
+    app.library.library_viewport_width = app.layout().library_grid_card_width * 3.0
+        + app.layout().library_masonry_gap * 2.0
+        + app.layout().library_scrollbar_gutter;
+    app.library.library_viewport_height = 900.0;
+    let entries = app.visible_library_entries();
+    let source_index = entries
+        .iter()
+        .position(|entry| entry.id == EntryId::new("b"))
+        .unwrap();
+    let layout = app.library_masonry_layout(&entries);
+    let (column_index, source_item) = layout
+        .columns
+        .iter()
+        .enumerate()
+        .find_map(|(column_index, column)| {
+            column
+                .iter()
+                .find(|item| item.index == source_index)
+                .map(|item| (column_index, item))
+        })
+        .unwrap();
+    let cursor = Point::new(
+        app.library.library_viewport_x
+            + column_index as f32 * (app.library_grid_card_width() + app.library_grid_column_gap())
+            + app.library_grid_card_width() / 2.0,
+        app.library.library_viewport_y + source_item.top + source_item.height / 2.0,
+    );
+
+    let mut drag = LibraryDragState::new(EntryId::new("b"), vec![EntryId::new("b")], 1, false);
+    drag.active = true;
+    drag.target_index = 3;
+    drag.cursor = Some(cursor);
+    app.library.library_drag = Some(drag);
+
+    app.update_library_drag_target_from_cursor();
+
+    assert_eq!(
+        app.library
+            .library_drag
+            .as_ref()
+            .map(|drag| drag.target_index),
+        Some(1)
+    );
+}
+
+#[test]
+fn manual_reorder_is_allowed_inside_selected_folder() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.library.library_sort_mode = LibrarySortMode::Manual;
+    app.library.selected_folder = Some(FolderId::new("folder"));
+    app.library.search_query.clear();
+    app.library.search_results = None;
+    app.library.active_tag_filter = None;
+
+    assert!(app.can_drag_reorder_library());
+}
+
+#[test]
+fn manual_reorder_still_requires_unfiltered_manual_sort() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.library.library_sort_mode = LibrarySortMode::TitleAsc;
+    assert!(!app.can_drag_reorder_library());
+
+    app.library.library_sort_mode = LibrarySortMode::Manual;
+    app.library.search_query = String::from("paper");
+    assert!(!app.can_drag_reorder_library());
+
+    app.library.search_query.clear();
+    app.library.active_tag_filter = Some(String::from("research"));
+    assert!(!app.can_drag_reorder_library());
 }
 
 #[test]

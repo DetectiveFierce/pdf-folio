@@ -141,13 +141,10 @@ pub enum CommandDanger {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum CommandSurface {
     HeaderMore,
     ImportMenu,
     SelectionToolbar,
-    Inspector,
-    ContextMenu,
     CommandPalette,
 }
 
@@ -905,15 +902,6 @@ const fn spec(
     }
 }
 
-#[allow(dead_code)]
-pub fn command_spec(id: CommandId) -> CommandSpec {
-    COMMAND_SPECS
-        .iter()
-        .copied()
-        .find(|spec| spec.id == id)
-        .expect("registered command")
-}
-
 pub fn library_commands(app: &PDFolioApp) -> Vec<ResolvedCommand> {
     COMMAND_SPECS
         .iter()
@@ -1081,7 +1069,6 @@ pub fn command_visible(app: &PDFolioApp, id: CommandId, surface: CommandSurface)
                     | CommandId::GoToTag
             ) && command_enabled(app, id)
         }
-        CommandSurface::Inspector | CommandSurface::ContextMenu => command_enabled(app, id),
     }
 }
 

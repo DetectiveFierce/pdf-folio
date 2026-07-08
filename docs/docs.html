@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How PDF-Folio Works</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #140D08;
+    --bg-raised: #1C130B;
+    --bg-raised-2: #24190E;
+    --bg-inset: #100A06;
+    --border: rgba(212,178,138,0.14);
+    --border-soft: rgba(212,178,138,0.07);
+    --text: #E9DEC9;
+    --text-dim: #B7A488;
+    --text-faint: #7C6D57;
+    --accent: #CB9E4F;
+    --accent-soft: rgba(203,158,79,0.13);
+    --accent-dim: #9C7B41;
+    --red: #C97456;
+    --serif: 'Spectral', Georgia, serif;
+    --sans: 'IBM Plex Sans', -apple-system, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --maxw: 780px;
+  }
+
+  *{ box-sizing: border-box; }
+  html{ scroll-behavior: smooth; }
+
+  body{
+    margin:0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* subtle grain / vignette so the flat brown isn't dead */
+  body::before{
+    content:"";
+    position: fixed; inset:0;
+    pointer-events:none;
+    z-index:0;
+    background:
+      radial-gradient(ellipse 900px 500px at 14% -8%, rgba(203,158,79,0.06), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 100% 10%, rgba(203,158,79,0.035), transparent 55%);
+  }
+
+  a{ color: inherit; }
+
+  ::selection{ background: rgba(203,158,79,0.28); color: var(--text); }
+
+  /* ---------- layout shell ---------- */
+  .shell{
+    display:flex;
+    min-height:100vh;
+    position:relative;
+    z-index:1;
+  }
+
+  /* ---------- sidebar ---------- */
+  .sidebar{
+    width: 272px;
+    flex-shrink:0;
+    background: var(--bg-raised);
+    border-right: 1px solid var(--border);
+    position: sticky;
+    top:0;
+    height:100vh;
+    overflow-y:auto;
+    padding: 28px 0 40px;
+  }
+  .sidebar::-webkit-scrollbar{ width:8px; }
+  .sidebar::-webkit-scrollbar-thumb{ background: var(--border); border-radius:4px; }
+
+  .brand{
+    padding: 0 24px 22px;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 18px;
+  }
+  .brand .mark{
+    display:flex; align-items:center; gap:10px;
+    margin-bottom:10px;
+  }
+  .brand .tiles{
+    display:grid;
+    grid-template-columns: repeat(2, 7px);
+    grid-template-rows: repeat(2, 7px);
+    gap:2px;
+    flex-shrink:0;
+  }
+  .brand .tiles span{ background: var(--accent); display:block; border-radius:1px; }
+  .brand .tiles span:nth-child(2){ background: var(--accent-dim); opacity:.7; }
+  .brand .tiles span:nth-child(3){ background: var(--accent-dim); opacity:.5; }
+  .brand .tiles span:nth-child(4){ background: var(--accent); opacity:.35; }
+  .brand .name{
+    font-family: var(--serif);
+    font-weight:600;
+    font-size: 17px;
+    letter-spacing: 0.01em;
+  }
+  .brand .tagline{
+    font-size: 12.5px;
+    color: var(--text-faint);
+    line-height:1.5;
+  }
+
+  nav.toc{ padding: 0 14px; }
+  nav.toc .group{ margin-bottom: 4px; }
+  nav.toc .group-label{
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--text-faint);
+    padding: 16px 10px 6px;
+    font-weight:600;
+  }
+  nav.toc a{
+    display:block;
+    text-decoration:none;
+    font-size: 13.6px;
+    color: var(--text-dim);
+    padding: 6px 10px;
+    border-radius: 6px;
+    border-left: 2px solid transparent;
+    transition: background .12s ease, color .12s ease, border-color .12s ease;
+  }
+  nav.toc a:hover{ background: var(--bg-raised-2); color: var(--text); }
+  nav.toc a.active{
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-left-color: var(--accent);
+    font-weight:500;
+  }
+  nav.toc a.sub{ padding-left: 22px; font-size: 13px; color: var(--text-faint); }
+  nav.toc a.sub:hover, nav.toc a.sub.active{ color: var(--accent); }
+
+  /* ---------- main content ---------- */
+  main{
+    flex:1;
+    min-width:0;
+    padding: 64px 48px 140px;
+    max-width: 980px;
+  }
+
+  .doc-header{ margin-bottom: 56px; max-width: var(--maxw); }
+  .doc-header .eyebrow{
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .doc-header h1{
+    font-family: var(--serif);
+    font-size: 44px;
+    line-height:1.15;
+    font-weight:600;
+    margin: 0 0 18px;
+    letter-spacing: -0.01em;
+  }
+  .doc-header .lede{
+    font-size: 16.5px;
+    color: var(--text-dim);
+    max-width: 620px;
+  }
+
+  section{ max-width: var(--maxw); margin-bottom: 78px; scroll-margin-top: 28px; }
+  section h2{
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight:600;
+    margin: 0 0 6px;
+    padding-top: 6px;
+    letter-spacing:-0.005em;
+  }
+  section .section-index{
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent-dim);
+    display:block;
+    margin-bottom: 8px;
+  }
+  section > .lede{
+    color: var(--text-dim);
+    font-size: 15.5px;
+    margin-bottom: 30px;
+  }
+
+  h3{
+    font-family: var(--sans);
+    font-weight:600;
+    font-size: 17px;
+    color: var(--text);
+    margin: 34px 0 10px;
+    scroll-margin-top: 28px;
+  }
+  h3 .idx{ color: var(--accent-dim); font-family: var(--mono); font-weight:500; margin-right:8px; font-size:15px; }
+
+  p{ margin: 0 0 16px; color: var(--text); }
+  p.dim{ color: var(--text-dim); }
+
+  strong{ color: var(--text); font-weight:600; }
+  em.term{ font-style: normal; color: var(--accent); font-weight:500; }
+
+  ul, ol{ margin: 0 0 18px; padding-left: 22px; }
+  li{ margin-bottom: 8px; color: var(--text); }
+  li::marker{ color: var(--accent-dim); }
+
+  code{
+    font-family: var(--mono);
+    font-size: 0.87em;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-soft);
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: var(--accent);
+  }
+
+  pre{
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    overflow-x:auto;
+    margin: 0 0 22px;
+  }
+  pre code{
+    background:none; border:none; padding:0;
+    color: var(--text-dim);
+    font-size: 13.2px;
+    line-height:1.65;
+  }
+  pre .k{ color: var(--accent); }        /* keyword-ish */
+  pre .s{ color: #A8B88C; }              /* string-ish */
+  pre .c{ color: var(--text-faint); font-style: italic; } /* comment */
+  pre .t{ color: #C79A9A; }              /* type-ish */
+
+  .diagram{
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin: 8px 0 24px;
+    font-family: var(--mono);
+    font-size: 12.6px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    white-space: pre;
+    overflow-x:auto;
+  }
+  .diagram .hl{ color: var(--accent); }
+  .diagram .hl2{ color: #9CB57E; }
+
+  .callout{
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-dim);
+    background: var(--bg-raised);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    margin: 4px 0 24px;
+    font-size: 14.5px;
+    color: var(--text-dim);
+  }
+  .callout strong{ color: var(--accent); }
+
+  .why-grid{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 6px 0 26px;
+  }
+  @media (max-width: 720px){ .why-grid{ grid-template-columns: 1fr; } }
+  .why-card{
+    border: 1px solid var(--border);
+    background: var(--bg-raised);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .why-card .label{
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .why-card p{ font-size: 14px; margin:0; color: var(--text-dim); }
+
+  table{ width:100%; border-collapse: collapse; margin: 4px 0 24px; font-size:14px; }
+  th, td{ text-align:left; padding: 9px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  th{ color: var(--text-faint); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.06em; }
+  td code{ font-size: 0.82em; }
+  td.desc{ color: var(--text-dim); }
+
+  .divider{
+    height:1px;
+    background: linear-gradient(90deg, var(--border), transparent);
+    margin: 46px 0;
+    max-width: var(--maxw);
+  }
+
+  .footer-nav{
+    max-width: var(--maxw);
+    display:flex; justify-content:space-between; gap: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-soft);
+  }
+  .footer-nav a{
+    text-decoration:none; color: var(--text-faint); font-size: 13px;
+  }
+  .footer-nav a:hover{ color: var(--accent); }
+
+  /* mobile */
+  .menu-btn{ display:none; }
+  @media (max-width: 900px){
+    .sidebar{
+      position: fixed; left:0; top:0; z-index:20;
+      transform: translateX(-100%);
+      transition: transform .2s ease;
+      box-shadow: 20px 0 40px rgba(0,0,0,0.4);
+    }
+    .sidebar.open{ transform: translateX(0); }
+    main{ padding: 64px 22px 100px; }
+    .menu-btn{
+      display:flex; align-items:center; gap:8px;
+      position: fixed; top:16px; left:16px; z-index:30;
+      background: var(--bg-raised); border:1px solid var(--border);
+      color: var(--text); font-family: var(--mono); font-size:12px;
+      padding: 9px 13px; border-radius: 8px; cursor:pointer;
+    }
+    .doc-header h1{ font-size: 34px; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <button class="menu-btn" id="menuBtn">☰ Menu</button>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="mark">
+        <div class="tiles"><span></span><span></span><span></span><span></span></div>
+        <div class="name">PDF&#8209;Folio</div>
+      </div>
+      <div class="tagline">How it works — an internals guide to the rendering pipeline, library database, and sync architecture.</div>
+    </div>
+    <nav class="toc">
+      <div class="group">
+        <a href="#overview" class="top">Overview</a>
+      </div>
+      <div class="group">
+        <div class="group-label">Rendering</div>
+        <a href="#rendering" class="top">The Rendering Pipeline</a>
+        <a href="#rendering-open" class="sub">Opening a document</a>
+        <a href="#rendering-tiles" class="sub">Tiles &amp; the render cache</a>
+        <a href="#rendering-zoom" class="sub">Zoom without flicker</a>
+        <a href="#rendering-text" class="sub">Text layer &amp; outline</a>
+      </div>
+      <div class="group">
+        <div class="group-label">Library</div>
+        <a href="#database" class="top">The Library Database</a>
+        <a href="#database-identity" class="sub">A PDF's identity</a>
+        <a href="#database-schema" class="sub">Anatomy of the schema</a>
+        <a href="#database-organization" class="sub">Folders, tags &amp; trash</a>
+        <a href="#database-undo" class="sub">Undo as time travel</a>
+        <a href="#database-import" class="sub">Import &amp; provenance</a>
+      </div>
+      <div class="group">
+        <div class="group-label">Retrieval</div>
+        <a href="#search" class="top">Search &amp; Watching</a>
+      </div>
+      <div class="group">
+        <div class="group-label">Interface</div>
+        <a href="#style" class="top">The Style System</a>
+      </div>
+      <div class="group">
+        <div class="group-label">Sync</div>
+        <a href="#sync" class="top">Cross-Device Sync</a>
+        <a href="#sync-shape" class="sub">Three tiers, one job each</a>
+        <a href="#sync-server" class="sub">The role of the server</a>
+        <a href="#sync-turso-r2" class="sub">Why Turso and R2 both</a>
+        <a href="#sync-crdt" class="sub">The CRDT metadata model</a>
+        <a href="#sync-lifecycle" class="sub">A sync pass, start to finish</a>
+        <a href="#sync-cli" class="sub">CLI entry points</a>
+      </div>
+      <div class="group">
+        <a href="#bulk-action" class="top">Life of a Bulk Action</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main>
+
+    <div class="doc-header">
+      <div class="eyebrow">Internals Guide</div>
+      <h1>How PDF-Folio Works</h1>
+      <p class="lede">PDF-Folio is a native Rust PDF reader and library manager. This guide follows
+      data and control flow through the real system — how a page gets rendered, how the library
+      database is organized, and how metadata and files move between devices — rather than
+      cataloging features.</p>
+    </div>
+
+    <!-- ============================================================ -->
+    <section id="overview">
+      <span class="section-index">§1</span>
+      <h2>Overview</h2>
+      <p class="lede">One reducer, one direction of data flow.</p>
+
+      <p>PDF-Folio's UI (<code>pdf-folio-ui</code>) is built on <code>iced</code>, which follows
+      the Elm architecture: a single <em class="term">Message</em> enum describes every event the
+      app can react to, a single <em class="term">update</em> function is the only code allowed to
+      change state, and everything else — clicking a page, a background render finishing, a sync
+      pull arriving from another device — enters the app the same way, as a message.</p>
+
+      <div class="diagram">user input / async result
+        │
+        ▼
+  <span class="hl">Message</span> enum  ──────────►  <span class="hl">update</span>(&amp;mut PDFolioApp, Message) -&gt; Task&lt;Message&gt;
+        ▲                                  │
+        │                                  ▼
+   Task&lt;Message&gt; ◄──────────────  side effects (DB writes, rendering, network, file IO)
+        │
+        ▼
+   view(&amp;PDFolioApp) -&gt; Element&lt;Message&gt;</div>
+
+      <p>Anything that might block — rendering a page through Pdfium, hashing a file, a SQLite
+      write, a network call — runs on Tokio's blocking thread pool inside a <code>Task</code>, and
+      reports back by emitting a message. Background work never mutates app state directly; it can
+      only <em class="term">propose</em> a change by producing a message, which then flows through
+      the same reducer as a mouse click would. That single rule is what makes the rest of this
+      document readable as a sequence of "message in, message out" steps, no matter which
+      subsystem is involved.</p>
+
+      <p>State itself is grouped into nested runtime structs so call sites stay legible about which
+      subsystem they're touching:</p>
+
+      <div class="diagram"><span class="hl">PDFolioApp</span>
+  mode:       AppMode
+  viewer:     ViewerRuntime        <span class="c">// open document, render cache, zoom, find, outline</span>
+  library:    LibraryRuntime       <span class="c">// entries, folders, filters, selection, drag state</span>
+  libraries:  LibraryRegistryRuntime
+  chrome:     ChromeRuntime        <span class="c">// menus, flyouts, confirmation modal</span>
+  appearance: AppearanceRuntime    <span class="c">// theme, loaded style book</span>
+  settings:   Settings
+  db:         Arc&lt;Db&gt;</div>
+
+      <p class="dim">The sections below go deep on three subsystems in particular — the library
+      database, and cross-device sync — since those are where most of PDF-Folio's real complexity
+      lives.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="rendering">
+      <span class="section-index">§2</span>
+      <h2>The Rendering Pipeline</h2>
+      <p class="lede">From bytes on disk to pixels on screen, one page at a time.</p>
+
+      <h3 id="rendering-open"><span class="idx">2.1</span>Opening a document</h3>
+      <p><code>pdf-folio-core::PdfDoc</code> is a thin, UI-agnostic wrapper around
+      <code>pdfium-render</code>. Opening a file only reads the page count — it deliberately does
+      not keep Pdfium's document handle alive:</p>
+
+      <pre><code><span class="k">pub struct</span> PdfDoc {
+    path: PathBuf,
+    page_count: u16,
+}</code></pre>
+
+      <p>Every later operation — <code>render_page</code>, <code>text_on_page</code>,
+      <code>outline</code>, <code>metadata_title</code> — reopens the file through an internal
+      <code>with_document()</code> helper. That's a deliberate trade: a little repeated file-open
+      overhead in exchange for a <code>PdfDoc</code> that is <code>Clone</code> and freely shareable
+      across async tasks, without ever holding a non-<code>Send</code> Pdfium handle across an
+      <code>.await</code> point.</p>
+
+      <p>Pdfium itself is bound exactly <strong>once per process</strong>, behind a
+      <code>OnceLock</code>, and every call additionally passes through a process-wide
+      <code>Mutex&lt;()&gt;</code> guard — Pdfium's C API isn't safely reentrant across threads
+      even when each call opens its own document. If Pdfium can't be found at all (no system
+      library, nothing bundled next to the binary), every open/render call fails with a clear
+      diagnostic instead of the process crashing.</p>
+
+      <p>The UI never calls any of this directly. It builds a <code>Task</code>:</p>
+
+      <pre><code><span class="c">// crates/pdf-folio-ui/src/viewer/tasks.rs</span>
+<span class="k">pub</span>(<span class="k">crate</span>) <span class="k">fn</span> open_document_task(path: PathBuf) -&gt; Task&lt;Message&gt; {
+    Task::perform(
+        <span class="k">async move</span> {
+            <span class="k">let</span> doc = tokio::task::spawn_blocking(<span class="k">move</span> || PdfDoc::open(&amp;path)).<span class="k">await</span>??;
+            Ok((path, doc))
+        },
+        |result| <span class="k">match</span> result {
+            Ok((path, doc)) =&gt; Message::DocumentOpened { path, doc: Arc::new(doc) },
+            Err(error)      =&gt; Message::DocumentError(error.to_string()),
+        },
+    )
+}</code></pre>
+
+      <p><code>spawn_blocking</code> moves the Pdfium call off the UI thread entirely, and the
+      resulting <code>PdfDoc</code> is wrapped in an <code>Arc</code> so later render tasks can
+      cheaply clone a handle into their own async closures.</p>
+
+      <h3 id="rendering-tiles"><span class="idx">2.2</span>Tiles and the render cache</h3>
+      <p><code>render_page(index, width_px)</code> asks Pdfium to rasterize one page at a specific
+      target pixel width — DPI-aware, since Pdfium derives the output height from the page's own
+      aspect ratio. The cache key reflects this directly:</p>
+
+      <pre><code><span class="k">pub struct</span> TileKey { page: u16, width_px: u16 }</code></pre>
+
+      <p>A page rendered at one zoom level is a <em>different tile</em> from the same page at
+      another zoom level — re-rasterizing is the only way to get a crisp result, so zooming doesn't
+      scale a bitmap in the common case, it eventually asks Pdfium for a new one.
+      <code>pdf-folio-core::TileCache</code> is a thread-safe LRU (64 tiles by default) mapping
+      <code>TileKey -&gt; Arc&lt;Vec&lt;u8&gt;&gt;</code> RGBA bytes. A cache hit returns instantly
+      without touching Pdfium; a miss triggers a background render task that reports back with a
+      <code>Message</code> once the bytes are ready.</p>
+
+      <h3 id="rendering-zoom"><span class="idx">2.3</span>Zoom without flicker</h3>
+      <p>Re-rendering on every scroll-wheel tick would hammer Pdfium and stutter the UI, so zoom is
+      split into two phases: an <strong>interim zoom</strong>, which scales the already-rendered
+      tile on the GPU as a transform (instant, slightly soft), and a <strong>settled
+      re-render</strong>, which fires once input goes quiet and re-rasterizes at the new width for
+      a crisp result.</p>
+
+      <p>The debounce is a generation counter plus a delay task:</p>
+
+      <pre><code><span class="k">pub</span>(<span class="k">crate</span>) <span class="k">fn</span> schedule_zoom_render(generation: u64) -&gt; Task&lt;Message&gt; {
+    Task::perform(
+        <span class="k">async move</span> {
+            tokio::time::sleep(Duration::from_millis(<span class="s">140</span>)).<span class="k">await</span>;
+            generation
+        },
+        Message::ZoomRenderSettled,
+    )
+}</code></pre>
+
+      <p>Every zoom input bumps the generation counter and schedules a fresh 140&nbsp;ms timer. When
+      <code>ZoomRenderSettled(generation)</code> arrives, <code>update()</code> compares it against
+      the app's <em>current</em> generation; if the user zoomed again since that timer was
+      scheduled, the message is stale and gets dropped instead of triggering a redundant re-render.
+      Cheap to implement, and it stops a burst of superseded renders from competing for the
+      blocking thread pool.</p>
+
+      <h3 id="rendering-text"><span class="idx">2.4</span>Text layer &amp; outline</h3>
+      <p><code>text_layer(index)</code> walks Pdfium's character-level text API and returns
+      <strong>normalized</strong> bounding boxes — fractions of page width/height, not PDF points or
+      pixels. That normalization means the same text layer can back selection highlights and
+      find-in-document matches at any zoom level without re-querying Pdfium; the canvas code just
+      multiplies by whatever the current rendered page size happens to be.
+      <code>outline()</code> walks Pdfium's bookmark tree into a plain
+      <code>OutlineNode { title, page, children }</code> tree, independent of any Pdfium type living
+      past the call — that's what the table-of-contents sidebar renders.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="database">
+      <span class="section-index">§3</span>
+      <h2>The Library Database</h2>
+      <p class="lede">Every named library is its own SQLite file, and every PDF's identity comes from its bytes, not its path.</p>
+
+      <p><code>pdf-folio-db::Db</code> wraps a single bundled <code>rusqlite</code> connection —
+      there's no system SQLite dependency, and no shared server. Each named library the user
+      creates gets its own SQLite file; switching libraries in the app swaps which
+      <code>Arc&lt;Db&gt;</code> and search index the rest of the UI talks to. This is what makes
+      "create a second library for research papers" a cheap, isolated operation rather than a
+      partition inside one shared database.</p>
+
+      <h3 id="database-identity"><span class="idx">3.1</span>A PDF's identity is its bytes</h3>
+      <p>The single most consequential design decision in the whole database layer is this: a PDF's
+      primary key is not its file path. It's a BLAKE3 hash of its contents.</p>
+
+      <pre><code><span class="k">pub fn</span> hash_file(path: &amp;Path) -&gt; Result&lt;String&gt; {
+    <span class="k">let mut</span> hasher = Hasher::new();
+    <span class="c">// ...read the file in 64KB chunks...</span>
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+<span class="k">pub fn</span> import_pdf(db: &amp;Db, path: &amp;Path) -&gt; Result&lt;ImportedEntry&gt; {
+    <span class="k">let</span> id = EntryId::new(hash_file(path)?);
+    <span class="k">let</span> inserted = db.entry_by_path(path)?.is_none();
+    db.insert_entry(&amp;NewLibraryEntry { id: id.clone(), path: path.to_path_buf(), <span class="c">/* .. */</span> })?;
+    Ok(ImportedEntry { id, path: path.to_path_buf(), inserted })
+}</code></pre>
+
+      <p>Content-addressing a library entry pays for itself in a few different places at once,
+      which is why it's worth pausing on rather than treating as an implementation detail:</p>
+
+      <div class="why-grid">
+        <div class="why-card">
+          <div class="label">Import is naturally idempotent</div>
+          <p>Importing the exact same file twice — even copied into two different folders, even
+          renamed — hashes to the same <code>EntryId</code>. There's no separate de-duplication
+          pass; identity <em>is</em> the hash.</p>
+        </div>
+        <div class="why-card">
+          <div class="label">Renames and moves don't orphan metadata</div>
+          <p>Move a PDF to a new folder on disk, or rename it, and the library entry keeps every
+          tag, folder membership, and reading position — the row was never addressed by path in
+          the first place.</p>
+        </div>
+        <div class="why-card">
+          <div class="label">A foundation sync can build on</div>
+          <p>A content hash is exactly what a sync system wants as a blob key: it's stable,
+          collision-resistant, and computable independently on every device without coordination.
+          Section&nbsp;6 leans on this directly.</p>
+        </div>
+        <div class="why-card">
+          <div class="label">Extracted vs. edited metadata stay separate</div>
+          <p>Because identity doesn't depend on title/author, the schema is free to track the
+          PDF's <em>own</em> metadata and the user's <em>display</em> overrides as genuinely
+          different fields (below) rather than overwriting one with the other.</p>
+        </div>
+      </div>
+
+      <p>Folder import (<code>import_folder</code>) recursively scans a directory for
+      <code>.pdf</code> files and imports each independently — one file failing to hash or open is
+      recorded in an <code>errors</code> list without aborting the rest of the scan.</p>
+
+      <h3 id="database-schema"><span class="idx">3.2</span>Anatomy of the schema</h3>
+      <p>The schema reads less like a generic document store and more like a small set of
+      deliberate distinctions. The two that matter most: <em class="term">extracted</em> metadata is
+      never the same column as <em class="term">display</em> metadata, and <em class="term">folder
+      membership</em> is app-level data that is completely separate from the filesystem.</p>
+
+      <table>
+        <tr><th>Table</th><th>Purpose</th></tr>
+        <tr><td><code>entries</code></td><td class="desc">One row per PDF, keyed by its BLAKE3 <code>id</code>. Carries the PDF's own <code>title</code>/<code>author</code> alongside independent <code>display_title</code>/<code>display_author</code> overrides, precomputed <code>sort_title</code>/<code>sort_author</code> keys (so "The Great Gatsby" files under G), a <code>manual_order</code> for drag-to-reorder, and a <code>missing</code> flag for entries whose backing file has disappeared.</td></tr>
+        <tr><td><code>tags</code></td><td class="desc">A plain <code>(entry_id, tag)</code> join table — tags belong to entries, not to any folder.</td></tr>
+        <tr><td><code>folders</code></td><td class="desc">Self-referential via <code>parent_id</code> for nesting. Trashing uses a <code>trashed_at</code> <em>timestamp</em>, not a boolean — see below.</td></tr>
+        <tr><td><code>entry_folders</code></td><td class="desc">Many-to-many membership between entries and folders, with its own <code>manual_order</code> for per-folder manual sort.</td></tr>
+        <tr><td><code>bookmarks</code> / <code>annotations</code></td><td class="desc">Per-entry, per-page rows. Annotations store an opaque <code>data</code> JSON blob keyed by <code>kind</code>, so new annotation types (highlight, note, drawing) don't need a schema migration to add.</td></tr>
+        <tr><td><code>library_preferences</code></td><td class="desc">A generic <code>key -&gt; value</code> table for sort mode, layout mode, sidebar width — UI persistence that doesn't warrant its own typed table.</td></tr>
+        <tr><td><code>import_sources</code>, <code>raindrop_collections</code>, <code>raindrop_entries</code></td><td class="desc">Provenance for PDFs pulled from Raindrop.io — see §3.5.</td></tr>
+        <tr><td><code>sync_*</code> tables</td><td class="desc">The CRDT operation log and materialized sync state — the subject of all of §6.</td></tr>
+      </table>
+
+      <p>Foreign keys use <code>ON DELETE CASCADE</code> throughout — deleting a folder cascades
+      into <code>entry_folders</code> and, for mirrored Raindrop collections, back into
+      <code>raindrop_collections</code> — so the in-database model stays consistent without the
+      application layer manually cleaning up joins after every delete.</p>
+
+      <h3 id="database-organization"><span class="idx">3.3</span>Folders, tags, and trash</h3>
+      <p>Folders in PDF-Folio are <strong>app metadata</strong>, not filesystem directories. A PDF
+      can live in one folder path on disk and appear in an entirely different folder structure
+      inside the library — moving it between folders in the UI never touches the source file.
+      That distinction is also why membership needed its own join table instead of a
+      <code>folder_id</code> column on <code>entries</code>: it lets a future "add to multiple
+      folders" model exist without a schema change, though today the UI treats primary placement
+      as effectively singular per entry.</p>
+
+      <p>Trash — for both entries and whole folder subtrees — is soft-delete via a
+      <code>trashed_at</code> timestamp rather than row deletion or a boolean flag. That single
+      choice is what makes "restore" and "permanently delete" genuinely distinct, separately
+      confirmed actions in the UI, rather than trash being a one-way door. It also means trashing a
+      folder doesn't have to recursively rewrite every child row's state — the subtree's
+      trashed-ness is a property that can be computed from parentage, and un-trashing is just
+      clearing the timestamp back to <code>NULL</code>.</p>
+
+      <h3 id="database-undo"><span class="idx">3.4</span>Undo as time travel, not inverse operations</h3>
+      <p>Most undo systems work by recording an inverse for every possible edit: reordering pushes
+      a "move it back" action, tagging pushes an "untag" action, and so on. PDF-Folio does something
+      structurally simpler: it snapshots the <em>entire</em> organizational state before and after
+      an edit, and undo just restores the earlier snapshot.</p>
+
+      <pre><code><span class="c">/// Reversible snapshot of library organization and user-editable entry state.</span>
+<span class="k">pub struct</span> LibraryOrganizationSnapshot {
+    <span class="k">pub</span> folders: Vec&lt;LibraryFolderSnapshot&gt;,
+    <span class="k">pub</span> entry_folders: Vec&lt;EntryFolderMembership&gt;,
+    <span class="k">pub</span> entry_trash_states: Vec&lt;EntryTrashState&gt;,
+    <span class="k">pub</span> entry_tags: Vec&lt;EntryTagSnapshot&gt;,
+}</code></pre>
+
+      <p>A bulk action — reordering, moving 40 selected PDFs into a folder, bulk-tagging, trashing a
+      subtree — captures a <code>LibraryOrganizationSnapshot</code> before it runs and another after.
+      The "before" snapshot is what undo restores; redo simply replays the "after" one. This buys a
+      property that's easy to undervalue: <strong>every kind of organizational edit is undoable for
+      free</strong>, including ones added later, because nothing about undo needs to know what
+      specifically changed — it only needs to know how to fully capture and fully restore the
+      state.</p>
+
+      <div class="callout">The one place this does need to know what changed is search: after
+      restoring a snapshot, the app diffs entry trash-state between the old and new snapshot
+      (<code>search_changed_entry_ids</code>) to figure out which entries need their Tantivy index
+      entries refreshed, since undo can resurrect or re-hide a PDF that search should or shouldn't
+      surface.</div>
+
+      <h3 id="database-import"><span class="idx">3.5</span>Import &amp; provenance</h3>
+      <p>Not every PDF enters the library through a folder scan. The Raindrop.io integration
+      (<code>pdf-folio-raindrop</code>) imports selected bookmarks, and the schema tracks where they
+      came from: <code>import_sources</code> identifies the remote account/source,
+      <code>raindrop_collections</code> mirrors a Raindrop collection onto a local folder (with
+      cascading delete back to that folder), and <code>raindrop_entries</code> links a local entry
+      back to its Raindrop bookmark id, remote link, and remote metadata. That provenance is what
+      lets an import be rolled back cleanly if the user cancels partway through, rather than leaving
+      orphaned folders and entries behind.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="search">
+      <span class="section-index">§4</span>
+      <h2>Search &amp; Filesystem Watching</h2>
+      <p class="lede">Full-text search is indexed per page, and disk changes flow in as ordinary messages.</p>
+
+      <p><code>pdf-folio-db::SearchIndex</code> wraps Tantivy with a small, fixed schema — and
+      critically, indexes <strong>per page</strong>, not per document:</p>
+
+      <pre><code>schema_builder.add_text_field(<span class="s">"id"</span>,     STRING | STORED);  <span class="c">// entry id, not tokenized</span>
+schema_builder.add_text_field(<span class="s">"title"</span>,  TEXT | STORED);
+schema_builder.add_text_field(<span class="s">"author"</span>, TEXT | STORED);
+schema_builder.add_text_field(<span class="s">"body"</span>,   TEXT);            <span class="c">// tokenized, not stored</span>
+schema_builder.add_u64_field(<span class="s">"page"</span>,    STORED);</code></pre>
+
+      <p>Each <code>IndexDocument</code> represents one page's extracted text, which is why a search
+      hit carries a <code>page</code> number — the UI can jump straight to the matching page rather
+      than just opening the document and leaving the user to hunt. <code>body</code> is tokenized
+      for ranked matching but deliberately not stored, since page text is always cheaply
+      re-derivable from the PDF itself through Pdfium if reindexing is ever needed.</p>
+
+      <p>Filesystem changes flow through <code>pdf-folio-db::LibraryWatcher</code>, a thin wrapper
+      around the <code>notify</code> crate that filters raw OS events down to two variants:</p>
+
+      <pre><code><span class="k">pub enum</span> LibraryWatchEvent {
+    PdfCreated(PathBuf),
+    PdfRemoved(PathBuf),
+}</code></pre>
+
+      <p>Only <code>.pdf</code> paths are surfaced, and creates/modifies collapse into the same
+      <code>PdfCreated</code> variant — either way the right response is "make sure this file is
+      imported or refreshed." Events cross an <code>mpsc</code> channel into an <code>iced</code>
+      subscription, which turns them into ordinary <code>Message</code>s. The watcher itself never
+      touches the database directly; like every other background source in the app, it only ever
+      proposes a change.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="style">
+      <span class="section-index">§5</span>
+      <h2>The Style System</h2>
+      <p class="lede">Views describe structure and message flow; visual values live in KDL, not Rust.</p>
+
+      <p>Colors, radii, borders, and spacing are meant to come from <code>pdf-folio-style</code>
+      rather than being hard-coded in a view function. KDL files under
+      <code>crates/pdf-folio-style/styles/</code> define themes and per-component visual states:</p>
+
+      <pre><code><span class="k">component</span> <span class="s">"LibraryCard"</span> {
+    <span class="k">normal</span>  background=<span class="s">"#251A0E"</span> text=<span class="s">"#DDD0BA"</span> border=<span class="s">"#C8B89A1A"</span> radius=<span class="s">8</span>
+    <span class="k">hovered</span> background=<span class="s">"#2E2010"</span> border=<span class="s">"#C8B89A2E"</span>
+}</code></pre>
+
+      <p><code>tokens.rs</code> turns these into typed Rust values (<code>ThemeTokens</code>,
+      <code>Spacing</code>, <code>FontSize</code>) so a view writes <code>tokens.surface</code>
+      instead of a raw hex string, and <code>classes.rs</code>/<code>components.rs</code> expose
+      small styled constructors like <code>toolbar_button(...)</code> that accept labels and
+      messages but never read application state themselves. In a development checkout, styles are
+      read from disk at runtime — editing a <code>.kdl</code> file and reloading
+      (<code>View → Reload Styles</code>, or an automatic filesystem watch) updates the running app
+      without a rebuild, and user overrides layer in from
+      <code>$XDG_CONFIG_HOME/pdf-folio/styles/*.kdl</code> on top of the bundled defaults.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="sync">
+      <span class="section-index">§6</span>
+      <h2>Cross-Device Sync</h2>
+      <p class="lede">One user, several machines, and a design that keeps the server out of the way of the data.</p>
+
+      <p>Sync is scoped deliberately narrowly: <strong>one user's own devices</strong>, not
+      multi-user collaboration. That narrow scope is what makes an unusually cheap architecture
+      viable — a single self-hosted control-plane process, a serverless edge database, and
+      pay-per-use object storage, with no fleet of application servers in between.</p>
+
+      <h3 id="sync-shape"><span class="idx">6.1</span>Three tiers, one job each</h3>
+      <p>Every sync operation touches up to three distinct systems, and each one exists to do
+      exactly one thing:</p>
+
+      <div class="why-grid">
+        <div class="why-card">
+          <div class="label">Control plane — <code>folio-sync-server</code></div>
+          <p>An <code>axum</code> service on a personal machine ("mind-palace"), reachable over
+          Tailscale. Its only job is proving <em>who you are</em> and handing out short-lived
+          credentials. It never stores or forwards library data.</p>
+        </div>
+        <div class="why-card">
+          <div class="label">Turso / libSQL — metadata</div>
+          <p>A serverless, SQL-native edge database. Holds the CRDT operation log and materialized
+          entry/folder/tag metadata — structured, relational, transactional data.</p>
+        </div>
+        <div class="why-card">
+          <div class="label">Cloudflare R2 — blobs</div>
+          <p>S3-compatible object storage with no egress fees. Holds PDF bytes themselves, keyed
+          by the same BLAKE3 hash used as the local <code>EntryId</code>.</p>
+        </div>
+      </div>
+
+      <p>The reason this is worth stating explicitly, rather than just as three bullet points, is
+      that the placement of the boundary between them is the actual design decision — and it's one
+      most sync systems get wrong in one direction or the other.</p>
+
+      <h3 id="sync-server"><span class="idx">6.2</span>The role of the server: identity, not data</h3>
+      <p>It would be simpler, on paper, to skip the server entirely and have the desktop app hold
+      long-lived Turso and R2 credentials directly. PDF-Folio doesn't do this, for reasons that
+      matter for a system running unattended on someone's own hardware:</p>
+
+      <ul>
+        <li><strong>A single, revocable choke point.</strong> Every device authenticates the same
+        way — Google OAuth with <em class="term">PKCE</em> — and the server is the one place that
+        decides whether a given Google account is allowed in at all, via an explicit allow-list
+        (<code>PDF_FOLIO_ALLOWED_GOOGLE_SUB</code> / <code>_EMAIL</code>). Losing a laptop means
+        revoking one session, not rotating a database credential embedded in every device you
+        own.</li>
+        <li><strong>Credentials expire on their own.</strong> The server mints a session JWT with a
+        30-day TTL, a Turso token scoped to that same session lifetime, and R2 presigned URLs that
+        expire in 15 minutes and are scoped to exactly one object key
+        (<code>blobs/&lt;hash&gt;.pdf</code>). Nothing long-lived is ever handed to a client.</li>
+        <li><strong>The R2 secret key can live in exactly one place.</strong> Generating a
+        presigned URL requires R2's secret access key. That key lives only on the server; if it
+        lived on every desktop instead, compromising any one device would compromise write access
+        to the whole bucket.</li>
+      </ul>
+
+      <p>What the server does <strong>not</strong> do is just as important: it never proxies a SQL
+      query or a PDF's bytes. Once the desktop app has a Turso token, it speaks Turso's HTTP
+      (Hrana) protocol <em>directly</em> to Turso. Once it has a presigned R2 URL, it uploads or
+      downloads the PDF <em>directly</em> to R2. The server's job ends the moment it hands back a
+      token or URL — it is a credential broker sitting beside the data path, not inside it, which
+      is exactly what keeps this a "zero-cost, single-user" architecture instead of one that needs
+      to scale a proxy with usage.</p>
+
+      <div class="diagram">Desktop App                    folio-sync-server                Turso / R2
+    │                              │  (mind-palace, via Tailscale)     │
+    │ ── Google OAuth (PKCE) ────► │                                   │
+    │                              │ ── verify + check allow-list ──►  │
+    │ ◄── session JWT (30d) ────── │                                   │
+    │                              │                                   │
+    │ ── GET /token/turso ───────► │                                   │
+    │ ◄── db url + auth token ──── │                                   │
+    │                                                                  │
+    │ <span class="hl">── SQL over Hrana, direct ─────────────────────────────────────►│</span>
+    │                              │                                   │
+    │ ── POST /token/r2/upload ──► │                                   │
+    │ ◄── presigned PUT URL (15m)  │                                   │
+    │                                                                  │
+    │ <span class="hl2">── PDF bytes, direct PUT to R2 ────────────────────────────────►│</span></div>
+
+      <h3 id="sync-turso-r2"><span class="idx">6.3</span>Why both Turso and R2 — not one or the other</h3>
+      <p>It's fair to ask why this needs two remote stores instead of one. The short answer is that
+      metadata and blobs have almost opposite storage requirements, and PDF-Folio's split lines up
+      exactly with that difference rather than being an arbitrary choice of two vendors.</p>
+
+      <table>
+        <tr><th></th><th>Library metadata</th><th>PDF blobs</th></tr>
+        <tr><td>Shape</td><td class="desc">Small, structured rows — titles, folder trees, tags, reading position</td><td class="desc">Large, opaque binary files, sometimes tens of megabytes</td></tr>
+        <tr><td>Access pattern</td><td class="desc">Frequent, small reads/writes; needs relational queries and ordering ("everything changed since sequence N")</td><td class="desc">Infrequent, whole-object transfer; content never mutates once written</td></tr>
+        <tr><td>Consistency need</td><td class="desc">Needs a real query engine for CRDT replay: filtering, ordering by logical time, per-entity lookups</td><td class="desc">Needs none of that — a blob is fetched by hash or not at all</td></tr>
+        <tr><td>Right tool</td><td class="desc"><strong>Turso/libSQL</strong> — SQL-native, edge-replicated, cheap for many small transactional operations</td><td class="desc"><strong>Cloudflare R2</strong> — S3-compatible object storage, no egress fees, priced for large binary payloads</td></tr>
+      </table>
+
+      <p>Putting PDF bytes <em>inside</em> Turso would work in the narrow sense that libSQL can
+      store blobs, but it would mean every metadata sync — even one that only renamed a folder —
+      pulls against a database bloated with megabytes of unrelated PDF content, and it would tie
+      blob replication to a database engine that isn't priced or built for bulk binary egress.
+      Conversely, trying to make R2 hold the CRDT operation log would mean giving up exactly the
+      thing a relational engine is for: querying "every operation for this library with a logical
+      time greater than N," which the sync algorithm in §6.4 depends on directly. The two stores
+      aren't redundant with each other; each one is doing the part of the job the other one is bad
+      at.</p>
+
+      <p>One more detail worth surfacing: PDF bytes are <strong>never uploaded from an arbitrary
+      user file path</strong>. Before a blob upload, PDF-Folio copies the source file into a
+      managed, content-addressed local cache and relinks the library entry to that managed path.
+      Sync always uploads from that stable cache location, keyed by the same BLAKE3 hash used as
+      the entry's identity (§3.1) — the R2 object key is literally <code>blobs/&lt;hash&gt;.pdf</code>.
+      That's the payoff of content-addressing showing up a second time: the same hash that made
+      import idempotent is what makes a blob's remote name computable independently on every
+      device, with no coordination and no naming collisions.</p>
+
+      <h3 id="sync-crdt"><span class="idx">6.4</span>The CRDT metadata model</h3>
+      <p>Local metadata edits are captured as an append-only, per-device operation log
+      (<code>sync_crdt_operations</code>), where every row is an immutable fact rather than a value
+      that gets overwritten in place:</p>
+
+      <pre><code>op_id, library_id, device_id, logical_time, entity_kind, entity_id, payload, ...</code></pre>
+
+      <p><code>entity_kind</code> is <code>entry</code>, <code>folder</code>, or
+      <code>entry_folder</code> — plus a fourth, synthetic <code>library</code> kind used by a
+      separate stream covering library <em>existence</em> itself (§6.4.1). Each device keeps its
+      own monotonic <code>logical_time</code> counter per library. Conflicts resolve as a
+      deterministic <em class="term">last-writer-wins register</em>, computed purely from the
+      operation log rather than from any wall-clock trust between devices:</p>
+
+      <pre><code><span class="k">fn</span> operation_wins(candidate: &amp;SyncCrdtOperation, current: &amp;SyncCrdtOperation) -&gt; bool {
+    (candidate.logical_time, candidate.device_id.as_str(), candidate.op_id.as_str())
+        &gt; (current.logical_time,   current.device_id.as_str(),   current.op_id.as_str())
+}</code></pre>
+
+      <p>For a given <code>(entity_kind, entity_id)</code>, the operation with the highest
+      <code>(logical_time, device_id, op_id)</code> tuple wins. Logical time decides most
+      conflicts; device id and op id are pure tiebreakers that guarantee every device computes the
+      <em>exact same</em> winner from the exact same operation history, with zero coordination
+      required between devices to agree. A sync pass then <em class="term">materializes</em> the
+      winning operations back into ordinary rows (<code>sync_entries</code>,
+      <code>sync_folders</code>, <code>sync_entry_folders</code>) that the rest of the app actually
+      reads from.</p>
+
+      <p>Because the whole model is built on durable, replayable facts rather than one shared
+      mutable row, running a sync pass twice, out of order, or interrupting it halfway through is
+      always safe — worst case it repeats a small amount of work, it never corrupts state.</p>
+
+      <h3 style="margin-top:26px;"><span class="idx">6.4.1</span>A second, synthetic stream: the library registry</h3>
+      <p>Library <em>existence</em> — which named libraries exist at all, and their display names —
+      syncs through its own independent CRDT stream, using a synthetic id
+      (<code>REGISTRY_LIBRARY_ID = "__pdf_folio_registry__"</code>) with
+      <code>entity_kind = "library"</code>. This deliberately decouples "does this library exist"
+      from "what's inside it": a library's contents only begin syncing once the registry stream
+      agrees the library exists on both ends, which avoids a whole class of bugs where a
+      half-created or half-deleted library leaves orphaned metadata behind on another device.</p>
+
+      <h3 id="sync-lifecycle"><span class="idx">6.5</span>A sync pass, start to finish</h3>
+      <p>Putting §6.2 through §6.4 together, here is literally what happens during one automatic
+      sync pass:</p>
+
+      <ol>
+        <li><strong>Preflight.</strong> Local changes since the last pass are snapshotted into new
+        CRDT operations — but only where a payload actually differs, since each entity's last known
+        payload hash is tracked to keep this idempotent. The device then checks Turso's remote
+        operation-sequence head against its own last-seen cursor. If nothing changed locally and
+        the remote head hasn't moved, and no blobs are waiting to upload, the pass stops here —
+        the common case is two cheap reads, not a full round trip.</li>
+        <li><strong>Upload blobs.</strong> Any content-addressed PDF not yet confirmed present in
+        R2 is copied into the managed cache (if needed) and uploaded via a presigned PUT URl.</li>
+        <li><strong>Push operations.</strong> This device's not-yet-pushed CRDT operations are
+        inserted into Turso's shared log with <code>ON CONFLICT DO NOTHING</code>, so re-pushing
+        after a partial failure is always safe.</li>
+        <li><strong>Pull operations.</strong> Operations appended remotely since this device's last
+        checkpoint are fetched by sequence number.</li>
+        <li><strong>Materialize.</strong> Winners are recomputed for every touched entity and
+        written into the local <code>sync_*</code> tables.</li>
+        <li><strong>Hydrate.</strong> Any newly-materialized entity this device has never seen
+        locally gets inserted into the actual library (folders, memberships, entries), and its PDF
+        blob is downloaded from R2 into the local cache if not already present. An existing local
+        entry whose file went missing can be relinked to a newly-available blob here instead of
+        being duplicated.</li>
+      </ol>
+
+      <p>The desktop app runs this automatically right after Google sign-in, immediately after any
+      local library or reading-progress edit, and on a periodic idle timer as a safety net — thanks
+      to the preflight step, none of those triggers are expensive when there's genuinely nothing to
+      sync.</p>
+
+      <h3 id="sync-cli"><span class="idx">6.6</span>CLI entry points</h3>
+      <p>Every piece of the flow above is also reachable directly from the command line, which is
+      how the whole path gets smoke-tested against a second machine:</p>
+
+      <pre><code>cargo run -p pdf-folio-main --bin pdf-folio -- sync health          <span class="c"># ping the control plane</span>
+cargo run -p pdf-folio-main --bin pdf-folio -- sync auth            <span class="c"># run the Google PKCE flow</span>
+cargo run -p pdf-folio-main --bin pdf-folio -- sync status          <span class="c"># show local sync state</span>
+cargo run -p pdf-folio-main --bin pdf-folio -- sync ensure-schema   <span class="c"># create the Turso schema</span>
+cargo run -p pdf-folio-main --bin pdf-folio -- sync sync-once       <span class="c"># run one full pass</span></code></pre>
+
+      <p><code>sync-once</code> is the standard second-machine smoke test: it uploads local blobs,
+      runs the exact same CRDT pass the UI's auto-sync loop uses, and hydrates pulled blobs —
+      exercising auth, the control plane, Turso, R2, and remote-library hydration in one shot.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="bulk-action">
+      <span class="section-index">§7</span>
+      <h2>Life of a Bulk Action</h2>
+      <p class="lede">One concrete walk-through, tying every subsystem above together.</p>
+
+      <p>Consider: select 40 PDFs, drag them onto a folder.</p>
+
+      <ol>
+        <li>Card and row clicks accumulate into <code>LibraryRuntime</code>'s selection set
+        (shift-click for ranges, ctrl-click to toggle) — handled synchronously in
+        <code>update()</code>, no async needed for selection itself.</li>
+        <li>Dropping onto a folder card resolves through the drag state machine in
+        <code>pdf-folio-ui-components</code>, which is pure geometry and hit-testing and knows
+        nothing about the database.</li>
+        <li><code>update()</code> captures a <code>LibraryOrganizationSnapshot</code>
+        (§3.4), performs the <code>entry_folders</code> upserts on the blocking pool the same way
+        rendering runs (§2.1), and emits a completion message when done.</li>
+        <li>The write bumps <code>updated_at</code> on every touched entry — which is exactly what
+        the next sync preflight (§6.5, step 1) will notice, causing those membership changes to be
+        captured as CRDT operations on the next pass.</li>
+        <li>If a filesystem watcher event or another device's sync pull arrives concurrently, both
+        surface as ordinary messages and fold into the same single-threaded reducer — there is no
+        separate code path for a local edit versus a remote one once it reaches the message
+        loop.</li>
+      </ol>
+
+      <p class="dim">Rendering, importing, searching, syncing, undo — every one of them is built
+      from the same shape: background work on the blocking pool, a message describing what
+      happened, and a single reducer that is the only thing allowed to actually change state.</p>
+    </section>
+
+    <div class="footer-nav">
+      <a href="#overview">↑ Back to top</a>
+      <span>PDF&#8209;Folio internals guide</span>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // mobile sidebar toggle
+  const menuBtn = document.getElementById('menuBtn');
+  const sidebar = document.getElementById('sidebar');
+  if (menuBtn) {
+    menuBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+    sidebar.querySelectorAll('a').forEach(a => a.addEventListener('click', () => sidebar.classList.remove('open')));
+  }
+
+  // scrollspy
+  const links = Array.from(document.querySelectorAll('nav.toc a'));
+  const targets = links
+    .map(a => ({ a, el: document.querySelector(a.getAttribute('href')) }))
+    .filter(x => x.el);
+
+  const setActive = (id) => {
+    links.forEach(a => a.classList.remove('active'));
+    const match = links.find(a => a.getAttribute('href') === '#' + id);
+    if (match) match.classList.add('active');
+  };
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) setActive(entry.target.id);
+    });
+  }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
+
+  targets.forEach(t => observer.observe(t.el));
+</script>
+</body>
+</html>

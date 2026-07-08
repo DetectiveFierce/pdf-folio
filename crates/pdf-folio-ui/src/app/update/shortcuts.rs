@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<Message> {
+pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<Message> {
     if app.chrome.command_palette_open {
         return match shortcut {
             Shortcut::FineScroll(delta) if delta > 0 => {

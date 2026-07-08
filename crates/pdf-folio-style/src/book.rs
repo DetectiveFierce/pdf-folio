@@ -1,7 +1,7 @@
 //! External KDL-backed style book.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -15,36 +15,15 @@ use crate::tokens::{
     VisualBorder, VisualStyle,
 };
 
-const BUNDLED_STYLE_FILES: [(&str, &str); 7] = [
-    (
-        "styles/themes/espresso.kdl",
-        include_str!("../styles/themes/espresso.kdl"),
-    ),
-    (
-        "styles/themes/light.kdl",
-        include_str!("../styles/themes/light.kdl"),
-    ),
-    (
-        "styles/components/core.kdl",
-        include_str!("../styles/components/core.kdl"),
-    ),
-    (
-        "styles/components/library/sidebar.kdl",
-        include_str!("../styles/components/library/sidebar.kdl"),
-    ),
-    (
-        "styles/components/library/library.kdl",
-        include_str!("../styles/components/library/library.kdl"),
-    ),
-    (
-        "styles/components/viewer/viewer.kdl",
-        include_str!("../styles/components/viewer/viewer.kdl"),
-    ),
-    (
-        "styles/application.kdl",
-        include_str!("../styles/application.kdl"),
-    ),
-];
+mod parser;
+mod sources;
+
+use parser::*;
+#[cfg(test)]
+use sources::{bundled_style_dir, style_files_in_dir};
+use sources::{
+    bundled_style_sources, style_source_dirs, user_style_dir, user_style_files, BUNDLED_STYLE_FILES,
+};
 
 /// Parsed and validated style data.
 #[derive(Debug, Clone)]
@@ -495,6 +474,20 @@ impl RawStyleBook {
             Class::JumpOverlay => match property {
                 "input_width" => self.layout.jump_input_width = value_as_f32(name, value)?,
                 other => return Err(format!("{name}: unknown JumpOverlay layout `{other}`")),
+            },
+            Class::LibrarySearchInput => match property {
+                "clear_icon_size" | "clear_button_size" | "clear_button_padding" => self
+                    .apply_generic_app_layout_property(
+                        name,
+                        "LibrarySearchInput",
+                        property,
+                        value,
+                    )?,
+                other => {
+                    return Err(format!(
+                        "{name}: unknown LibrarySearchInput layout `{other}`"
+                    ))
+                }
             },
             Class::MenuPanel => {
                 self.apply_generic_app_layout_property(name, "MenuPanel", property, value)?
@@ -1225,173 +1218,6 @@ fn parse_component_text(name: &str, node: &KdlNode) -> Result<ComponentTextStyle
     Ok(text)
 }
 
-fn parse_color_value(name: &str, value: &KdlValue, tokens: &ThemeTokens) -> Result<Color, String> {
-    let source = value
-        .as_string()
-        .ok_or_else(|| format!("{name}: expected color string"))?;
-    parse_color_expression(source, tokens).map_err(|error| format!("{name}: {error}"))
-}
-
-fn parse_color_expression(source: &str, tokens: &ThemeTokens) -> Result<Color, String> {
-    let source = source.trim();
-    if let Some(token) = source.strip_prefix('$') {
-        return theme_color(tokens, token).ok_or_else(|| format!("unknown color token `{source}`"));
-    }
-    if let Some(args) = source
-        .strip_prefix("mix(")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        let parts = args.split(',').map(str::trim).collect::<Vec<_>>();
-        if parts.len() != 3 {
-            return Err(format!("invalid mix expression `{source}`"));
-        }
-        let base = parse_color_expression(parts[0], tokens)?;
-        let overlay = parse_color_expression(parts[1], tokens)?;
-        let amount = parts[2]
-            .parse::<f32>()
-            .map_err(|_| format!("invalid mix amount in `{source}`"))?;
-        return Ok(mix_color(base, overlay, amount));
-    }
-    parse_color_literal(source)
-}
-
-fn parse_color_literal(source: &str) -> Result<Color, String> {
-    let source = source.trim();
-    if let Some(args) = source
-        .strip_prefix("rgba(")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        let values = args
-            .split(',')
-            .map(|part| part.trim().parse::<f32>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| format!("invalid rgba color `{source}`"))?;
-        if values.len() != 4 {
-            return Err(format!("invalid rgba color `{source}`"));
-        }
-        return Ok(Color::from_rgba8(
-            values[0].clamp(0.0, 255.0) as u8,
-            values[1].clamp(0.0, 255.0) as u8,
-            values[2].clamp(0.0, 255.0) as u8,
-            values[3].clamp(0.0, 1.0),
-        ));
-    }
-    let hex = source
-        .strip_prefix('#')
-        .ok_or_else(|| format!("invalid color `{source}`"))?;
-    if hex.len() != 6 && hex.len() != 8 {
-        return Err(format!("invalid color `{source}`"));
-    }
-    let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| format!("invalid color `{source}`"))?;
-    let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| format!("invalid color `{source}`"))?;
-    let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| format!("invalid color `{source}`"))?;
-    let a = if hex.len() == 8 {
-        f32::from(
-            u8::from_str_radix(&hex[6..8], 16).map_err(|_| format!("invalid color `{source}`"))?,
-        ) / 255.0
-    } else {
-        1.0
-    };
-    Ok(Color::from_rgba8(r, g, b, a))
-}
-
-fn theme_color(tokens: &ThemeTokens, token: &str) -> Option<Color> {
-    Some(match token {
-        "background" => tokens.background,
-        "surface" => tokens.surface,
-        "surface_raised" => tokens.surface_raised,
-        "text_primary" => tokens.text_primary,
-        "text_secondary" => tokens.text_secondary,
-        "accent" => tokens.accent,
-        "border" => tokens.border,
-        "error" => tokens.error,
-        "canvas" => tokens.canvas,
-        "placeholder" => tokens.placeholder,
-        "focus" => tokens.focus,
-        "shadow" => tokens.shadow,
-        _ => return None,
-    })
-}
-
-fn node_string_arg<'a>(name: &str, node: &'a KdlNode, index: usize) -> Result<&'a str, String> {
-    node.get(index)
-        .and_then(KdlValue::as_string)
-        .ok_or_else(|| {
-            format!(
-                "{name}: node `{}` missing string argument {index}",
-                node.name().value()
-            )
-        })
-}
-
-fn node_f32_arg(name: &str, node: &KdlNode, index: usize) -> Result<f32, String> {
-    node.get(index)
-        .map(|value| value_as_f32(name, value))
-        .transpose()?
-        .ok_or_else(|| {
-            format!(
-                "{name}: node `{}` missing numeric argument {index}",
-                node.name().value()
-            )
-        })
-}
-
-fn node_usize_arg(name: &str, node: &KdlNode, index: usize) -> Result<usize, String> {
-    let value = node.get(index).ok_or_else(|| {
-        format!(
-            "{name}: node `{}` missing integer argument {index}",
-            node.name().value()
-        )
-    })?;
-    let KdlValue::Integer(value) = value else {
-        return Err(format!("{name}: expected integer value"));
-    };
-    usize::try_from(*value).map_err(|_| format!("{name}: expected non-negative integer"))
-}
-
-fn value_as_f32(name: &str, value: &KdlValue) -> Result<f32, String> {
-    let number = match value {
-        KdlValue::Integer(value) => *value as f32,
-        KdlValue::Float(value) => *value as f32,
-        _ => return Err(format!("{name}: expected numeric value")),
-    };
-    if !number.is_finite() || number < 0.0 {
-        return Err(format!("{name}: expected finite non-negative number"));
-    }
-    Ok(number)
-}
-
-fn value_as_u16(name: &str, value: &KdlValue) -> Result<u16, String> {
-    let KdlValue::Integer(value) = value else {
-        return Err(format!("{name}: expected integer value"));
-    };
-    u16::try_from(*value).map_err(|_| format!("{name}: expected integer from 0 to 65535"))
-}
-
-fn value_as_usize(name: &str, value: &KdlValue) -> Result<usize, String> {
-    let KdlValue::Integer(value) = value else {
-        return Err(format!("{name}: expected integer value"));
-    };
-    usize::try_from(*value).map_err(|_| format!("{name}: expected non-negative integer"))
-}
-
-fn value_as_u32(name: &str, value: &KdlValue) -> Result<u32, String> {
-    let KdlValue::Integer(value) = value else {
-        return Err(format!("{name}: expected integer value"));
-    };
-    u32::try_from(*value).map_err(|_| format!("{name}: expected non-negative integer"))
-}
-
-fn parse_font_weight(name: &str, value: &str) -> Result<iced::font::Weight, String> {
-    Ok(match value {
-        "regular" | "normal" => iced::font::Weight::Normal,
-        "medium" => iced::font::Weight::Medium,
-        "semibold" | "semi_bold" => iced::font::Weight::Semibold,
-        "bold" => iced::font::Weight::Bold,
-        other => return Err(format!("{name}: unsupported font weight `{other}`")),
-    })
-}
-
 fn label_map_mut(
     labels: &mut AppLabelTokens,
     section: LabelSection,
@@ -1557,6 +1383,7 @@ fn set_primitive(tokens: &mut PrimitiveTokens, token: &str, value: f32) -> Resul
         "library_switcher_sidebar_text_width" => tokens.library_switcher_sidebar_text_width = value,
         "sidebar_chevron_icon_size" => tokens.sidebar_chevron_icon_size = value,
         "sidebar_chevron_button_size" => tokens.sidebar_chevron_button_size = value,
+        "sidebar_chevron_button_padding" => tokens.sidebar_chevron_button_padding = value,
         "file_tree_indent_width" => tokens.file_tree_indent_width = value,
         "file_tree_max_indent" => tokens.file_tree_max_indent = value,
         "file_tree_meta_char_width" => tokens.file_tree_meta_char_width = value,
@@ -1669,120 +1496,6 @@ fn set_layout_count(tokens: &mut AppLayoutTokens, token: &str, value: usize) -> 
         other => return Err(format!("unknown layout count `{other}`")),
     }
     Ok(())
-}
-
-fn user_style_dir() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .map(|config| config.join("pdf-folio").join("styles"))
-}
-
-fn bundled_style_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("styles")
-}
-
-fn style_source_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    let bundled = bundled_style_dir();
-    if bundled.exists() {
-        dirs.push(bundled);
-    }
-    if let Some(user) = user_style_dir().filter(|path| path.exists()) {
-        dirs.push(user);
-    }
-    dirs.sort();
-    dirs.dedup();
-    dirs
-}
-
-fn bundled_style_sources() -> Result<Vec<(String, String)>, String> {
-    let bundled_dir = bundled_style_dir();
-    let disk_files = style_files_in_dir(&bundled_dir);
-    let mut sources = Vec::new();
-
-    for (relative, fallback) in BUNDLED_STYLE_FILES {
-        let relative_path = relative.strip_prefix("styles/").unwrap_or(relative);
-        let path = bundled_dir.join(relative_path);
-        if path.exists() {
-            let source = std::fs::read_to_string(&path)
-                .map_err(|error| format!("{}: {error}", path.display()))?;
-            sources.push((path.display().to_string(), source));
-        } else {
-            sources.push((relative.to_owned(), fallback.to_owned()));
-        }
-    }
-
-    for path in disk_files {
-        if bundled_style_relative_path(&bundled_dir, &path).is_some_and(|relative| {
-            BUNDLED_STYLE_FILES
-                .iter()
-                .any(|(bundled, _)| bundled.strip_prefix("styles/").unwrap_or(bundled) == relative)
-        }) {
-            continue;
-        }
-
-        let source = std::fs::read_to_string(&path)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
-        sources.push((path.display().to_string(), source));
-    }
-
-    Ok(sources)
-}
-
-fn user_style_files(dir: &Path) -> Vec<PathBuf> {
-    style_files_in_dir(dir)
-}
-
-fn style_files_in_dir(dir: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    collect_kdl_files(dir, &mut files);
-    files.sort();
-    files.sort_by_key(|path| style_file_order_key(dir, path));
-    files
-}
-
-fn collect_kdl_files(path: &Path, files: &mut Vec<PathBuf>) {
-    if path.is_file() {
-        if path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("kdl"))
-        {
-            files.push(path.to_path_buf());
-        }
-        return;
-    }
-
-    let Ok(entries) = std::fs::read_dir(path) else {
-        return;
-    };
-    for entry in entries.filter_map(Result::ok) {
-        collect_kdl_files(&entry.path(), files);
-    }
-}
-
-fn style_file_order_key(root: &Path, path: &Path) -> (u8, PathBuf) {
-    let relative = path.strip_prefix(root).unwrap_or(path);
-    let first_component = relative
-        .components()
-        .next()
-        .and_then(|component| component.as_os_str().to_str());
-    let file_stem = relative.file_stem().and_then(|stem| stem.to_str());
-    let group = match (first_component, file_stem) {
-        (Some("themes"), _) | (_, Some("theme" | "themes")) => 0,
-        (Some("components"), _) | (_, Some("component" | "components")) => 1,
-        (Some("application.kdl"), _) | (_, Some("application")) => 2,
-        _ => 3,
-    };
-    (group, relative.to_path_buf())
-}
-
-fn bundled_style_relative_path<'a>(root: &'a Path, path: &'a Path) -> Option<String> {
-    path.strip_prefix(root)
-        .ok()
-        .and_then(|path| path.to_str())
-        .map(|path| path.replace(std::path::MAIN_SEPARATOR, "/"))
 }
 
 /// Built-in dark fallback used when style loading fails before app startup.
@@ -1962,5 +1675,4 @@ fn set_class_state(
 }
 
 #[cfg(test)]
-#[path = "tests/style/book.rs"]
 mod tests;

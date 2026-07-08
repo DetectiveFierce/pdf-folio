@@ -12,7 +12,7 @@ struct ContextMenuItemSpec {
 }
 
 impl PDFolioApp {
-    pub(super) fn open_context_menu(&mut self, target: ContextMenuTarget) {
+    pub(crate) fn open_context_menu(&mut self, target: ContextMenuTarget) {
         self.viewer.zoom_menu_open = false;
 
         match &target {
@@ -38,7 +38,7 @@ impl PDFolioApp {
         });
     }
 
-    pub(super) fn context_menu_action_message(&self, action: ContextMenuAction) -> Option<Message> {
+    pub(crate) fn context_menu_action_message(&self, action: ContextMenuAction) -> Option<Message> {
         let target = &self.chrome.open_context_menu.as_ref()?.target;
         match action {
             ContextMenuAction::Open => match target {

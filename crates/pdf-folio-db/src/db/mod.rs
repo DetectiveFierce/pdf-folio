@@ -7,566 +7,15 @@ use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
-const MANUAL_ORDER_GAP: i64 = 1024;
+mod naming;
 
-/// Stable library entry identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EntryId(String);
+use naming::{
+    clean_folder_name, clean_optional_text, clean_title_sort_key, next_folder_suffix, sort_key,
+    MANUAL_ORDER_GAP,
+};
 
-impl EntryId {
-    /// Creates an entry identifier.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// Returns the identifier as a string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// Stable library folder identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FolderId(String);
-
-impl FolderId {
-    /// Creates a folder identifier.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// Returns the identifier as a string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// User-managed PDF folder.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Folder {
-    /// Stable folder identifier.
-    pub id: FolderId,
-    /// User-visible folder name.
-    pub name: String,
-    /// Optional parent folder.
-    pub parent_id: Option<FolderId>,
-    /// Stable manual order among sibling folders.
-    pub manual_order: i64,
-    /// Folder creation timestamp.
-    pub created_at: DateTime<Utc>,
-    /// Folder update timestamp.
-    pub updated_at: DateTime<Utc>,
-}
-
-/// External service whose items have been imported into the local library.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImportSource {
-    /// Stable source identifier, e.g. `raindrop:123`.
-    pub id: String,
-    /// Source provider kind.
-    pub kind: String,
-    /// Provider account identifier, when known.
-    pub account_id: Option<String>,
-    /// User-visible account/source label.
-    pub display_name: Option<String>,
-    /// Source creation timestamp.
-    pub created_at: DateTime<Utc>,
-    /// Source update timestamp.
-    pub updated_at: DateTime<Utc>,
-}
-
-/// A Raindrop.io collection mirrored into a local PDF-Folio folder.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RaindropCollectionMapping {
-    /// PDF-Folio import source id.
-    pub source_id: String,
-    /// Raindrop collection id.
-    pub collection_id: i64,
-    /// Local folder id.
-    pub folder_id: FolderId,
-    /// Parent Raindrop collection id.
-    pub parent_collection_id: Option<i64>,
-    /// Most recent remote collection title seen by PDF-Folio.
-    pub title: String,
-}
-
-/// A Raindrop.io item imported into a local PDF-Folio entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RaindropEntryMapping {
-    /// PDF-Folio import source id.
-    pub source_id: String,
-    /// Raindrop item id.
-    pub raindrop_id: i64,
-    /// Local entry id.
-    pub entry_id: EntryId,
-    /// Raindrop collection id containing the item.
-    pub collection_id: Option<i64>,
-    /// Remote link used to download/open the item.
-    pub remote_link: Option<String>,
-    /// Most recent remote title seen by PDF-Folio.
-    pub remote_title: Option<String>,
-    /// Most recent remote update timestamp seen by PDF-Folio.
-    pub remote_updated_at: Option<String>,
-    /// Remote filename, when supplied by Raindrop.
-    pub file_name: Option<String>,
-    /// Remote file size, when supplied by Raindrop.
-    pub file_size: Option<u64>,
-}
-
-/// Library layout preference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LibraryLayoutMode {
-    /// Grid of PDF cards.
-    Grid,
-    /// Dense list of PDF rows.
-    List,
-}
-
-impl LibraryLayoutMode {
-    /// Returns the stable string stored in SQLite.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Grid => "grid",
-            Self::List => "list",
-        }
-    }
-}
-
-impl std::str::FromStr for LibraryLayoutMode {
-    type Err = ();
-
-    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        match value {
-            "grid" => Ok(Self::Grid),
-            "list" => Ok(Self::List),
-            _ => Err(()),
-        }
-    }
-}
-
-/// Library sort preference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LibrarySortMode {
-    /// User-managed ordering.
-    Manual,
-    /// Title, ascending.
-    TitleAsc,
-    /// Title, descending.
-    TitleDesc,
-    /// Author, ascending.
-    AuthorAsc,
-    /// Author, descending.
-    AuthorDesc,
-    /// Recently added PDFs first.
-    RecentlyAdded,
-    /// Recently opened PDFs first.
-    RecentlyOpened,
-    /// Most progress first.
-    ReadingProgress,
-    /// Page count, descending.
-    PageCount,
-    /// Missing files first.
-    MissingFiles,
-}
-
-impl LibrarySortMode {
-    /// Returns the stable string stored in SQLite.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Manual => "manual",
-            Self::TitleAsc => "title_asc",
-            Self::TitleDesc => "title_desc",
-            Self::AuthorAsc => "author_asc",
-            Self::AuthorDesc => "author_desc",
-            Self::RecentlyAdded => "recently_added",
-            Self::RecentlyOpened => "recently_opened",
-            Self::ReadingProgress => "reading_progress",
-            Self::PageCount => "page_count",
-            Self::MissingFiles => "missing_files",
-        }
-    }
-
-    /// Returns the user-facing label for this sort mode.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Manual => "Manual",
-            Self::TitleAsc => "Title A-Z",
-            Self::TitleDesc => "Title Z-A",
-            Self::AuthorAsc => "Author A-Z",
-            Self::AuthorDesc => "Author Z-A",
-            Self::RecentlyAdded => "Recently Added",
-            Self::RecentlyOpened => "Recently Opened",
-            Self::ReadingProgress => "Progress",
-            Self::PageCount => "Page Count",
-            Self::MissingFiles => "Missing",
-        }
-    }
-}
-
-impl std::fmt::Display for LibrarySortMode {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.label())
-    }
-}
-
-impl std::str::FromStr for LibrarySortMode {
-    type Err = ();
-
-    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        match value {
-            "manual" => Ok(Self::Manual),
-            "title_asc" => Ok(Self::TitleAsc),
-            "title_desc" => Ok(Self::TitleDesc),
-            "author_asc" => Ok(Self::AuthorAsc),
-            "author_desc" => Ok(Self::AuthorDesc),
-            "recently_added" => Ok(Self::RecentlyAdded),
-            "recently_opened" => Ok(Self::RecentlyOpened),
-            "reading_progress" => Ok(Self::ReadingProgress),
-            "page_count" => Ok(Self::PageCount),
-            "missing_files" => Ok(Self::MissingFiles),
-            _ => Err(()),
-        }
-    }
-}
-
-/// Persisted library view preferences.
-#[derive(Debug, Clone, PartialEq)]
-pub struct LibraryPreferences {
-    /// Active sort mode.
-    pub sort_mode: LibrarySortMode,
-    /// Active layout mode.
-    pub layout_mode: LibraryLayoutMode,
-    /// Selected folder filter.
-    pub selected_folder: Option<FolderId>,
-    /// Last sidebar width.
-    pub sidebar_width: f32,
-    /// Card scale for the masonry grid view.
-    pub grid_zoom: f32,
-    /// Metadata fields visible in cards/rows.
-    pub visible_metadata_fields: Vec<String>,
-    /// Whether the root library tree section is expanded.
-    pub library_tree_root_expanded: bool,
-    /// Folder tree nodes collapsed by the user.
-    pub collapsed_folder_ids: Vec<FolderId>,
-}
-
-impl Default for LibraryPreferences {
-    fn default() -> Self {
-        Self {
-            sort_mode: LibrarySortMode::RecentlyAdded,
-            layout_mode: LibraryLayoutMode::Grid,
-            selected_folder: None,
-            sidebar_width: 112.0,
-            grid_zoom: 1.0,
-            visible_metadata_fields: vec![
-                String::from("author"),
-                String::from("page_count"),
-                String::from("file_size"),
-            ],
-            library_tree_root_expanded: true,
-            collapsed_folder_ids: Vec::new(),
-        }
-    }
-}
-
-/// A PDF entry stored in the local library.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibraryEntry {
-    /// Stable content-derived identifier.
-    pub id: EntryId,
-    /// Absolute or user-selected path to the PDF.
-    pub path: PathBuf,
-    /// Optional document title.
-    pub title: Option<String>,
-    /// Optional document author.
-    pub author: Option<String>,
-    /// User override for the displayed title.
-    pub display_title: Option<String>,
-    /// User override for the displayed author.
-    pub display_author: Option<String>,
-    /// Normalized value used for title sorting.
-    pub sort_title: Option<String>,
-    /// Normalized value used for author sorting.
-    pub sort_author: Option<String>,
-    /// True when extracted metadata should not overwrite display metadata.
-    pub metadata_locked: bool,
-    /// Stable manual order in the root library.
-    pub manual_order: i64,
-    /// True once author attribution has been attempted for this entry.
-    pub author_attributed: bool,
-    /// True once page-count attribution has been attempted for this entry.
-    pub page_count_attributed: bool,
-    /// Timestamp when the entry was added.
-    pub added_at: DateTime<Utc>,
-    /// Most recent open timestamp.
-    pub opened_at: Option<DateTime<Utc>>,
-    /// Page count, if known.
-    pub page_count: Option<u16>,
-    /// File size in bytes, if known.
-    pub file_size: Option<u64>,
-    /// Last zero-based page read by the user.
-    pub last_page: u16,
-    /// User rating from 0 to 5.
-    pub rating: u8,
-    /// Hash of the cached cover thumbnail bytes.
-    pub cover_hash: Option<String>,
-    /// User tags attached to the entry.
-    pub tags: Vec<String>,
-    /// Folders containing the entry.
-    pub folders: Vec<Folder>,
-    /// True when the source file disappeared from disk.
-    pub missing: bool,
-}
-
-/// One persisted PDF-folder membership row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EntryFolderMembership {
-    /// Library entry id.
-    pub entry_id: EntryId,
-    /// Folder id containing the entry.
-    pub folder_id: FolderId,
-    /// Stable manual order within the folder.
-    pub manual_order: i64,
-}
-
-/// One persisted folder row with trash state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibraryFolderSnapshot {
-    /// Stable folder identifier.
-    pub id: FolderId,
-    /// User-visible folder name.
-    pub name: String,
-    /// Optional parent folder.
-    pub parent_id: Option<FolderId>,
-    /// Stable manual order among sibling folders.
-    pub manual_order: i64,
-    /// Folder creation timestamp.
-    pub created_at: DateTime<Utc>,
-    /// Folder update timestamp.
-    pub updated_at: DateTime<Utc>,
-    /// Trash timestamp, when the folder is in the Trash Can.
-    pub trashed_at: Option<DateTime<Utc>>,
-}
-
-/// One persisted entry trash-state row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EntryTrashState {
-    /// Library entry id.
-    pub entry_id: EntryId,
-    /// User override for the displayed title.
-    pub display_title: Option<String>,
-    /// User override for the displayed author.
-    pub display_author: Option<String>,
-    /// Normalized value used for title sorting.
-    pub sort_title: Option<String>,
-    /// Normalized value used for author sorting.
-    pub sort_author: Option<String>,
-    /// True when extracted metadata should not overwrite display metadata.
-    pub metadata_locked: bool,
-    /// Stable manual order in the root library.
-    pub manual_order: i64,
-    /// Trash timestamp, when the entry is in the Trash Can.
-    pub trashed_at: Option<DateTime<Utc>>,
-}
-
-/// One persisted entry tag row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EntryTagSnapshot {
-    /// Library entry id.
-    pub entry_id: EntryId,
-    /// User-visible tag.
-    pub tag: String,
-}
-
-/// Sync-visible metadata for an entry row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncEntryRow {
-    /// BLAKE3/content-addressed entry id.
-    pub id: EntryId,
-    /// Local library id used by the remote Turso schema.
-    pub library_id: String,
-    /// User-visible title, when known.
-    pub title: Option<String>,
-    /// User-visible author, when known.
-    pub author: Option<String>,
-    /// Last local update timestamp as a Unix timestamp.
-    pub updated_at: i64,
-    /// Tombstone timestamp, when deleted.
-    pub deleted_at: Option<i64>,
-}
-
-/// Sync-visible metadata for a folder row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncFolderRow {
-    /// Stable folder id.
-    pub id: FolderId,
-    /// Local library id used by the remote Turso schema.
-    pub library_id: String,
-    /// User-visible folder name.
-    pub name: String,
-    /// Optional parent folder id.
-    pub parent_id: Option<FolderId>,
-    /// Last local update timestamp as a Unix timestamp.
-    pub updated_at: i64,
-    /// Tombstone timestamp, when deleted.
-    pub deleted_at: Option<i64>,
-}
-
-/// Sync-visible metadata for an entry-folder membership row.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncEntryFolderRow {
-    /// Entry id.
-    pub entry_id: EntryId,
-    /// Folder id.
-    pub folder_id: FolderId,
-    /// Last local update timestamp as a Unix timestamp.
-    pub updated_at: i64,
-    /// Tombstone timestamp, when deleted.
-    pub deleted_at: Option<i64>,
-}
-
-/// Counts returned after seeding local library data into sync metadata tables.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SyncSeedSummary {
-    /// Entry metadata rows written.
-    pub entries: usize,
-    /// Folder metadata rows written.
-    pub folders: usize,
-    /// Entry-folder membership rows written.
-    pub entry_folders: usize,
-}
-
-/// One immutable sync CRDT operation stored locally and mirrored remotely.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncCrdtOperation {
-    /// Globally stable operation id.
-    pub op_id: String,
-    /// Library this operation belongs to.
-    pub library_id: String,
-    /// Device that originally created this operation.
-    pub device_id: String,
-    /// Hybrid logical timestamp used for deterministic LWW conflict resolution.
-    pub logical_time: i64,
-    /// CRDT entity kind, for example `entry`, `folder`, or `entry_folder`.
-    pub entity_kind: String,
-    /// Stable entity id within the kind.
-    pub entity_id: String,
-    /// JSON payload for the entity state carried by this operation.
-    pub payload: String,
-    /// Local creation timestamp as a Unix timestamp.
-    pub created_at: i64,
-    /// Remote append-only sequence, once this op has been seen in Turso.
-    pub remote_sequence: Option<i64>,
-    /// Local timestamp when this op was pushed, if it originated locally.
-    pub pushed_at: Option<i64>,
-}
-
-/// Counts produced while preparing CRDT operations from local metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SyncCrdtPrepareSummary {
-    /// Newly generated local operations.
-    pub generated: usize,
-    /// Locally-originated operations still waiting to be pushed.
-    pub pending_push: usize,
-}
-
-/// Reversible snapshot of library organization and user-editable entry state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibraryOrganizationSnapshot {
-    /// All user folders, including trashed folders.
-    pub folders: Vec<LibraryFolderSnapshot>,
-    /// All PDF-folder memberships.
-    pub entry_folders: Vec<EntryFolderMembership>,
-    /// Reversible entry state for all PDFs.
-    pub entry_trash_states: Vec<EntryTrashState>,
-    /// User tags for all PDFs.
-    pub entry_tags: Vec<EntryTagSnapshot>,
-}
-
-impl LibraryOrganizationSnapshot {
-    /// Returns entry ids whose indexed search state differs between snapshots.
-    pub fn search_changed_entry_ids(&self, other: &Self) -> Vec<EntryId> {
-        let entry_search_state = |snapshot: &Self| {
-            snapshot
-                .entry_trash_states
-                .iter()
-                .map(|entry| {
-                    (
-                        entry.entry_id.as_str().to_owned(),
-                        (
-                            entry.display_title.clone(),
-                            entry.display_author.clone(),
-                            entry.sort_title.clone(),
-                            entry.sort_author.clone(),
-                            entry.metadata_locked,
-                            entry.trashed_at,
-                        ),
-                    )
-                })
-                .collect::<std::collections::HashMap<_, _>>()
-        };
-        let left = entry_search_state(self);
-        let right = entry_search_state(other);
-        let mut ids = left
-            .keys()
-            .chain(right.keys())
-            .filter(|id| left.get(*id) != right.get(*id))
-            .map(|id| EntryId::new(id.clone()))
-            .collect::<Vec<_>>();
-        ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-        ids.dedup_by(|left, right| left.as_str() == right.as_str());
-        ids
-    }
-
-    /// Returns true when restoring this snapshot should rebuild search-derived state.
-    pub fn search_state_differs_from(&self, other: &Self) -> bool {
-        !self.search_changed_entry_ids(other).is_empty()
-    }
-
-    /// Returns true when entry or folder trash state differs between snapshots.
-    pub fn trash_state_differs_from(&self, other: &Self) -> bool {
-        let entry_trash = |snapshot: &Self| {
-            snapshot
-                .entry_trash_states
-                .iter()
-                .map(|entry| (entry.entry_id.as_str().to_owned(), entry.trashed_at.clone()))
-                .collect::<std::collections::HashMap<_, _>>()
-        };
-        let folder_trash = |snapshot: &Self| {
-            snapshot
-                .folders
-                .iter()
-                .map(|folder| (folder.id.as_str().to_owned(), folder.trashed_at.clone()))
-                .collect::<std::collections::HashMap<_, _>>()
-        };
-
-        trash_maps_differ(entry_trash(self), entry_trash(other))
-            || trash_maps_differ(folder_trash(self), folder_trash(other))
-    }
-}
-
-/// Input data for creating a library entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewLibraryEntry {
-    /// Stable content-derived identifier.
-    pub id: EntryId,
-    /// Path to the PDF.
-    pub path: PathBuf,
-    /// Optional document title.
-    pub title: Option<String>,
-    /// Optional document author.
-    pub author: Option<String>,
-    /// True once author attribution has been attempted for this entry.
-    pub author_attributed: bool,
-    /// True once page-count attribution has been attempted for this entry.
-    pub page_count_attributed: bool,
-    /// Page count, if known.
-    pub page_count: Option<u16>,
-    /// File size in bytes, if known.
-    pub file_size: Option<u64>,
-    /// Hash of the cached cover thumbnail bytes.
-    pub cover_hash: Option<String>,
-}
+mod types;
+pub use types::*;
 
 /// SQLite-backed PDF-Folio library database.
 #[derive(Debug)]
@@ -1890,6 +1339,41 @@ impl Db {
                 "UPDATE entries SET manual_order = ?1 WHERE id = ?2",
                 params![(index as i64 + 1) * MANUAL_ORDER_GAP, entry_id.as_str()],
             )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Replaces the manual order of entries inside one folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any entry is not in the folder or SQLite cannot write the order.
+    pub fn set_manual_folder_entry_order(
+        &self,
+        folder_id: &FolderId,
+        entry_ids: &[EntryId],
+    ) -> Result<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        for (index, entry_id) in entry_ids.iter().enumerate() {
+            let updated = transaction.execute(
+                "UPDATE entry_folders
+                 SET manual_order = ?1
+                 WHERE folder_id = ?2 AND entry_id = ?3",
+                params![
+                    (index as i64 + 1) * MANUAL_ORDER_GAP,
+                    folder_id.as_str(),
+                    entry_id.as_str()
+                ],
+            )?;
+            if updated == 0 {
+                anyhow::bail!(
+                    "Entry {} is not in folder {}.",
+                    entry_id.as_str(),
+                    folder_id.as_str()
+                );
+            }
         }
         transaction.commit()?;
         Ok(())
@@ -3380,8 +2864,10 @@ impl Db {
             " AND f.trashed_at IS NULL"
         };
         let mut folders_by_entry = std::collections::HashMap::<String, Vec<Folder>>::new();
+        let mut folder_orders_by_entry =
+            std::collections::HashMap::<String, Vec<EntryFolderMembership>>::new();
         let mut folder_statement = connection.prepare(&format!(
-            "SELECT ef.entry_id, f.id, f.name, f.parent_id, f.manual_order, f.created_at, f.updated_at
+            "SELECT ef.entry_id, f.id, f.name, f.parent_id, f.manual_order, f.created_at, f.updated_at, ef.manual_order
              FROM entry_folders ef
              INNER JOIN folders f ON f.id = ef.folder_id
              WHERE ef.entry_id IN ({placeholders}){trash_filter}
@@ -3401,16 +2887,29 @@ impl Db {
                         updated_at: DateTime::from_timestamp(row.get(6)?, 0)
                             .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
                     },
+                    row.get::<_, i64>(7)?,
                 ))
             })?;
         for row in folder_rows {
-            let (entry_id, folder) = row.context("Could not load entry folder.")?;
+            let (entry_id, folder, folder_entry_manual_order) =
+                row.context("Could not load entry folder.")?;
+            folder_orders_by_entry
+                .entry(entry_id.clone())
+                .or_default()
+                .push(EntryFolderMembership {
+                    entry_id: EntryId::new(entry_id.clone()),
+                    folder_id: folder.id.clone(),
+                    manual_order: folder_entry_manual_order,
+                });
             folders_by_entry.entry(entry_id).or_default().push(folder);
         }
 
         for entry in entries {
             entry.tags = tags_by_entry.remove(entry.id.as_str()).unwrap_or_default();
             entry.folders = folders_by_entry
+                .remove(entry.id.as_str())
+                .unwrap_or_default();
+            entry.folder_orders = folder_orders_by_entry
                 .remove(entry.id.as_str())
                 .unwrap_or_default();
         }
@@ -3898,6 +3397,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryEntry> {
         cover_hash: row.get(18)?,
         tags: Vec::new(),
         folders: Vec::new(),
+        folder_orders: Vec::new(),
         missing: row.get::<_, i64>(19)? != 0,
     })
 }
@@ -3942,19 +3442,6 @@ fn row_to_folder_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryFo
         created_at: DateTime::from_timestamp(created_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
         updated_at: DateTime::from_timestamp(updated_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
         trashed_at: trashed_at.and_then(|timestamp| DateTime::from_timestamp(timestamp, 0)),
-    })
-}
-
-fn trash_maps_differ(
-    left: std::collections::HashMap<String, Option<DateTime<Utc>>>,
-    right: std::collections::HashMap<String, Option<DateTime<Utc>>>,
-) -> bool {
-    left.iter().any(|(id, left_value)| {
-        let right_value = right.get(id).cloned().flatten();
-        left_value != &right_value && (left_value.is_some() || right_value.is_some())
-    }) || right.iter().any(|(id, right_value)| {
-        let left_value = left.get(id).cloned().flatten();
-        right_value != &left_value && (right_value.is_some() || left_value.is_some())
     })
 }
 
@@ -4019,43 +3506,5 @@ fn row_to_import_source(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportSourc
     })
 }
 
-fn sort_key(value: Option<&str>) -> Option<String> {
-    clean_optional_text(value).map(|value| value.to_lowercase())
-}
-
-fn clean_optional_text(value: Option<&str>) -> Option<String> {
-    value
-        .map(|value| {
-            value
-                .chars()
-                .filter(|ch| !ch.is_control())
-                .collect::<String>()
-        })
-        .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|value| !value.is_empty())
-        .map(|value| value.chars().take(512).collect())
-}
-
-fn clean_title_sort_key(title: &str) -> Option<String> {
-    let title = clean_optional_text(Some(title))?;
-    let lower = title.to_lowercase();
-    for article in ["the ", "a ", "an "] {
-        if let Some(rest) = lower.strip_prefix(article) {
-            return Some(rest.to_owned());
-        }
-    }
-    Some(lower)
-}
-
-fn clean_folder_name(name: &str) -> Result<String> {
-    clean_optional_text(Some(name)).context("Folder name cannot be empty.")
-}
-
-fn next_folder_suffix(connection: &Connection) -> Result<i64> {
-    let count: i64 = connection.query_row("SELECT COUNT(*) FROM folders", [], |row| row.get(0))?;
-    Ok(count + 1)
-}
-
 #[cfg(test)]
-#[path = "tests/db.rs"]
 mod tests;

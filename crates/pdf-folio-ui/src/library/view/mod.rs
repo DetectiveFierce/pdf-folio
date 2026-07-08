@@ -1,7 +1,7 @@
 //! Library view rendering.
 
-use crate::app_commands::{command_message, command_visible, CommandId, CommandSurface};
-use crate::app_view::dismissible_error_banner;
+use crate::app::commands::{command_message, command_visible, CommandId, CommandSurface};
+use crate::app::view::dismissible_error_banner;
 use crate::viewer::canvas::HistoryRestoreSpinner;
 use crate::*;
 use chrono::{DateTime, Local};
@@ -24,15 +24,10 @@ const SEARCH_CLEAR_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" wid
 const SYNC_CHECK_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"##;
 static LIBRARY_VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
-#[path = "view/dialogs.rs"]
 mod dialogs;
-#[path = "view/entries.rs"]
 mod entries;
-#[path = "view/folders.rs"]
 mod folders;
-#[path = "view/inspector.rs"]
 mod inspector;
-#[path = "view/sidebar.rs"]
 mod sidebar;
 
 pub(crate) use dialogs::*;
@@ -49,7 +44,7 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let render_items = library_render_items(app, &entries);
     let folder_section_height = folder_cards_section_height(app, child_folders.len());
     let entry_scroll_offset = (app.library.library_scroll_offset - folder_section_height).max(0.0);
-    let window = app.visible_library_entry_window_at(entries.len(), entry_scroll_offset);
+    let window = app.visible_library_entry_window_at(render_items.len(), entry_scroll_offset);
     let reorder_hint = if app.can_drag_reorder_library() {
         "Manual reorder enabled"
     } else {
@@ -91,7 +86,7 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
         let mut rows = column![].spacing(Spacing::SM);
         let top_spacer = window.start as f32 * app.library_row_height();
         let bottom_spacer =
-            entries.len().saturating_sub(window.end) as f32 * app.library_row_height();
+            render_items.len().saturating_sub(window.end) as f32 * app.library_row_height();
         if top_spacer > 0.0 {
             rows = rows.push(container("").height(top_spacer));
         }
@@ -161,10 +156,9 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
                             tokens,
                             LibraryEntryRenderMode::Placeholder,
                         ),
-                        LibraryRenderItem::DropZone(_) => component_library_drop_zone_card(
+                        LibraryRenderItem::DropZone(entry) => component_library_drop_zone_card(
                             app.library_grid_card_width(),
-                            app.library_card_estimated_height(&EntryId::new("__drop_zone__")),
-                            app.library_card_font_size(FontSize::SM),
+                            app.library_card_estimated_height(&entry.id),
                             tokens,
                         ),
                     });
@@ -269,6 +263,7 @@ fn view_library_header(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Mes
 
     let mut controls_row = row![
         library_history_icon_button(
+            app.layout(),
             UNDO_SVG,
             "Undo",
             app.library.history.can_undo(),
@@ -276,6 +271,7 @@ fn view_library_header(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Mes
             tokens,
         ),
         library_history_icon_button(
+            app.layout(),
             REDO_SVG,
             "Redo",
             app.library.history.can_redo(),
@@ -517,9 +513,12 @@ fn library_sync_indicator(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, 
         .height(Length::Fixed(spinner_size))
         .into()
     } else if app.sync_queued_libraries.is_empty() {
+        let icon_size = app
+            .layout()
+            .metric("LibrarySyncIndicator", "icon_size", 14.0);
         Svg::new(iced::widget::svg::Handle::from_memory(SYNC_CHECK_SVG))
-            .width(Length::Fixed(14.0))
-            .height(Length::Fixed(14.0))
+            .width(Length::Fixed(icon_size))
+            .height(Length::Fixed(icon_size))
             .style(move |_, _| iced::widget::svg::Style {
                 color: Some(with_alpha(tokens.text_secondary, 0.78)),
             })
@@ -685,16 +684,25 @@ pub(crate) fn library_search_input<'a>(
 
     let mut search = stack![input].width(Length::Fill);
     if !app.library.search_query.is_empty() {
+        let clear_icon_size = app
+            .layout()
+            .metric("LibrarySearchInput", "clear_icon_size", 12.0);
+        let clear_button_size =
+            app.layout()
+                .metric("LibrarySearchInput", "clear_button_size", 24.0);
+        let clear_button_padding =
+            app.layout()
+                .metric("LibrarySearchInput", "clear_button_padding", 0.0);
         let icon = Svg::new(iced::widget::svg::Handle::from_memory(SEARCH_CLEAR_SVG))
-            .width(Length::Fixed(12.0))
-            .height(Length::Fixed(12.0))
+            .width(Length::Fixed(clear_icon_size))
+            .height(Length::Fixed(clear_icon_size))
             .style(move |_, _| iced::widget::svg::Style {
                 color: Some(tokens.text_secondary),
             });
         let clear_button = button(container(icon).center(Length::Fill))
-            .width(Length::Fixed(24.0))
-            .height(Length::Fixed(24.0))
-            .padding(0)
+            .width(Length::Fixed(clear_button_size))
+            .height(Length::Fixed(clear_button_size))
+            .padding(clear_button_padding)
             .on_press(Message::SearchQueryChanged(String::new()))
             .style(move |_, _| iced::widget::button::Style {
                 text_color: tokens.text_secondary,
@@ -757,6 +765,7 @@ pub(crate) fn library_new_folder_button<'a>(
 }
 
 pub(crate) fn library_history_icon_button<'a>(
+    layout: &crate::style::AppLayoutTokens,
     icon: &'static [u8],
     label: &'static str,
     enabled: bool,
@@ -768,14 +777,17 @@ pub(crate) fn library_history_icon_button<'a>(
     } else {
         with_alpha(tokens.text_secondary, 0.45)
     };
+    let icon_size = layout.metric("LibraryHistoryButton", "icon_size", 16.0);
+    let center_size = layout.metric("LibraryHistoryButton", "center_size", 20.0);
+    let button_size = layout.metric("LibraryHistoryButton", "button_size", 32.0);
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
-        .width(Length::Fixed(16.0))
-        .height(Length::Fixed(16.0))
+        .width(Length::Fixed(icon_size))
+        .height(Length::Fixed(icon_size))
         .style(move |_, _| iced::widget::svg::Style { color: Some(color) });
-    let button = button(container(icon).center(Length::Fixed(20.0)))
+    let button = button(container(icon).center(Length::Fixed(center_size)))
         .padding(Spacing::SM)
-        .width(Length::Fixed(32.0))
-        .height(Length::Fixed(32.0))
+        .width(Length::Fixed(button_size))
+        .height(Length::Fixed(button_size))
         .style(move |_, status| button_style(tokens, Class::ToolbarButton, status));
     let button = if enabled {
         button.on_press(message)
@@ -863,53 +875,6 @@ pub(crate) fn library_filter_summary<'a>(
             .padding([Spacing::XS, Spacing::MD]),
     );
     row.into()
-}
-
-#[allow(dead_code)]
-pub(crate) fn view_library_selection_status_row<'a>(
-    app: &'a PDFolioApp,
-    tokens: ThemeTokens,
-    reorder_hint: &'a str,
-) -> Element<'a, Message> {
-    let selected_count = app.library.selected_library_entries.len();
-    let mut details = row![
-        master_checkbox(
-            app.master_checkbox_state(),
-            tokens,
-            Message::MasterCheckboxClicked
-        ),
-        text(format!("{} selected", format_count(selected_count, "PDF")))
-            .size(FontSize::SM)
-            .font(ui_font(FontWeight::MEDIUM))
-            .color(tokens.accent),
-    ]
-    .spacing(Spacing::MD)
-    .align_y(iced::Alignment::Center)
-    .width(Length::Fill);
-
-    if let Some(status) = app.library.library_status.as_deref() {
-        details = details.push(
-            text(status)
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::REGULAR))
-                .color(tokens.text_secondary),
-        );
-    }
-
-    row![
-        details,
-        text(reorder_hint)
-            .size(FontSize::SM)
-            .font(ui_font(FontWeight::REGULAR))
-            .color(if app.can_drag_reorder_library() {
-                tokens.accent
-            } else {
-                tokens.text_secondary
-            }),
-    ]
-    .spacing(Spacing::MD)
-    .align_y(iced::Alignment::Center)
-    .into()
 }
 
 pub(crate) fn breadcrumb_button<'a>(

@@ -20,6 +20,7 @@ primitive "library_switcher_sidebar_button_height" 34
 primitive "library_switcher_sidebar_text_width" 170
 primitive "sidebar_chevron_icon_size" 18
 primitive "sidebar_chevron_button_size" 28
+primitive "sidebar_chevron_button_padding" 0
 primitive "file_tree_indent_width" 12
 primitive "file_tree_max_indent" 72
 primitive "file_tree_meta_char_width" 6

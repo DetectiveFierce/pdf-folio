@@ -18,6 +18,14 @@ component "ContextMenuPanel" {
     layout width=250 item_height=30
 }
 
+component "CommandPalette" {
+    layout width=520 list_height=420 icon_slot_width=12 metadata_spacing=1
+}
+
+component "SignedOutPanel" {
+    layout width=420
+}
+
 component "JumpOverlay" {
     layout input_width=90
 }
@@ -28,6 +36,18 @@ component "LibrarySwitcher" {
 
 component "LibraryToolbar" {
     layout compact_width=760 narrow_width=600 breadcrumb_width=150 breadcrumb_narrow_width=94 filter_pill_width=170 filter_pill_narrow_width=112 reorder_hint_width=190 reorder_hint_narrow_width=118
+}
+
+component "LibrarySearchInput" {
+    layout clear_icon_size=12 clear_button_size=24 clear_button_padding=0
+}
+
+component "LibraryHistoryButton" {
+    layout icon_size=16 center_size=20 button_size=32
+}
+
+component "LibrarySyncIndicator" {
+    layout size=30 icon_size=14 spinner_size=14
 }
 
 component "LibraryEntry" {

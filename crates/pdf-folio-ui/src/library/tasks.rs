@@ -59,6 +59,43 @@ pub(crate) fn persist_manual_entry_order_task(
     )
 }
 
+pub(crate) fn persist_manual_folder_entry_order_task(
+    db: Arc<Db>,
+    folder_id: FolderId,
+    entry_ids: Vec<EntryId>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let before = db.library_organization_snapshot()?;
+                db.set_manual_folder_entry_order(&folder_id, &entry_ids)?;
+                let after = db.library_organization_snapshot()?;
+                Ok::<_, anyhow::Error>((
+                    LibraryHistoryAction {
+                        label: String::from("Manual Folder PDF Order"),
+                        refresh_search_on_restore: before.search_state_differs_from(&after),
+                        before,
+                        after,
+                    },
+                    String::from("Manual folder PDF order saved"),
+                    entry_ids.len(),
+                    Vec::<String>::new(),
+                ))
+            })
+            .await?
+        },
+        |result| match result {
+            Ok((action, label, updated, errors)) => Message::LibraryHistoryActionFinished {
+                action,
+                label,
+                updated,
+                errors,
+            },
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
 pub(crate) fn persist_manual_folder_order_task(
     db: Arc<Db>,
     parent_id: Option<FolderId>,

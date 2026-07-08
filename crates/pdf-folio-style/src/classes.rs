@@ -987,5 +987,4 @@ pub fn mix_color(base: Color, overlay: Color, amount: f32) -> Color {
 }
 
 #[cfg(test)]
-#[path = "tests/style/classes.rs"]
 mod tests;

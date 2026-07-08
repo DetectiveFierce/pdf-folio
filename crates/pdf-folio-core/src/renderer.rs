@@ -92,5 +92,4 @@ impl Default for TileCache {
 }
 
 #[cfg(test)]
-#[path = "tests/renderer.rs"]
 mod tests;

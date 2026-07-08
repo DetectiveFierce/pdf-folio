@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn viewer_spread_groups(
+pub(crate) fn viewer_spread_groups(
     page_count: u16,
     spread_mode: ViewerSpreadMode,
 ) -> Vec<Vec<u16>> {
@@ -38,7 +38,7 @@ pub(super) fn viewer_spread_groups(
     }
 }
 
-pub(super) fn prefetch_page_order_for_range(
+pub(crate) fn prefetch_page_order_for_range(
     visible: std::ops::Range<u16>,
     page_count: u16,
     scrolling_forward: bool,
@@ -78,13 +78,13 @@ pub(super) fn prefetch_page_order_for_range(
     pages
 }
 
-pub(super) fn push_unique_page(pages: &mut Vec<u16>, page: u16, page_count: u16) {
+pub(crate) fn push_unique_page(pages: &mut Vec<u16>, page: u16, page_count: u16) {
     if page < page_count && !pages.contains(&page) {
         pages.push(page);
     }
 }
 
-pub(super) fn selected_render_key<'a>(
+pub(crate) fn selected_render_key<'a>(
     keys: impl Iterator<Item = &'a TileKey>,
     target: TileKey,
     preview_width_px: Option<u16>,
@@ -111,7 +111,7 @@ pub(super) fn selected_render_key<'a>(
         .min_by_key(|candidate| candidate.width_px.abs_diff(target.width_px))
 }
 
-pub(super) fn viewer_group_width(app: &PDFolioApp, group: &[u16]) -> f32 {
+pub(crate) fn viewer_group_width(app: &PDFolioApp, group: &[u16]) -> f32 {
     if group.is_empty() {
         return 0.0;
     }
@@ -120,14 +120,14 @@ pub(super) fn viewer_group_width(app: &PDFolioApp, group: &[u16]) -> f32 {
         + Spacing::PAGE_GAP * group.len().saturating_sub(1) as f32
 }
 
-pub(super) fn viewer_group_height(app: &PDFolioApp, group: &[u16]) -> f32 {
+pub(crate) fn viewer_group_height(app: &PDFolioApp, group: &[u16]) -> f32 {
     group
         .iter()
         .map(|&page| app.page_height(page))
         .fold(0.0, f32::max)
 }
 
-pub(super) fn viewer_groups_max_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
+pub(crate) fn viewer_groups_max_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
     groups
         .iter()
         .map(|group| viewer_group_width(app, group))
@@ -135,14 +135,14 @@ pub(super) fn viewer_groups_max_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> 
         + Spacing::PAGE_GUTTER * 2.0
 }
 
-pub(super) fn viewer_groups_max_height(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
+pub(crate) fn viewer_groups_max_height(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
     groups
         .iter()
         .map(|group| viewer_group_height(app, group))
         .fold(0.0, f32::max)
 }
 
-pub(super) fn viewer_groups_inline_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
+pub(crate) fn viewer_groups_inline_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
     if groups.is_empty() {
         return app.viewer.viewer_viewport_width.max(1.0);
     }
@@ -156,6 +156,6 @@ pub(super) fn viewer_groups_inline_width(app: &PDFolioApp, groups: &[Vec<u16>]) 
         + Spacing::PAGE_GUTTER * 2.0
 }
 
-pub(super) fn rects_intersect(a: Rectangle, b: Rectangle) -> bool {
+pub(crate) fn rects_intersect(a: Rectangle, b: Rectangle) -> bool {
     a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y
 }

@@ -315,6 +315,39 @@ impl LibraryRenderItem {
     }
 }
 
+fn drag_target_changes_order(
+    entries: &[LibraryEntry],
+    dragged_ids: &[EntryId],
+    target_index: usize,
+) -> bool {
+    let dragged = dragged_ids.iter().cloned().collect::<HashSet<_>>();
+    if dragged.is_empty() {
+        return false;
+    }
+
+    let current = entries
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let moving = current
+        .iter()
+        .filter(|entry_id| dragged.contains(entry_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if moving.is_empty() {
+        return false;
+    }
+
+    let mut remaining = current
+        .iter()
+        .filter(|entry_id| !dragged.contains(entry_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let insert_index = target_index.min(remaining.len());
+    remaining.splice(insert_index..insert_index, moving);
+    remaining != current
+}
+
 pub(crate) fn library_render_items(
     app: &PDFolioApp,
     entries: &[LibraryEntry],
@@ -326,8 +359,15 @@ pub(crate) fn library_render_items(
             .map(LibraryRenderItem::Entry)
             .collect();
     };
+    library_render_items_for_drag(entries, drag)
+}
+
+pub(crate) fn library_render_items_for_drag(
+    entries: &[LibraryEntry],
+    drag: &LibraryDragState,
+) -> Vec<LibraryRenderItem> {
     if !drag.multi {
-        let Some(ghost_entry) = entries
+        let Some(dragged_entry) = entries
             .iter()
             .find(|entry| entry.id == drag.entry_id)
             .cloned()
@@ -339,22 +379,27 @@ pub(crate) fn library_render_items(
                 .collect();
         };
 
-        let compact_entries: Vec<_> = entries
-            .iter()
-            .filter(|entry| entry.id != drag.entry_id)
-            .cloned()
-            .collect();
-        let target_index = drag.target_index.min(compact_entries.len());
+        let target_index = drag.target_index.min(entries.len().saturating_sub(1));
+        let show_drop_zone = drag.drop_target.is_none()
+            && drag_target_changes_order(entries, &drag.entry_ids, target_index);
 
-        let mut items = Vec::with_capacity(entries.len());
-        for index in 0..=compact_entries.len() {
-            if target_index == index {
-                items.push(LibraryRenderItem::Ghost(ghost_entry.clone()));
-            }
-
-            if let Some(entry) = compact_entries.get(index) {
+        let mut compact_index = 0;
+        let mut drop_zone_inserted = false;
+        let mut items = Vec::with_capacity(entries.len() + 1);
+        for entry in entries {
+            if entry.id == drag.entry_id {
+                items.push(LibraryRenderItem::Ghost(entry.clone()));
+            } else {
+                if show_drop_zone && !drop_zone_inserted && compact_index == target_index {
+                    items.push(LibraryRenderItem::DropZone(dragged_entry.clone()));
+                    drop_zone_inserted = true;
+                }
                 items.push(LibraryRenderItem::Entry(entry.clone()));
+                compact_index += 1;
             }
+        }
+        if show_drop_zone && !drop_zone_inserted {
+            items.push(LibraryRenderItem::DropZone(dragged_entry));
         }
 
         return items;
@@ -378,6 +423,9 @@ pub(crate) fn library_render_items(
     let target_index = drag
         .target_index
         .min(entries.len().saturating_sub(placeholder_entries.len()));
+    let show_drop_zone = drag.drop_target.is_none()
+        && drag_target_changes_order(entries, &drag.entry_ids, target_index);
+
     let mut compact_index = 0;
     let mut drop_zone_inserted = false;
     let mut items = Vec::with_capacity(entries.len() + 1);
@@ -385,7 +433,7 @@ pub(crate) fn library_render_items(
         if dragged_ids.contains(&entry.id) {
             items.push(LibraryRenderItem::Ghost(entry.clone()));
         } else {
-            if !drop_zone_inserted && drag.drop_target.is_none() && compact_index == target_index {
+            if show_drop_zone && !drop_zone_inserted && compact_index == target_index {
                 items.push(LibraryRenderItem::DropZone(drop_zone_entry.clone()));
                 drop_zone_inserted = true;
             }
@@ -393,7 +441,7 @@ pub(crate) fn library_render_items(
             compact_index += 1;
         }
     }
-    if !drop_zone_inserted && drag.drop_target.is_none() {
+    if show_drop_zone && !drop_zone_inserted {
         items.push(LibraryRenderItem::DropZone(drop_zone_entry));
     }
 

@@ -1,7 +1,7 @@
 use super::*;
 
 impl PDFolioApp {
-    pub(super) fn all_tags(&self) -> Vec<String> {
+    pub(crate) fn all_tags(&self) -> Vec<String> {
         let mut tags: Vec<String> = self
             .library
             .library_entries
@@ -13,7 +13,7 @@ impl PDFolioApp {
         tags
     }
 
-    pub(super) fn request_visible_thumbnails(&mut self) -> Task<Message> {
+    pub(crate) fn request_visible_thumbnails(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         let entries = self.visible_library_entries();
         let folder_section_height = folder_cards_section_height(self, self.child_folders().len());
@@ -63,7 +63,7 @@ impl PDFolioApp {
         Task::batch(tasks)
     }
 
-    pub(super) fn load_cached_visible_thumbnails(&mut self) {
+    pub(crate) fn load_cached_visible_thumbnails(&mut self) {
         let entries = self.visible_thumbnail_entries();
         let preferred_size = if self.library.compact_view_mode {
             ThumbnailSize::Default
@@ -108,7 +108,7 @@ impl PDFolioApp {
         }
     }
 
-    pub(super) fn refresh_library(&mut self) -> Task<Message> {
+    pub(crate) fn refresh_library(&mut self) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let sort_mode = self.library.library_sort_mode;
         Task::perform(
@@ -132,7 +132,7 @@ impl PDFolioApp {
         )
     }
 
-    pub(super) fn refresh_folders(&self) -> Task<Message> {
+    pub(crate) fn refresh_folders(&self) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let trash_db = Arc::clone(&self.db);
         Task::batch([
