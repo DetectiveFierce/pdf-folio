@@ -4168,15 +4168,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
 
 [[package]]
+name = "pdf-folio-cloud"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64",
+ "blake3",
+ "chrono",
+ "directories",
+ "hex",
+ "hmac",
+ "jsonwebtoken",
+ "pdf-folio-core",
+ "rand 0.9.4",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "webbrowser",
+ "zip",
+]
+
+[[package]]
 name = "pdf-folio-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
+ "chrono",
+ "directories",
  "image",
  "lru 0.18.0",
+ "notify",
  "pdfium-render",
  "rayon",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tantivy",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
