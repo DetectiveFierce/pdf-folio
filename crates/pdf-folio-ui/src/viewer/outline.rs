@@ -147,7 +147,7 @@ fn thumbnail_button(app: &PDFolioApp, page: u16, tokens: ThemeTokens) -> Element
         .into()
     } else {
         container(
-            crate::ui_components_library::view::document_preview_lines(
+            crate::components::library::view::document_preview_lines(
                 width, height, tokens, 0.82,
             ),
         )

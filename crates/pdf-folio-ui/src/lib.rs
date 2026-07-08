@@ -26,8 +26,8 @@ pub use pdf_folio_style as style;
 pub use pdf_folio_style::theme;
 
 mod shell;
+mod components;
 mod library;
-mod ui_components_library;
 mod viewer;
 mod viewer_crate_state;
 pub mod views;
@@ -165,7 +165,7 @@ use shell::session::{load_app_session, save_app_session, AppSession};
 use shell::sync_auth::{SyncAuthRuntime, SyncAuthState};
 use shell::update::{pending_raindrop_rollback_check_task, update};
 use shell::view::view;
-use crate::ui_components_library::view::with_alpha;
+use crate::components::library::view::with_alpha;
 
 pub use shell::app::*;
 

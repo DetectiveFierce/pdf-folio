@@ -6,7 +6,7 @@ use crate::viewer::canvas::HistoryRestoreSpinner;
 use crate::*;
 use chrono::{DateTime, Local};
 use iced::widget::{canvas, column, row, stack, Svg};
-use crate::ui_components_library::view::{
+use crate::components::library::view::{
     document_preview_lines, flush_media_style, ghost_tags_row,
     library_drop_zone_card as component_library_drop_zone_card,
     library_drop_zone_row as component_library_drop_zone_row,
