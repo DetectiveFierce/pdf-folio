@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use blake3::Hasher;
 use directories::ProjectDirs;
 
-use crate::{Db, EntryId, NewLibraryEntry};
+use super::{Db, EntryId, NewLibraryEntry};
 
 /// Result of importing a single PDF path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +180,79 @@ fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
         None
     } else {
         Some(title.chars().take(512).collect())
+    }
+}
+
+// --- Filesystem watching -----------------------------------------------------
+//
+// `LibraryWatcher` previously lived in its own `watcher.rs` module within the
+// standalone `pdf-folio-db` crate. It has been folded into the import module
+// because both are concerned with PDFs entering the library: the import
+// helpers do the initial scan/import, and the watcher reacts to filesystem
+// changes in already-imported folders.
+
+use std::sync::mpsc::Sender;
+
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+
+/// High-level PDF file event emitted by the library watcher.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LibraryWatchEvent {
+    /// A PDF file was created or modified.
+    PdfCreated(PathBuf),
+    /// A PDF file was removed.
+    PdfRemoved(PathBuf),
+}
+
+/// Filesystem watcher for configured library folders.
+#[derive(Debug)]
+pub struct LibraryWatcher {
+    watcher: RecommendedWatcher,
+}
+
+impl LibraryWatcher {
+    /// Creates a new library watcher.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the platform watcher cannot be created.
+    pub fn new(sender: Sender<LibraryWatchEvent>) -> Result<Self> {
+        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            let Ok(event) = event else {
+                return;
+            };
+
+            let watch_event = match event.kind {
+                EventKind::Create(_) | EventKind::Modify(_) => event
+                    .paths
+                    .into_iter()
+                    .find(|path| is_pdf_path(path))
+                    .map(LibraryWatchEvent::PdfCreated),
+                EventKind::Remove(_) => event
+                    .paths
+                    .into_iter()
+                    .find(|path| is_pdf_path(path))
+                    .map(LibraryWatchEvent::PdfRemoved),
+                _ => None,
+            };
+
+            if let Some(event) = watch_event {
+                let _ = sender.send(event);
+            }
+        })
+        .context("Could not create filesystem watcher.")?;
+
+        Ok(Self { watcher })
+    }
+
+    /// Starts watching a directory for PDF changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the platform watcher cannot subscribe to the directory.
+    pub fn watch_directory(&mut self, path: &Path) -> Result<()> {
+        self.watcher.watch(path, RecursiveMode::Recursive)?;
+        Ok(())
     }
 }
 

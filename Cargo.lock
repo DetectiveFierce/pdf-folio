@@ -4220,16 +4220,7 @@ dependencies = [
 name = "pdf-folio-db"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "blake3",
- "chrono",
- "directories",
- "notify",
- "rusqlite",
- "serde",
- "serde_json",
- "tantivy",
- "tracing",
+ "pdf-folio-core",
 ]
 
 [[package]]
