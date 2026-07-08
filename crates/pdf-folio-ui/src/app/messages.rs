@@ -10,7 +10,7 @@ use pdf_folio_core::{Annotation, AnnotationId, PageTextLayer, PdfDoc, TileKey};
 use pdf_folio_db::{
     EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
 };
-use pdf_folio_raindrop::{
+use pdf_folio_cloud::raindrop::{
     RaindropImportDestination, RaindropImportPreview, RaindropImportProgress, RaindropImportSummary,
 };
 
@@ -164,7 +164,7 @@ pub enum Message {
     /// Start Google sync sign-in.
     SyncSignInRequested,
     /// Google sync sign-in finished.
-    SyncSignInFinished(Result<pdf_folio_sync::Session, String>),
+    SyncSignInFinished(Result<pdf_folio_cloud::sync::Session, String>),
     /// Periodic automatic sync timer fired.
     AutoSyncTick(Instant),
     /// Live remote watcher detected new CRDT operations.
@@ -188,7 +188,7 @@ pub enum Message {
         /// Library that completed this sync pass.
         library_id: String,
         /// Sync result for the library.
-        result: Result<pdf_folio_sync::SyncRunReport, String>,
+        result: Result<pdf_folio_cloud::sync::SyncRunReport, String>,
     },
     /// App-level library registry sync completed.
     LibraryRegistrySyncFinished {

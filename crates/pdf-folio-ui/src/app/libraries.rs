@@ -2,7 +2,7 @@ use super::*;
 use anyhow::Context;
 use directories::ProjectDirs;
 use pdf_folio_db::thumbnail_path;
-use pdf_folio_sync::SyncLibraryRow;
+use pdf_folio_cloud::sync::SyncLibraryRow;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 

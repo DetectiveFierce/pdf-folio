@@ -2,7 +2,7 @@ FROM rust:1-bookworm AS builder
 
 WORKDIR /app
 COPY . .
-RUN cargo build --release -p pdf-folio-sync-server
+RUN cargo build --release -p pdf-folio-cloud --bin pdf-folio-sync-server
 
 FROM debian:bookworm-slim AS runtime
 

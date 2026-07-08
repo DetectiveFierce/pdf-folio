@@ -28,7 +28,7 @@ pub(crate) fn mark_entry_opened_task(app: &PDFolioApp) -> Task<Message> {
 enum RaindropImportTaskEvent {
     CreatedFolder(FolderId),
     Progress(RaindropImportProgress),
-    Finished(anyhow::Result<pdf_folio_raindrop::RaindropImportSummary>),
+    Finished(anyhow::Result<pdf_folio_cloud::raindrop::RaindropImportSummary>),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -242,7 +242,7 @@ pub(crate) fn raindrop_import_destination(
 
 pub(crate) fn raindrop_import_task(
     db: Arc<Db>,
-    preview: pdf_folio_raindrop::RaindropImportPreview,
+    preview: pdf_folio_cloud::raindrop::RaindropImportPreview,
     preserve_structure: bool,
     root_folder: Option<FolderId>,
     new_folder_name: Option<String>,
@@ -272,7 +272,7 @@ pub(crate) fn raindrop_import_task(
             let import_db = Arc::clone(&db);
             let mut import_task = tokio::spawn(async move {
                 let destination = raindrop_import_destination(preserve_structure, root_folder);
-                pdf_folio_raindrop::import_preview_pdfs_with_progress(
+                pdf_folio_cloud::raindrop::import_preview_pdfs_with_progress(
                     &import_db,
                     preview,
                     destination,
@@ -426,8 +426,8 @@ pub(crate) fn sync_library_registry_task(
     Task::perform(
         async move {
             let session =
-                pdf_folio_sync::cached_session().context("No cached sync session is available.")?;
-            let client = pdf_folio_sync::SyncClient::new(session);
+                pdf_folio_cloud::sync::cached_session().context("No cached sync session is available.")?;
+            let client = pdf_folio_cloud::sync::SyncClient::new(session);
             client.ensure_remote_schema().await?;
             let db = Db::open(&db_path)?;
             let rows = push_local
@@ -492,10 +492,10 @@ pub(crate) fn auto_sync_task(library: LibraryProfile) -> Task<Message> {
     Task::perform(
         async move {
             let session =
-                pdf_folio_sync::cached_session().context("No cached sync session is available.")?;
-            let client = pdf_folio_sync::SyncClient::new(session);
+                pdf_folio_cloud::sync::cached_session().context("No cached sync session is available.")?;
+            let client = pdf_folio_cloud::sync::SyncClient::new(session);
             client.ensure_remote_schema().await?;
-            let cache = pdf_folio_sync::BlobCache::open_default()?;
+            let cache = pdf_folio_cloud::sync::BlobCache::open_default()?;
             let device_id = default_sync_device_id();
             let db = Db::open(&library.db_path)
                 .with_context(|| format!("Could not open {} for sync.", library.name))?;

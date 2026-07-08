@@ -13,8 +13,7 @@ iced.workspace = true
 notify.workspace = true
 pdf-folio-core = { path = "../pdf-folio-core" }
 pdf-folio-db = { path = "../pdf-folio-db" }
-pdf-folio-raindrop = { path = "../pdf-folio-raindrop" }
-pdf-folio-sync = { path = "../pdf-folio-sync" }
+pdf-folio-cloud = { path = "../pdf-folio-cloud" }
 pdf-folio-style = { path = "../pdf-folio-style" }
 pdf-folio-viewer = { path = "../pdf-folio-viewer" }
 pdf-folio-ui-components = { path = "../pdf-folio-ui-components" }

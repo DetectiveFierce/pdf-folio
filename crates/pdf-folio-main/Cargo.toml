@@ -15,7 +15,7 @@ chrono.workspace = true
 clap.workspace = true
 directories.workspace = true
 pdf-folio-db = { path = "../pdf-folio-db" }
-pdf-folio-sync = { path = "../pdf-folio-sync" }
+pdf-folio-cloud = { path = "../pdf-folio-cloud" }
 pdf-folio-ui = { path = "../pdf-folio-ui" }
 reqwest.workspace = true
 serde.workspace = true

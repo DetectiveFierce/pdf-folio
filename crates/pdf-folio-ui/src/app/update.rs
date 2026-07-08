@@ -881,7 +881,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.raindrop_import_location_menu_open = false;
             app.library.raindrop_import_new_folder_active = false;
             app.library.raindrop_import_new_folder_name.clear();
-            if !pdf_folio_raindrop::can_import_without_prompt() {
+            if !pdf_folio_cloud::raindrop::can_import_without_prompt() {
                 app.library.raindrop_connect_dialog_open = true;
                 app.library.raindrop_callback_copied = false;
                 app.library.library_status =
@@ -891,7 +891,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.raindrop_import_dialog_open = true;
             app.library.library_status = Some(String::from("Loading Raindrop PDFs..."));
             return Task::perform(
-                async move { pdf_folio_raindrop::import_preview().await },
+                async move { pdf_folio_cloud::raindrop::import_preview().await },
                 |result| match result {
                     Ok(preview) => Message::RaindropImportPreviewLoaded(preview),
                     Err(error) => Message::LibraryError(error.to_string()),
@@ -1006,7 +1006,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             if selected_pdfs.is_empty() {
                 return Task::none();
             }
-            let selected_preview = pdf_folio_raindrop::RaindropImportPreview {
+            let selected_preview = pdf_folio_cloud::raindrop::RaindropImportPreview {
                 account_id: preview.account_id.clone(),
                 account_label: preview.account_label.clone(),
                 pdfs: selected_pdfs,
@@ -1028,7 +1028,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 completed: 0,
                 total: selected_preview.pdfs.len(),
                 current_title: String::from("Preparing import..."),
-                phase: pdf_folio_raindrop::RaindropImportPhase::PreparingImports,
+                phase: pdf_folio_cloud::raindrop::RaindropImportPhase::PreparingImports,
                 progress_basis_points: None,
                 failed: false,
                 started_at: Instant::now(),
@@ -1192,7 +1192,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::CopyRaindropCallbackUrl => {
             app.library.raindrop_callback_copied = true;
             app.library.library_status = Some(String::from("Callback url copied to clipboard!"));
-            return clipboard::write(String::from(pdf_folio_raindrop::OAUTH_CALLBACK_URL));
+            return clipboard::write(String::from(pdf_folio_cloud::raindrop::OAUTH_CALLBACK_URL));
         }
         Message::RaindropClientIdChanged(value) => {
             app.library.raindrop_callback_copied = false;
@@ -1223,12 +1223,12 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             app.library.library_status = Some(String::from(
                 "Opening Raindrop.io in your browser for sign-in...",
             ));
-            let oauth_config = pdf_folio_raindrop::RaindropOAuthConfig {
+            let oauth_config = pdf_folio_cloud::raindrop::RaindropOAuthConfig {
                 client_id,
                 client_secret,
             };
             return Task::perform(
-                async move { pdf_folio_raindrop::import_preview_with_auth(Some(oauth_config)).await },
+                async move { pdf_folio_cloud::raindrop::import_preview_with_auth(Some(oauth_config)).await },
                 |result| match result {
                     Ok(preview) => Message::RaindropImportPreviewLoaded(preview),
                     Err(error) => Message::LibraryError(error.to_string()),

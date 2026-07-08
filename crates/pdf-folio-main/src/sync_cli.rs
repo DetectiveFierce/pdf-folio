@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use directories::ProjectDirs;
 use pdf_folio_db::Db;
-use pdf_folio_sync::{
+use pdf_folio_cloud::sync::{
     cached_session, sign_in_with_google, BlobCache, GoogleAuthConfig, R2Client, SyncClient,
     SyncLibraryRow,
 };

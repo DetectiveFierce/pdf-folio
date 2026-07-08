@@ -1,9 +1,0 @@
-[package]
-name = "pdf-folio-sync"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-
-[dependencies]
-pdf-folio-cloud = { path = "../pdf-folio-cloud" }

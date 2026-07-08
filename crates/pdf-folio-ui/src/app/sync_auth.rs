@@ -3,8 +3,8 @@ use std::path::Path;
 use super::*;
 use anyhow::Context;
 #[cfg(not(test))]
-use pdf_folio_sync::cached_session;
-use pdf_folio_sync::{sign_in_with_google, GoogleAuthConfig, Session};
+use pdf_folio_cloud::sync::cached_session;
+use pdf_folio_cloud::sync::{sign_in_with_google, GoogleAuthConfig, Session};
 
 const DEFAULT_ALLOWED_GOOGLE_EMAIL: &str = "aidanjwagner03@gmail.com";
 const DEFAULT_SYNC_SERVER_BASE_URL: &str = "http://mind-palace:53148";

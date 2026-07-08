@@ -210,19 +210,19 @@ fn registry_live_sync_stream(
         let Ok(db) = Db::open(&watch.db_path) else {
             return;
         };
-        let Ok(session) = pdf_folio_sync::cached_session() else {
+        let Ok(session) = pdf_folio_cloud::sync::cached_session() else {
             return;
         };
-        let client = pdf_folio_sync::SyncClient::new(session);
+        let client = pdf_folio_cloud::sync::SyncClient::new(session);
         loop {
             tokio::time::sleep(LIVE_SYNC_INTERVAL).await;
             let Ok(cursor) =
-                db.sync_crdt_remote_cursor(pdf_folio_sync::REGISTRY_LIBRARY_ID, &watch.device_id)
+                db.sync_crdt_remote_cursor(pdf_folio_cloud::sync::REGISTRY_LIBRARY_ID, &watch.device_id)
             else {
                 continue;
             };
             let Ok(remote_sequence) = client
-                .remote_crdt_head_sequence(pdf_folio_sync::REGISTRY_LIBRARY_ID)
+                .remote_crdt_head_sequence(pdf_folio_cloud::sync::REGISTRY_LIBRARY_ID)
                 .await
             else {
                 continue;
@@ -249,10 +249,10 @@ fn live_sync_stream(watch: &LiveSyncWatch) -> impl iced::futures::Stream<Item = 
         let Ok(db) = Db::open(&watch.db_path) else {
             return;
         };
-        let Ok(session) = pdf_folio_sync::cached_session() else {
+        let Ok(session) = pdf_folio_cloud::sync::cached_session() else {
             return;
         };
-        let client = pdf_folio_sync::SyncClient::new(session);
+        let client = pdf_folio_cloud::sync::SyncClient::new(session);
         loop {
             tokio::time::sleep(LIVE_SYNC_INTERVAL).await;
             let Ok(cursor) = db.sync_crdt_remote_cursor(&watch.library_id, &watch.device_id) else {

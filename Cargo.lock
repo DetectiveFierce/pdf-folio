@@ -4231,8 +4231,8 @@ dependencies = [
  "chrono",
  "clap",
  "directories",
+ "pdf-folio-cloud",
  "pdf-folio-db",
- "pdf-folio-sync",
  "pdf-folio-ui",
  "reqwest",
  "serde",
@@ -4240,13 +4240,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "pdf-folio-raindrop"
-version = "0.1.0"
-dependencies = [
- "pdf-folio-cloud",
 ]
 
 [[package]]
@@ -4259,23 +4252,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdf-folio-sync"
-version = "0.1.0"
-dependencies = [
- "pdf-folio-cloud",
-]
-
-[[package]]
-name = "pdf-folio-sync-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "pdf-folio-cloud",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "pdf-folio-ui"
 version = "0.1.0"
 dependencies = [
@@ -4284,11 +4260,10 @@ dependencies = [
  "directories",
  "iced",
  "notify",
+ "pdf-folio-cloud",
  "pdf-folio-core",
  "pdf-folio-db",
- "pdf-folio-raindrop",
  "pdf-folio-style",
- "pdf-folio-sync",
  "pdf-folio-ui-components",
  "pdf-folio-viewer",
  "reqwest",

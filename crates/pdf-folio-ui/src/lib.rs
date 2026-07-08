@@ -54,7 +54,7 @@ use pdf_folio_db::{
     Db, EntryId, Folder, FolderId, ImportedEntry, LibraryEntry, LibraryLayoutMode,
     LibraryOrganizationSnapshot, LibraryPreferences, LibrarySortMode, LibraryWatchEvent,
 };
-use pdf_folio_raindrop::{
+use pdf_folio_cloud::raindrop::{
     RaindropImportDestination, RaindropImportPhase, RaindropImportPreview, RaindropImportProgress,
     RaindropPdfCandidate,
 };

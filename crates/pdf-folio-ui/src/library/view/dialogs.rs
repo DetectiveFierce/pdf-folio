@@ -1,6 +1,6 @@
 use super::*;
 use iced::widget::{column, scrollable};
-use pdf_folio_raindrop::{RaindropImportDestination, RaindropImportPhase};
+use pdf_folio_cloud::raindrop::{RaindropImportDestination, RaindropImportPhase};
 
 const RAINDROP_INTEGRATIONS_URL: &str = "https://app.raindrop.io/settings/integrations";
 const FOLDER_PLUS_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"##;
@@ -841,7 +841,7 @@ pub(crate) fn view_raindrop_connect_dialog(app: &PDFolioApp) -> Element<'_, Mess
             .on_press(Message::OpenRaindropIntegrations),
         text(format!(
             "1. Open Raindrop Integrations: {RAINDROP_INTEGRATIONS_URL}\n2. In For Developers, choose Create new app.\n3. Use these values:\n   Name: PDF-Folio\n   Description: Import my Raindrop PDF files into PDF-Folio.\n   Site: https://github.com/pdf-folio/pdf-folio\n   Redirect URI: {callback}\n4. Save the app in Raindrop.\n5. Copy the Client ID and Client Secret from Raindrop into the fields below.\n6. Click Sign in.\n\nIf Raindrop says \"Incorrect redirect_uri\", replace the Redirect URI in Raindrop with the exact value below and save the app again.",
-            callback = pdf_folio_raindrop::OAUTH_CALLBACK_URL
+            callback = pdf_folio_cloud::raindrop::OAUTH_CALLBACK_URL
         ))
         .size(FontSize::SM)
         .color(tokens.text_secondary),
@@ -850,7 +850,7 @@ pub(crate) fn view_raindrop_connect_dialog(app: &PDFolioApp) -> Element<'_, Mess
                 .size(FontSize::SM)
                 .font(ui_font(FontWeight::SEMIBOLD))
                 .color(tokens.text_primary),
-            toolbar_button(pdf_folio_raindrop::OAUTH_CALLBACK_URL, tokens)
+            toolbar_button(pdf_folio_cloud::raindrop::OAUTH_CALLBACK_URL, tokens)
                 .on_press(Message::CopyRaindropCallbackUrl),
             text(copy_status)
                 .size(FontSize::SM)

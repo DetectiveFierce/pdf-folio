@@ -204,7 +204,7 @@ impl PDFolioApp {
                 raindrop_pdf_thumbnails: HashMap::new(),
                 selected_raindrop_pdf_ids: HashSet::new(),
                 raindrop_import_destination:
-                    pdf_folio_raindrop::RaindropImportDestination::PreserveRaindropFolders,
+                    pdf_folio_cloud::raindrop::RaindropImportDestination::PreserveRaindropFolders,
                 raindrop_import_location_menu_open: false,
                 expanded_raindrop_import_location_folders: HashSet::new(),
                 raindrop_import_new_folder_active: false,
