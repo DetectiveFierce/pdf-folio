@@ -122,7 +122,7 @@ pub(crate) use shell::constants::*;
 pub(crate) use shell::icons::*;
 pub use shell::messages;
 #[cfg(test)]
-pub(crate) use shell::viewer_layout::*;
+pub(crate) use viewer::layout::*;
 
 use crate::shell::messages::{
     ConfirmationAction, ContextMenuAction, ContextMenuTarget, LibrarySidebarTab, Message, Shortcut,

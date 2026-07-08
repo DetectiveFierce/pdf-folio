@@ -1,4 +1,5 @@
-use super::*;
+use crate::*;
+use crate::viewer::layout::selected_render_key;
 
 impl PDFolioApp {
     pub(crate) fn page_top(&self, target_page: u16) -> f32 {

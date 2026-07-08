@@ -23,8 +23,4 @@ pub(crate) mod subscriptions;
 pub(crate) mod sync_auth;
 pub(crate) mod update;
 pub(crate) mod view;
-pub(crate) mod viewer_layout;
-pub(crate) mod viewer_navigation;
 pub(crate) mod viewer_state;
-
-pub(crate) use viewer_layout::*;

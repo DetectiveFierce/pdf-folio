@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 
 pub(crate) fn viewer_spread_groups(
     page_count: u16,
