@@ -5,10 +5,10 @@
 
 pub mod auth;
 pub mod blobs;
+pub mod client;
 pub mod remote;
 pub mod session;
 pub mod status;
-pub mod sync;
 
 pub use auth::{sign_in_with_google, GoogleAuthConfig};
 pub use blobs::BlobCache;
@@ -19,4 +19,4 @@ pub use status::{
     SyncBlobUploadReport, SyncCheckpoint, SyncCrdtPreflight, SyncCrdtReport, SyncHydrationReport,
     SyncLibraryRow, SyncPlan, SyncRunReport, REGISTRY_LIBRARY_ID,
 };
-pub use sync::SyncClient;
+pub use client::SyncClient;
