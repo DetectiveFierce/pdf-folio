@@ -183,6 +183,79 @@ fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
     }
 }
 
+
+// --- External import sources -------------------------------------------------
+
+use chrono::{DateTime, Utc};
+use rusqlite::{params, OptionalExtension};
+
+use super::ImportSource;
+
+impl Db {
+    /// Creates or updates an external import source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot write the source.
+    pub fn upsert_import_source(
+        &self,
+        id: &str,
+        kind: &str,
+        account_id: Option<&str>,
+        display_name: Option<&str>,
+    ) -> Result<ImportSource> {
+        let connection = self.connection()?;
+        let now = Utc::now().timestamp();
+        connection.execute(
+            "INSERT INTO import_sources
+                (id, kind, account_id, display_name, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+                kind = excluded.kind,
+                account_id = excluded.account_id,
+                display_name = excluded.display_name,
+                updated_at = excluded.updated_at",
+            params![id, kind, account_id, display_name, now],
+        )?;
+        self.import_source(id)?
+            .with_context(|| format!("Import source {id} was not saved."))
+    }
+
+    /// Returns one import source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when SQLite cannot query the source.
+    pub fn import_source(&self, id: &str) -> Result<Option<ImportSource>> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT id, kind, account_id, display_name, created_at, updated_at
+                 FROM import_sources
+                 WHERE id = ?1",
+                params![id],
+                row_to_import_source,
+            )
+            .optional()
+            .context("Could not load import source.")
+    }
+
+}
+
+fn row_to_import_source(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportSource> {
+    let created_at: i64 = row.get(4)?;
+    let updated_at: i64 = row.get(5)?;
+    Ok(ImportSource {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        account_id: row.get(2)?,
+        display_name: row.get(3)?,
+        created_at: DateTime::from_timestamp(created_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+        updated_at: DateTime::from_timestamp(updated_at, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+    })
+}
+
+
 // --- Filesystem watching -----------------------------------------------------
 //
 // `LibraryWatcher` previously lived in its own `watcher.rs` module within the
