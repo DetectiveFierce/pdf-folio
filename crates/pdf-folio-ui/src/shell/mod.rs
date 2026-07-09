@@ -8,7 +8,6 @@ pub(crate) mod constants;
 pub(crate) mod context_menu;
 pub(crate) mod icons;
 pub mod libraries;
-pub(crate) mod library_drag;
 pub mod messages;
 pub(crate) mod platform;
 pub(crate) mod session;
