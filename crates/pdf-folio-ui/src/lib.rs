@@ -29,7 +29,6 @@ mod components;
 mod library;
 mod shell;
 mod viewer;
-mod viewer_crate_state;
 pub mod views;
 
 use std::collections::{HashMap, HashSet};
