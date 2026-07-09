@@ -9,7 +9,6 @@ pub(crate) mod context_menu;
 pub(crate) mod icons;
 pub mod libraries;
 pub(crate) mod library_drag;
-pub(crate) mod library_view_state;
 pub mod messages;
 pub(crate) mod platform;
 pub(crate) mod session;

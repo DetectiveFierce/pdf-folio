@@ -1,4 +1,6 @@
-use super::*;
+pub(crate) use crate::components::library::state::*;
+
+use crate::*;
 
 impl PDFolioApp {
     pub(crate) fn visible_library_entry_window_at(
