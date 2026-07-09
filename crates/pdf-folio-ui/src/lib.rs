@@ -29,7 +29,6 @@ mod components;
 mod library;
 mod shell;
 mod viewer;
-pub mod views;
 
 use std::collections::{HashMap, HashSet};
 #[cfg(test)]
