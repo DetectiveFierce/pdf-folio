@@ -3,6 +3,9 @@
 use crate::components::shared::context_menu::{
     context_menu_capture_layer, view_context_menu_dropdown,
 };
+use crate::components::viewer::canvas::{
+    HistoryRestoreSpinner, ViewerCanvas, ViewerSelectionOverlay,
+};
 use crate::components::viewer::toolbar::{
     view_viewer_toolbar, view_zoom_menu_dropdown, viewer_floating_sidebar_toggle,
     zoom_menu_capture_layer,
@@ -16,7 +19,6 @@ use crate::library::view::{
     view_raindrop_import_progress_dialog, view_tag_manager_dialog,
 };
 use crate::shell::commands::{command_matches, library_commands, CommandDanger};
-use crate::viewer::canvas::{HistoryRestoreSpinner, ViewerCanvas, ViewerSelectionOverlay};
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{canvas, column, row, stack};

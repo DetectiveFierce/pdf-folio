@@ -12,9 +12,9 @@ use crate::components::library::view::{
     library_scrollable as component_library_scrollable,
     library_sort_picker as component_library_sort_picker, with_alpha,
 };
+use crate::components::viewer::canvas::HistoryRestoreSpinner;
 use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
 use crate::shell::view::dismissible_error_banner;
-use crate::viewer::canvas::HistoryRestoreSpinner;
 use crate::*;
 use chrono::{DateTime, Local};
 use iced::widget::{canvas, column, row, stack, Svg};

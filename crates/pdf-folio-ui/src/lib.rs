@@ -141,7 +141,7 @@ use crate::style::{
     UI_FONT_FAMILY,
 };
 use crate::theme::AppTheme;
-use crate::viewer::canvas::ZoomRenderPolicy;
+use crate::viewer::rendering::ZoomRenderPolicy;
 use crate::viewer::rendering::{
     width_from_percent_input, zoom_percent_label, ZoomPreset, MAX_ZOOM_WIDTH, MIN_ZOOM_WIDTH,
     ZOOM_INPUT_ID,

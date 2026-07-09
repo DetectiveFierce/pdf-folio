@@ -30,12 +30,6 @@ pub(crate) struct HistoryRestoreSpinner {
     pub(crate) color: Color,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ZoomRenderPolicy {
-    Immediate,
-    Debounced,
-}
-
 impl canvas::Program<Message> for ViewerCanvas<'_> {
     type State = ViewerCanvasState;
 

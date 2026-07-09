@@ -199,3 +199,9 @@ fn available_page_width(app: &PDFolioApp) -> f32 {
 fn available_page_height(app: &PDFolioApp) -> f32 {
     (app.viewer.viewer_viewport_height - Spacing::PAGE_GUTTER * 2.0).max(f32::from(MIN_ZOOM_WIDTH))
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ZoomRenderPolicy {
+    Immediate,
+    Debounced,
+}

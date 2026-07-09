@@ -1,3 +1,4 @@
+pub(crate) mod canvas;
 pub(crate) mod outline;
 pub(crate) mod page_controls;
 pub(crate) mod sidebar;
