@@ -1,5 +1,5 @@
 use crate::style::menu_style_for_class;
-use crate::viewer::zoom::{zoom_percent, zoom_percent_label, ZoomPreset, ZOOM_INPUT_ID};
+use crate::viewer::rendering::{zoom_percent, zoom_percent_label, ZoomPreset, ZOOM_INPUT_ID};
 use crate::*;
 use iced::widget::text::Wrapping;
 use iced::widget::{button, column, row, Svg};

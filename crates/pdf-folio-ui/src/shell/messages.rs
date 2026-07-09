@@ -18,8 +18,8 @@ use crate::library::state::{LibraryMetadataDensity, LibraryReadingFilter};
 use crate::library::thumbnails::ThumbnailSize;
 use crate::shell::commands::CommandId;
 use crate::style::StyleBook;
+use crate::viewer::rendering::ZoomPreset;
 use crate::viewer::state::{ViewerScrollMode, ViewerSpreadMode};
-use crate::viewer::zoom::ZoomPreset;
 use crate::{
     ExportConflictBehavior, ExportFilenameTemplate, ExportMode, ExportSource, LibraryExportSummary,
     Settings,

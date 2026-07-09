@@ -1,4 +1,4 @@
-//! Viewer zoom control, presets, and page-relative zoom math.
+//! Viewer zoom presets and page-relative rendering math.
 
 use std::fmt;
 
