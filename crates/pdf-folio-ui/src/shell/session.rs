@@ -7,7 +7,7 @@ use directories::ProjectDirs;
 use iced::Task;
 use pdf_folio_db::{EntryId, FolderId, LibrarySortMode};
 
-use super::*;
+use crate::*;
 
 const SESSION_SCHEMA_VERSION: u16 = 1;
 

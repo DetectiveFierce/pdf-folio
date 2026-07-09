@@ -195,14 +195,20 @@ pub enum Message {
         /// Whether this registry sync should catch up every known library afterward.
         sync_all_after: bool,
         /// Updated registry after merging remote library profiles.
-        result: Result<(crate::shell::libraries::LibraryRegistryRuntime, Vec<String>), String>,
+        result: Result<
+            (
+                crate::library::registry::LibraryRegistryRuntime,
+                Vec<String>,
+            ),
+            String,
+        >,
     },
     /// A library switcher preview was refreshed.
     LibraryPreviewRefreshed {
         /// Library whose preview was loaded.
         library_id: String,
         /// New preview payload.
-        preview: crate::shell::libraries::LibraryPreview,
+        preview: crate::library::registry::LibraryPreview,
     },
     /// The native file picker was dismissed without choosing a file.
     FileDialogCanceled,
@@ -405,7 +411,7 @@ pub enum Message {
     /// Create a new discrete library.
     CreateLibrary,
     /// A library registry mutation finished.
-    LibraryRegistryUpdated(crate::shell::libraries::LibraryRegistryRuntime),
+    LibraryRegistryUpdated(crate::library::registry::LibraryRegistryRuntime),
     /// Existing-library rename input changed.
     LibraryRenameInputChanged { library_id: String, value: String },
     /// Rename an existing discrete library.

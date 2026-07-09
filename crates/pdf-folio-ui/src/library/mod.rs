@@ -4,6 +4,7 @@ pub(crate) use crate::components::library::{drag, filters, metadata, selection};
 pub(crate) mod actions;
 pub(crate) mod data;
 pub(crate) mod layout;
+pub mod registry;
 pub(crate) mod state;
 pub(crate) mod tasks;
 pub(crate) mod thumbnails;

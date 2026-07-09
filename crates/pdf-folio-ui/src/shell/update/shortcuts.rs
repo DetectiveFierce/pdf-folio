@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 
 pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<Message> {
     if app.chrome.command_palette_open {

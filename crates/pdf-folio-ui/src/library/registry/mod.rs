@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 use anyhow::Context;
 use directories::ProjectDirs;
 use pdf_folio_cloud::sync::SyncLibraryRow;

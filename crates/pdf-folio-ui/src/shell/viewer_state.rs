@@ -1,5 +1,5 @@
-use super::*;
 use crate::viewer::layout::*;
+use crate::*;
 
 impl PDFolioApp {
     pub(crate) fn layout(&self) -> &crate::style::AppLayoutTokens {

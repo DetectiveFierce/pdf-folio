@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 
 /// Primary app mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

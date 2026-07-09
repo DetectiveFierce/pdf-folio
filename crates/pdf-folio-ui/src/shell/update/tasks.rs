@@ -1,8 +1,8 @@
-use super::*;
-use crate::shell::libraries::{
+use crate::library::registry::{
     load_library_preview, sync_library_registry_profiles, sync_library_rows_for_registry,
     LibraryProfile,
 };
+use crate::*;
 use anyhow::Context;
 use directories::ProjectDirs;
 use iced::futures::SinkExt;

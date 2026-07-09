@@ -1,5 +1,5 @@
-use super::*;
 use crate::library::drag::folder_drop_target_ready;
+use crate::*;
 
 fn test_db(label: &str) -> Db {
     let nanos = SystemTime::now()

@@ -159,7 +159,7 @@ use crate::viewer::zoom::{
 use notify::EventKind;
 
 use crate::components::library::view::with_alpha;
-use shell::libraries::{
+use library::registry::{
     load_library_registry, LibraryNameDialog, LibraryProfile, LibraryRegistryRuntime,
 };
 use shell::session::{load_app_session, save_app_session, AppSession};

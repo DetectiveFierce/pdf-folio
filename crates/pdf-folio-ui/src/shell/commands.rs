@@ -1,6 +1,6 @@
 //! Shared command registry for library-facing actions.
 
-use super::*;
+use crate::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandId {

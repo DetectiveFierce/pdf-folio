@@ -245,7 +245,7 @@ fn new_library_card(
 
 fn library_preview_panel<'a>(
     layout: &crate::style::AppLayoutTokens,
-    preview: Option<&'a crate::shell::libraries::LibraryPreview>,
+    preview: Option<&'a crate::library::registry::LibraryPreview>,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     let Some(preview) = preview else {
@@ -334,7 +334,7 @@ fn library_empty_preview_panel(
 
 fn library_preview_pdf_tile<'a>(
     layout: &crate::style::AppLayoutTokens,
-    thumbnail: &'a crate::shell::libraries::LibraryPreviewThumbnail,
+    thumbnail: &'a crate::library::registry::LibraryPreviewThumbnail,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
     let tile_width = layout.metric("LibrarySwitcherPreview", "tile_width", 48.0);

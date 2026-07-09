@@ -1,7 +1,7 @@
-use super::*;
-use crate::shell::libraries::{
+use crate::library::registry::{
     create_library_profile, delete_library_profile, rename_library_profile,
 };
+use crate::*;
 
 mod shortcuts;
 mod tasks;

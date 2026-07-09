@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::*;
+use crate::*;
 use anyhow::Context;
 #[cfg(not(test))]
 use pdf_folio_cloud::sync::cached_session;
