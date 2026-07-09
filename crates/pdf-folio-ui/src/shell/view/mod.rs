@@ -1,5 +1,8 @@
 //! App shell and viewer-surface rendering.
 
+use crate::components::shared::context_menu::{
+    context_menu_capture_layer, view_context_menu_dropdown,
+};
 use crate::library::view::{
     chevron_button, floating_folder_drag_preview, floating_library_drag_preview,
     view_confirmation_dialog, view_create_folder_dialog, view_export_dialog,
@@ -8,7 +11,6 @@ use crate::library::view::{
     view_raindrop_import_progress_dialog, view_tag_manager_dialog,
 };
 use crate::shell::commands::{command_matches, library_commands, CommandDanger};
-use crate::shell::context_menu::{context_menu_capture_layer, view_context_menu_dropdown};
 use crate::viewer::canvas::{HistoryRestoreSpinner, ViewerCanvas, ViewerSelectionOverlay};
 use crate::viewer::outline::{view_jump_dialog, view_sidebar};
 use crate::viewer::zoom::{zoom_control, zoom_menu};

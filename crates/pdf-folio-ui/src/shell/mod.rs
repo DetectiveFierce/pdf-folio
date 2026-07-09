@@ -5,8 +5,6 @@ use crate::*;
 pub mod app;
 pub(crate) mod commands;
 pub(crate) mod constants;
-pub(crate) mod context_menu;
-pub(crate) mod icons;
 pub mod messages;
 pub(crate) mod platform;
 pub(crate) mod session;

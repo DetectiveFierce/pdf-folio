@@ -116,8 +116,8 @@ use crate::library::view::{
     folder_cards_per_row, folder_cards_section_height, format_count, masonry_target_index,
     parent_directory_drop_box_height, scroll_library_to_offset_task, shortest_column_index,
 };
+pub(crate) use components::shared::icons::*;
 pub(crate) use shell::constants::*;
-pub(crate) use shell::icons::*;
 pub use shell::messages;
 #[cfg(test)]
 pub(crate) use viewer::layout::*;
