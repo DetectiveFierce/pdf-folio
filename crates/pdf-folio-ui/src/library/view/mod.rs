@@ -24,16 +24,14 @@ const SEARCH_CLEAR_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" wid
 const SYNC_CHECK_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"##;
 static LIBRARY_VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
-mod dialogs;
 mod entries;
 mod folders;
-mod inspector;
 mod sidebar;
 
-pub(crate) use dialogs::*;
+pub(crate) use crate::components::library::dialogs::*;
+pub(crate) use crate::components::library::inspector::*;
 pub(crate) use entries::*;
 pub(crate) use folders::*;
-pub(crate) use inspector::*;
 pub(crate) use sidebar::*;
 
 pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {

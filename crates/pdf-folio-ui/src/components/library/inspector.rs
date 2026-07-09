@@ -1,5 +1,6 @@
-use super::*;
-use iced::widget::column;
+use crate::library::view::*;
+use crate::*;
+use iced::widget::{column, row};
 
 pub(crate) fn library_inspector_visible(app: &PDFolioApp) -> bool {
     app.mode == AppMode::Library && app.library.library_inspector_open
