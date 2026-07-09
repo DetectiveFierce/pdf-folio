@@ -10,5 +10,4 @@ pub(crate) mod platform;
 pub(crate) mod session;
 pub(crate) mod shortcuts;
 pub(crate) mod subscriptions;
-pub(crate) mod sync_auth;
 pub(crate) mod update;

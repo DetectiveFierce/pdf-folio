@@ -161,7 +161,7 @@ use library::registry::{
     load_library_registry, LibraryNameDialog, LibraryProfile, LibraryRegistryRuntime,
 };
 use shell::session::{load_app_session, save_app_session, AppSession};
-use shell::sync_auth::{SyncAuthRuntime, SyncAuthState};
+use shell::session::{SyncAuthRuntime, SyncAuthState};
 use shell::update::{pending_raindrop_rollback_check_task, update};
 
 pub use shell::app::*;

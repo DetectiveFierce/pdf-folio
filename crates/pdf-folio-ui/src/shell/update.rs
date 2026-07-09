@@ -52,7 +52,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::SyncSignInRequested => {
             app.sync_auth.state = SyncAuthState::SigningIn;
             app.sync_auth.error = None;
-            return super::sync_auth::sync_sign_in_task(
+            return super::session::sync_sign_in_task(
                 app.sync_auth.expected_email.clone(),
                 app.sync_auth.server_base_url.clone(),
             );
