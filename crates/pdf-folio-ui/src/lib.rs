@@ -144,8 +144,7 @@ use crate::style::{
 use crate::theme::AppTheme;
 use crate::viewer::canvas::ZoomRenderPolicy;
 use crate::viewer::state::{
-    RenderedPageView, ViewerFindMatch, ViewerFindState, ViewerScrollMode, ViewerSpreadMode,
-    ViewerTextAnchor, ViewerTextSelection,
+    RenderedPageView, ViewerFindState, ViewerScrollMode, ViewerSpreadMode, ViewerTextSelection,
 };
 use crate::viewer::tasks::{
     open_document_task, open_library_document_task, render_page, schedule_zoom_render,
