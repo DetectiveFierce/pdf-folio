@@ -123,7 +123,7 @@ pub use shell::messages;
 pub(crate) use viewer::layout::*;
 
 use crate::shell::messages::{
-    ConfirmationAction, ContextMenuAction, ContextMenuTarget, LibrarySidebarTab, Message, Shortcut,
+    ConfirmationAction, ContextMenuAction, ContextMenuTarget, LibrarySidebarTab, Message,
     ViewerSidebarTab,
 };
 use crate::shell::platform::file_manager_commands;

@@ -1,10 +1,8 @@
 use crate::library::registry::{
     create_library_profile, delete_library_profile, rename_library_profile,
 };
+use crate::shell::{shortcuts, tasks};
 use crate::*;
-
-mod shortcuts;
-mod tasks;
 
 pub(crate) use tasks::pending_raindrop_rollback_check_task;
 use tasks::*;
