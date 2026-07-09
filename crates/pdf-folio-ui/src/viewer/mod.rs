@@ -3,7 +3,6 @@
 pub(crate) mod canvas;
 pub(crate) mod layout;
 pub(crate) mod navigation;
-pub(crate) mod outline;
 pub(crate) mod rendering;
 pub(crate) mod state;
 pub(crate) mod tasks;

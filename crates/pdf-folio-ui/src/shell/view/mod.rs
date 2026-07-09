@@ -7,6 +7,7 @@ use crate::components::viewer::toolbar::{
     view_viewer_toolbar, view_zoom_menu_dropdown, viewer_floating_sidebar_toggle,
     zoom_menu_capture_layer,
 };
+use crate::components::viewer::{page_controls::view_jump_dialog, sidebar::view_sidebar};
 use crate::library::view::{
     floating_folder_drag_preview, floating_library_drag_preview, view_confirmation_dialog,
     view_create_folder_dialog, view_export_dialog, view_import_menu_dialog,
@@ -16,7 +17,6 @@ use crate::library::view::{
 };
 use crate::shell::commands::{command_matches, library_commands, CommandDanger};
 use crate::viewer::canvas::{HistoryRestoreSpinner, ViewerCanvas, ViewerSelectionOverlay};
-use crate::viewer::outline::{view_jump_dialog, view_sidebar};
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{canvas, column, row, stack};

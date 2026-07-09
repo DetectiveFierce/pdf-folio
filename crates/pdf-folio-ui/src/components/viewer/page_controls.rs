@@ -108,3 +108,31 @@ fn class_text_color(
         .text_color
         .unwrap_or(fallback)
 }
+
+pub(crate) fn view_jump_dialog(app: &PDFolioApp) -> Element<'_, Message> {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let max_page = app.viewer.doc.as_ref().map_or(0, |doc| doc.page_count());
+    let dialog = row![
+        text("Go to page")
+            .size(FontSize::CONTROL)
+            .color(tokens.text_primary),
+        text_input("Page", &app.viewer.jump_input)
+            .on_input(Message::JumpInputChanged)
+            .on_submit(Message::SubmitJump)
+            .style(move |_, status| text_input_style(tokens, Class::ViewerFindInput, status))
+            .width(app.layout().jump_input_width),
+        text(format!("of {max_page}"))
+            .size(FontSize::MD)
+            .color(tokens.text_secondary),
+        toolbar_button("Go", tokens).on_press(Message::SubmitJump),
+        toolbar_button("Cancel", tokens).on_press(Message::CloseOverlay),
+    ]
+    .spacing(Spacing::MD)
+    .padding(Spacing::MD)
+    .align_y(iced::Alignment::Center);
+
+    container(dialog)
+        .width(Length::Fill)
+        .style(move |_| container_style(tokens, Class::JumpOverlay))
+        .into()
+}
