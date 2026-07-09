@@ -1,4 +1,4 @@
-use crate::components::library::view::{document_preview_lines, ghost_tags_row};
+use crate::components::library::cards::{document_preview_lines, ghost_tags_row};
 use crate::library::view::*;
 use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
 use crate::*;

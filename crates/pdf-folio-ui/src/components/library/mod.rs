@@ -1,3 +1,4 @@
+pub(crate) mod cards;
 pub(crate) mod dialogs;
 pub mod drag;
 pub mod filters;

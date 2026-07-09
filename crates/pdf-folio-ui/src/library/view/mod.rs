@@ -1,15 +1,16 @@
 //! Library view rendering.
 
-use crate::components::library::view::{
+use crate::components::library::cards::{
     document_preview_lines, flush_media_style, ghost_tags_row,
     library_drop_zone_card as component_library_drop_zone_card,
-    library_drop_zone_row as component_library_drop_zone_row,
+    library_drop_zone_row as component_library_drop_zone_row, tags_row as component_tags_row,
+};
+use crate::components::library::view::{
     library_grid_zoom_control as component_library_grid_zoom_control,
     library_layout_toggle_button as component_library_layout_toggle_button,
     library_metadata_density_picker as component_library_metadata_density_picker,
     library_scrollable as component_library_scrollable,
-    library_sort_picker as component_library_sort_picker, tags_row as component_tags_row,
-    with_alpha,
+    library_sort_picker as component_library_sort_picker, with_alpha,
 };
 use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
 use crate::shell::view::dismissible_error_banner;
