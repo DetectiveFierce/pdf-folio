@@ -1,0 +1,110 @@
+use crate::*;
+use iced::widget::{row, Svg};
+
+pub(crate) fn viewer_page_control<'a>(
+    app: &'a PDFolioApp,
+    current_page: u16,
+    page_count: u16,
+    tokens: ThemeTokens,
+) -> Element<'a, Message> {
+    let control_layout = tokens.class_styles[Class::ViewerPageControl.index()].layout;
+    let control_text = tokens.class_styles[Class::ViewerPageControl.index()].text;
+    let control_color = class_text_color(
+        tokens,
+        Class::ViewerPageControl,
+        ComponentState::Normal,
+        tokens.text_secondary,
+    );
+    let numerator: Element<'a, Message> = if app.viewer.page_input_editing {
+        text_input("", &app.viewer.jump_input)
+            .id(iced::widget::Id::new(PAGE_INPUT_ID))
+            .on_input(Message::JumpInputChanged)
+            .on_submit(Message::SubmitJump)
+            .padding([
+                control_layout.padding_y(Spacing::XS),
+                control_layout.padding_x(Spacing::SM),
+            ])
+            .size(control_text.size.unwrap_or(FontSize::MD))
+            .font(ui_font(control_text.weight.unwrap_or(FontWeight::MEDIUM)))
+            .width(Length::Fixed(app.layout().viewer_page_number_width))
+            .style(move |_, status| text_input_style(tokens, Class::ViewerFindInput, status))
+            .into()
+    } else {
+        mouse_area(
+            container(
+                text(current_page.to_string())
+                    .size(control_text.size.unwrap_or(FontSize::MD))
+                    .font(ui_font(control_text.weight.unwrap_or(FontWeight::MEDIUM)))
+                    .color(control_color)
+                    .wrapping(Wrapping::None),
+            )
+            .width(Length::Fixed(app.layout().viewer_page_number_width))
+            .height(Length::Fixed(app.layout().viewer_page_chevron_size))
+            .center(Length::Fill),
+        )
+        .on_double_click(Message::StartPageInputEdit)
+        .into()
+    };
+
+    row![
+        viewer_page_chevron_button(app.layout(), CHEVRON_LEFT_SVG, tokens)
+            .on_press(Message::PreviousPage)
+            .width(Length::Fixed(app.layout().viewer_page_chevron_size))
+            .height(Length::Fixed(app.layout().viewer_page_chevron_size)),
+        numerator,
+        text(format!("/ {page_count}"))
+            .size(control_text.size.unwrap_or(FontSize::MD))
+            .font(ui_font(control_text.weight.unwrap_or(FontWeight::MEDIUM)))
+            .color(control_color)
+            .wrapping(Wrapping::None),
+        viewer_page_chevron_button(app.layout(), CHEVRON_RIGHT_SVG, tokens)
+            .on_press(Message::NextPage)
+            .width(Length::Fixed(app.layout().viewer_page_chevron_size))
+            .height(Length::Fixed(app.layout().viewer_page_chevron_size)),
+    ]
+    .spacing(control_layout.spacing.unwrap_or(Spacing::XS))
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+fn viewer_page_chevron_button<'a>(
+    layout: &crate::style::AppLayoutTokens,
+    icon: &'static [u8],
+    tokens: ThemeTokens,
+) -> iced::widget::Button<'a, Message> {
+    let button_layout = tokens.class_styles[Class::ViewerToolbarButton.index()].layout;
+    let icon_color = class_text_color(
+        tokens,
+        Class::ViewerToolbarButton,
+        ComponentState::Normal,
+        tokens.text_secondary,
+    );
+    let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
+        .width(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
+        .height(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
+        .style(move |_, _| iced::widget::svg::Style {
+            color: Some(icon_color),
+        });
+
+    button(container(icon).center(Length::Fill))
+        .padding(
+            button_layout
+                .padding_x(0.0)
+                .min(button_layout.padding_y(0.0)),
+        )
+        .style(move |_, status| {
+            crate::style::button_style(tokens, Class::ViewerToolbarButton, status)
+        })
+}
+
+fn class_text_color(
+    tokens: ThemeTokens,
+    class: Class,
+    state: ComponentState,
+    fallback: Color,
+) -> Color {
+    tokens.class_styles[class.index()]
+        .resolve(state)
+        .text_color
+        .unwrap_or(fallback)
+}
