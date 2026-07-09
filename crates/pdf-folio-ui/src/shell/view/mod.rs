@@ -3,22 +3,25 @@
 use crate::components::shared::context_menu::{
     context_menu_capture_layer, view_context_menu_dropdown,
 };
+use crate::components::viewer::toolbar::{
+    view_viewer_toolbar, view_zoom_menu_dropdown, viewer_floating_sidebar_toggle,
+    zoom_menu_capture_layer,
+};
 use crate::library::view::{
-    chevron_button, floating_folder_drag_preview, floating_library_drag_preview,
-    view_confirmation_dialog, view_create_folder_dialog, view_export_dialog,
-    view_import_menu_dialog, view_import_review_dialog, view_library,
-    view_library_move_picker_dialog, view_raindrop_connect_dialog, view_raindrop_import_dialog,
+    floating_folder_drag_preview, floating_library_drag_preview, view_confirmation_dialog,
+    view_create_folder_dialog, view_export_dialog, view_import_menu_dialog,
+    view_import_review_dialog, view_library, view_library_move_picker_dialog,
+    view_raindrop_connect_dialog, view_raindrop_import_dialog,
     view_raindrop_import_progress_dialog, view_tag_manager_dialog,
 };
 use crate::shell::commands::{command_matches, library_commands, CommandDanger};
 use crate::viewer::canvas::{HistoryRestoreSpinner, ViewerCanvas, ViewerSelectionOverlay};
 use crate::viewer::outline::{view_jump_dialog, view_sidebar};
-use crate::viewer::zoom::{zoom_control, zoom_menu};
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{canvas, column, row, stack};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const OVERFLOW_HORIZONTAL_SVG: &[u8] =
     include_bytes!("../../../assets/icons/overflow-horizontal.svg");
@@ -26,13 +29,7 @@ const OVERFLOW_VERTICAL_SVG: &[u8] = include_bytes!("../../../assets/icons/overf
 static VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
 mod library_switcher;
-mod viewer_toolbar;
-
 use library_switcher::view_library_switcher;
-use viewer_toolbar::{
-    view_viewer_toolbar, view_zoom_menu_dropdown, viewer_floating_sidebar_toggle,
-    zoom_menu_capture_layer,
-};
 
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     let probe_started_at = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").map(|_| Instant::now());

@@ -1,6 +1,9 @@
-use super::*;
+use crate::library::view::chevron_button;
+use crate::viewer::zoom::{zoom_control, zoom_menu};
+use crate::*;
+use iced::widget::{pin, row, Svg};
 
-pub(super) fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
+pub(crate) fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
     let page_count = app.viewer.doc.as_ref().map_or(0, |doc| doc.page_count());
@@ -198,7 +201,7 @@ fn viewer_page_chevron_button<'a>(
         })
 }
 
-pub(super) fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Message> {
+pub(crate) fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Message> {
     pin(
         mouse_area(container("").width(Length::Fill).height(Length::Fill))
             .on_press(Message::CloseZoomMenu),
@@ -209,7 +212,7 @@ pub(super) fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Messa
     .into()
 }
 
-pub(super) fn view_zoom_menu_dropdown(
+pub(crate) fn view_zoom_menu_dropdown(
     app: &PDFolioApp,
     tokens: ThemeTokens,
 ) -> Element<'_, Message> {
@@ -351,7 +354,7 @@ fn viewer_zoom_menu_x(app: &PDFolioApp) -> f32 {
         .max(toolbar_layout.padding_left(Spacing::MD))
 }
 
-pub(super) fn viewer_floating_sidebar_toggle<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
+pub(crate) fn viewer_floating_sidebar_toggle<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
     chevron_button(
         CHEVRON_RIGHT_SVG,
         "Show Contents",
@@ -359,4 +362,16 @@ pub(super) fn viewer_floating_sidebar_toggle<'a>(tokens: ThemeTokens) -> Element
         tokens,
         true,
     )
+}
+
+fn class_text_color(
+    tokens: ThemeTokens,
+    class: Class,
+    state: ComponentState,
+    fallback: Color,
+) -> Color {
+    tokens.class_styles[class.index()]
+        .resolve(state)
+        .text_color
+        .unwrap_or(fallback)
 }
