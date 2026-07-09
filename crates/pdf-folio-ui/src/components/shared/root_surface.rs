@@ -3,16 +3,8 @@
 use crate::components::shared::context_menu::{
     context_menu_capture_layer, view_context_menu_dropdown,
 };
-use crate::components::viewer::canvas::{
-    HistoryRestoreSpinner, ViewerCanvas, ViewerSelectionOverlay,
-};
-use crate::components::viewer::toolbar::{
-    view_viewer_toolbar, view_zoom_menu_dropdown, viewer_floating_sidebar_toggle,
-    zoom_menu_capture_layer,
-};
-use crate::components::viewer::{
-    find_bar::viewer_find_anchor, page_controls::view_jump_dialog, sidebar::view_sidebar,
-};
+use crate::components::viewer::canvas::HistoryRestoreSpinner;
+use crate::components::viewer::toolbar::{view_zoom_menu_dropdown, zoom_menu_capture_layer};
 use crate::library::view::{
     floating_folder_drag_preview, floating_library_drag_preview, view_confirmation_dialog,
     view_create_folder_dialog, view_export_dialog, view_import_menu_dialog,
@@ -39,77 +31,7 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     } else if app.mode == AppMode::LibrarySwitcher {
         view_library_switcher(app, tokens)
     } else if app.mode == AppMode::Viewer && app.viewer.doc.is_some() {
-        let sidebar: Element<'_, Message> = if app.viewer.toc_open {
-            view_sidebar(app).into()
-        } else {
-            container("").width(Length::Shrink).into()
-        };
-
-        let content_size = app.viewer_content_size(app.viewer.viewer_viewport_width);
-        let viewer = canvas(ViewerCanvas { app })
-            .width(Length::Fixed(content_size.width))
-            .height(Length::Fixed(content_size.height));
-        let selection_overlay = canvas(ViewerSelectionOverlay { app })
-            .width(Length::Fixed(content_size.width))
-            .height(Length::Fixed(content_size.height));
-        let viewer_content = stack![viewer, selection_overlay]
-            .width(Length::Fixed(content_size.width))
-            .height(Length::Fixed(content_size.height));
-        let viewer_scroll = scrollable(viewer_content)
-            .id(Id::new(VIEWER_SCROLLABLE_ID))
-            .direction(Direction::Both {
-                vertical: Scrollbar::default(),
-                horizontal: Scrollbar::default(),
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_, status| scrollable_style(tokens, Class::ViewerCanvas, status))
-            .on_scroll(|viewport| {
-                let offset = viewport.absolute_offset();
-                let bounds = viewport.bounds();
-                Message::ViewportChanged {
-                    horizontal_offset: offset.x,
-                    scroll_offset: offset.y,
-                    width: bounds.width,
-                    height: bounds.height,
-                }
-            });
-        let mut viewer_stack = stack![viewer_scroll]
-            .width(Length::Fill)
-            .height(Length::Fill);
-        if !app.viewer.toc_open {
-            viewer_stack = viewer_stack.push(
-                pin(viewer_floating_sidebar_toggle(tokens))
-                    .x(Spacing::SM)
-                    .y(Spacing::SM),
-            );
-        }
-        if app.viewer.viewer_find.open {
-            let find_width = app
-                .layout()
-                .viewer_find_bar_width
-                .min((app.viewer.viewer_viewport_width - Spacing::MD * 2.0).max(320.0));
-            viewer_stack = viewer_stack.push(viewer_find_anchor(app, tokens, find_width));
-        }
-        let mut main = column![].spacing(0);
-        if let Some(error) = app.viewer.document_error.as_deref() {
-            main = main.push(dismissible_error_banner(
-                error,
-                tokens,
-                app.layout(),
-                Message::DismissDocumentError,
-            ));
-        }
-        if app.viewer.jump_dialog_open {
-            main = main.push(view_jump_dialog(app));
-        }
-        main = main.push(viewer_stack);
-
-        column![
-            view_viewer_toolbar(app),
-            row![sidebar, main.width(Length::Fill)].height(Length::Fill)
-        ]
-        .into()
+        crate::viewer::view::view_viewer(app, tokens)
     } else {
         let mut library_shell = column![];
         if let Some(error) = app.viewer.document_error.as_deref() {
