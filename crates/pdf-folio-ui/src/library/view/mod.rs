@@ -28,6 +28,7 @@ mod root;
 mod sidebar;
 
 pub(crate) use crate::components::library::dialogs::*;
+pub(crate) use crate::components::library::folder_tree::*;
 pub(crate) use crate::components::library::inspector::*;
 pub(crate) use entries::*;
 pub(crate) use folders::*;

@@ -2,6 +2,7 @@ pub(crate) mod cards;
 pub(crate) mod dialogs;
 pub mod drag;
 pub mod filters;
+pub(crate) mod folder_tree;
 pub(crate) mod inspector;
 pub mod metadata;
 pub mod selection;
