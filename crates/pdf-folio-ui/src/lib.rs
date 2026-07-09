@@ -307,7 +307,7 @@ fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
     )
 }
 
-fn with_session_save(task: Task<Message>, app: &PDFolioApp) -> Task<Message> {
+pub(crate) fn with_session_save(task: Task<Message>, app: &PDFolioApp) -> Task<Message> {
     Task::batch([task, save_app_session_task(app)])
 }
 

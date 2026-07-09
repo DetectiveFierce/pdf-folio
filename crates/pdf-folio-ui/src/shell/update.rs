@@ -8,6 +8,10 @@ pub(crate) use tasks::pending_raindrop_rollback_check_task;
 use tasks::*;
 
 pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
+    if let Some(task) = crate::viewer::update::update(app, &message) {
+        return task;
+    }
+
     match message {
         Message::StartupResponsivenessProbe {
             launch_started_at,
@@ -446,16 +450,6 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.library.library_status = Some(format!("Style reload failed: {error}"));
             }
         },
-        Message::ToggleSidebar | Message::ToggleTocPanel => {
-            app.viewer.toc_open = !app.viewer.toc_open;
-            app.viewer.viewer_viewport_width = app.estimated_viewer_viewport_width();
-            app.viewer.viewer_viewport_height = app.estimated_viewer_viewport_height();
-            return with_session_save(app.apply_active_dimension_zoom(), app);
-        }
-        Message::ViewerSidebarTabSelected(tab) => {
-            app.viewer.viewer_sidebar_tab = tab;
-            return with_session_save(app.request_viewer_thumbnail_pages(), app);
-        }
         Message::ToggleViewMode => {
             app.library.compact_view_mode = !app.library.compact_view_mode;
             return Task::batch([

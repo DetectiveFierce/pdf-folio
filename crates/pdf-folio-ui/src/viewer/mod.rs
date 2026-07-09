@@ -5,4 +5,5 @@ pub(crate) mod navigation;
 pub(crate) mod rendering;
 pub(crate) mod state;
 pub(crate) mod tasks;
+pub(crate) mod update;
 pub(crate) mod view;
