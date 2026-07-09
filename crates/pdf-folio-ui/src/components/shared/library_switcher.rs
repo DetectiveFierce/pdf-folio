@@ -1,7 +1,13 @@
-use super::*;
-use iced::widget::column;
+use crate::*;
+use iced::widget::image;
+use iced::widget::{button, column, row, stack, Svg};
+use iced::ContentFit;
 
-pub(super) fn view_library_switcher(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
+const OVERFLOW_HORIZONTAL_SVG: &[u8] =
+    include_bytes!("../../../assets/icons/overflow-horizontal.svg");
+const OVERFLOW_VERTICAL_SVG: &[u8] = include_bytes!("../../../assets/icons/overflow-vertical.svg");
+
+pub(crate) fn view_library_switcher(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let card_width = app.layout().metric("LibrarySwitcher", "card_width", 230.0);
     let card_height = app.layout().metric("LibrarySwitcher", "card_height", 362.0);
     let mut cards = Vec::new();
@@ -578,4 +584,16 @@ fn library_card_menu_row<'a>(
             })
             .into()
     }
+}
+
+fn class_text_color(
+    tokens: ThemeTokens,
+    class: Class,
+    state: ComponentState,
+    fallback: Color,
+) -> Color {
+    tokens.class_styles[class.index()]
+        .resolve(state)
+        .text_color
+        .unwrap_or(fallback)
 }

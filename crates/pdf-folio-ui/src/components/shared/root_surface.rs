@@ -25,13 +25,9 @@ use iced::widget::{canvas, column, row, stack};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-const OVERFLOW_HORIZONTAL_SVG: &[u8] =
-    include_bytes!("../../../assets/icons/overflow-horizontal.svg");
-const OVERFLOW_VERTICAL_SVG: &[u8] = include_bytes!("../../../assets/icons/overflow-vertical.svg");
 static VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
-mod library_switcher;
-use library_switcher::view_library_switcher;
+use crate::components::shared::library_switcher::view_library_switcher;
 
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     let probe_started_at = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").map(|_| Instant::now());
@@ -764,16 +760,4 @@ pub(crate) fn dismissible_error_banner<'a>(
     .width(Length::Fill)
     .style(move |_| container_style(tokens, Class::ErrorBanner))
     .into()
-}
-
-fn class_text_color(
-    tokens: ThemeTokens,
-    class: Class,
-    state: ComponentState,
-    fallback: iced::Color,
-) -> iced::Color {
-    tokens.class_styles[class.index()]
-        .resolve(state)
-        .text_color
-        .unwrap_or(fallback)
 }

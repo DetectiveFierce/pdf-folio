@@ -156,13 +156,13 @@ use crate::viewer::tasks::{
 use notify::EventKind;
 
 use crate::components::library::view::with_alpha;
+use components::shared::root_surface::view;
 use library::registry::{
     load_library_registry, LibraryNameDialog, LibraryProfile, LibraryRegistryRuntime,
 };
 use shell::session::{load_app_session, save_app_session, AppSession};
 use shell::sync_auth::{SyncAuthRuntime, SyncAuthState};
 use shell::update::{pending_raindrop_rollback_check_task, update};
-use shell::view::view;
 
 pub use shell::app::*;
 
