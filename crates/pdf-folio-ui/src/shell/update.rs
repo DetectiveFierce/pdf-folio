@@ -1228,7 +1228,9 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 client_secret,
             };
             return Task::perform(
-                async move { pdf_folio_cloud::raindrop::import_preview_with_auth(Some(oauth_config)).await },
+                async move {
+                    pdf_folio_cloud::raindrop::import_preview_with_auth(Some(oauth_config)).await
+                },
                 |result| match result {
                     Ok(preview) => Message::RaindropImportPreviewLoaded(preview),
                     Err(error) => Message::LibraryError(error.to_string()),

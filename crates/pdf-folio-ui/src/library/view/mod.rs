@@ -1,11 +1,5 @@
 //! Library view rendering.
 
-use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
-use crate::shell::view::dismissible_error_banner;
-use crate::viewer::canvas::HistoryRestoreSpinner;
-use crate::*;
-use chrono::{DateTime, Local};
-use iced::widget::{canvas, column, row, stack, Svg};
 use crate::components::library::view::{
     document_preview_lines, flush_media_style, ghost_tags_row,
     library_drop_zone_card as component_library_drop_zone_card,
@@ -17,6 +11,12 @@ use crate::components::library::view::{
     library_sort_picker as component_library_sort_picker, tags_row as component_tags_row,
     with_alpha,
 };
+use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
+use crate::shell::view::dismissible_error_banner;
+use crate::viewer::canvas::HistoryRestoreSpinner;
+use crate::*;
+use chrono::{DateTime, Local};
+use iced::widget::{canvas, column, row, stack, Svg};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 

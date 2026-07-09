@@ -216,9 +216,10 @@ fn registry_live_sync_stream(
         let client = pdf_folio_cloud::sync::SyncClient::new(session);
         loop {
             tokio::time::sleep(LIVE_SYNC_INTERVAL).await;
-            let Ok(cursor) =
-                db.sync_crdt_remote_cursor(pdf_folio_cloud::sync::REGISTRY_LIBRARY_ID, &watch.device_id)
-            else {
+            let Ok(cursor) = db.sync_crdt_remote_cursor(
+                pdf_folio_cloud::sync::REGISTRY_LIBRARY_ID,
+                &watch.device_id,
+            ) else {
                 continue;
             };
             let Ok(remote_sequence) = client

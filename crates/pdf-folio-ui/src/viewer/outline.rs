@@ -146,11 +146,9 @@ fn thumbnail_button(app: &PDFolioApp, page: u16, tokens: ThemeTokens) -> Element
         .style(move |_| container_style(tokens, Class::ViewerPagePlaceholder))
         .into()
     } else {
-        container(
-            crate::components::library::view::document_preview_lines(
-                width, height, tokens, 0.82,
-            ),
-        )
+        container(crate::components::library::view::document_preview_lines(
+            width, height, tokens, 0.82,
+        ))
         .width(Length::Fixed(width))
         .height(Length::Fixed(height))
         .style(move |_| container_style(tokens, Class::ViewerPagePlaceholder))

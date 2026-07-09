@@ -25,9 +25,9 @@
 pub use pdf_folio_style as style;
 pub use pdf_folio_style::theme;
 
-mod shell;
 mod components;
 mod library;
+mod shell;
 mod viewer;
 mod viewer_crate_state;
 pub mod views;
@@ -49,16 +49,16 @@ use iced::{animation, font, keyboard, Animation, Color, ContentFit, Element, Fon
 use iced::{clipboard, mouse};
 use iced::{Rectangle, Size};
 use iced::{Task, Theme};
+use pdf_folio_cloud::raindrop::{
+    RaindropImportDestination, RaindropImportPhase, RaindropImportPreview, RaindropImportProgress,
+    RaindropPdfCandidate,
+};
 use pdf_folio_core::{Annotation, OutlineNode, PageTextLayer, PdfDoc, TileCache, TileKey};
 #[cfg(test)]
 use pdf_folio_db::NewLibraryEntry;
 use pdf_folio_db::{
     Db, EntryId, Folder, FolderId, ImportedEntry, LibraryEntry, LibraryLayoutMode,
     LibraryOrganizationSnapshot, LibraryPreferences, LibrarySortMode, LibraryWatchEvent,
-};
-use pdf_folio_cloud::raindrop::{
-    RaindropImportDestination, RaindropImportPhase, RaindropImportPreview, RaindropImportProgress,
-    RaindropPdfCandidate,
 };
 
 use crate::library::drag::{
@@ -158,6 +158,7 @@ use crate::viewer::zoom::{
 #[cfg(test)]
 use notify::EventKind;
 
+use crate::components::library::view::with_alpha;
 use shell::libraries::{
     load_library_registry, LibraryNameDialog, LibraryProfile, LibraryRegistryRuntime,
 };
@@ -165,7 +166,6 @@ use shell::session::{load_app_session, save_app_session, AppSession};
 use shell::sync_auth::{SyncAuthRuntime, SyncAuthState};
 use shell::update::{pending_raindrop_rollback_check_task, update};
 use shell::view::view;
-use crate::components::library::view::with_alpha;
 
 pub use shell::app::*;
 

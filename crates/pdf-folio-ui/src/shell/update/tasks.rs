@@ -425,8 +425,8 @@ pub(crate) fn sync_library_registry_task(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let session =
-                pdf_folio_cloud::sync::cached_session().context("No cached sync session is available.")?;
+            let session = pdf_folio_cloud::sync::cached_session()
+                .context("No cached sync session is available.")?;
             let client = pdf_folio_cloud::sync::SyncClient::new(session);
             client.ensure_remote_schema().await?;
             let db = Db::open(&db_path)?;
@@ -491,8 +491,8 @@ pub(crate) fn auto_sync_task(library: LibraryProfile) -> Task<Message> {
     let library_id = library.id.clone();
     Task::perform(
         async move {
-            let session =
-                pdf_folio_cloud::sync::cached_session().context("No cached sync session is available.")?;
+            let session = pdf_folio_cloud::sync::cached_session()
+                .context("No cached sync session is available.")?;
             let client = pdf_folio_cloud::sync::SyncClient::new(session);
             client.ensure_remote_schema().await?;
             let cache = pdf_folio_cloud::sync::BlobCache::open_default()?;

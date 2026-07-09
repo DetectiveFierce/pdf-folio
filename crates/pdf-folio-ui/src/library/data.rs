@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 
 impl PDFolioApp {
     pub(crate) fn all_tags(&self) -> Vec<String> {

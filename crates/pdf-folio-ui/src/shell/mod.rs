@@ -2,18 +2,13 @@
 
 use crate::*;
 
-pub(crate) mod commands;
 pub mod app;
+pub(crate) mod commands;
 pub(crate) mod constants;
 pub(crate) mod context_menu;
 pub(crate) mod icons;
 pub mod libraries;
-pub(crate) mod library_clipboard;
-pub(crate) mod library_data;
 pub(crate) mod library_drag;
-pub(crate) mod library_folders;
-pub(crate) mod library_layout;
-pub(crate) mod library_selection;
 pub(crate) mod library_view_state;
 pub mod messages;
 pub(crate) mod platform;
