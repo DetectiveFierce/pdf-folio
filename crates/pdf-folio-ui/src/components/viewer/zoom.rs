@@ -2,14 +2,13 @@
 //!
 //! Zoom percentage control and preset menu used by the viewer toolbar.
 
+use crate::components::shared::icons::CHEVRON_DOWN_SVG;
 use crate::style::menu_style_for_class;
 use crate::viewer::rendering::{zoom_percent, zoom_percent_label, ZoomPreset, ZOOM_INPUT_ID};
 use crate::*;
 use iced::widget::text::Wrapping;
 use iced::widget::{button, column, row, Svg};
 use iced::{alignment, Alignment};
-
-const CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"##;
 
 /// Compact zoom readout and buttons for the viewer toolbar.
 pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element<'a, Message> {

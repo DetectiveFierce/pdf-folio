@@ -31,14 +31,14 @@ pub use pdf::{
 // Re-export the database public surface at the crate root so callers can reach
 // it as `pdf_folio_core::{Db, EntryId, ...}` after the crate consolidation.
 pub use db::import::{
-    hash_file, import_folder, import_pdf, scan_pdf_files, thumbnail_cache_dir, thumbnail_path,
-    ImportSummary, ImportedEntry, LibraryWatchEvent, LibraryWatcher,
+    clean_import_title, hash_file, import_folder, import_pdf, scan_pdf_files, thumbnail_path,
+    title_from_path, ImportSummary, ImportedEntry, LibraryWatchEvent, LibraryWatcher,
 };
 pub use db::search::{IndexDocument, SearchHit, SearchIndex};
 pub use db::{
     Db, EntryFolderMembership, EntryId, EntryTrashState, Folder, FolderId, ImportSource,
     LibraryEntry, LibraryFolderSnapshot, LibraryLayoutMode, LibraryOrganizationSnapshot,
-    LibraryPreferences, LibrarySortMode, NewLibraryEntry, RaindropCollectionMapping,
-    RaindropEntryMapping, SyncCrdtOperation, SyncCrdtPrepareSummary, SyncEntryFolderRow,
-    SyncEntryRow, SyncFolderRow, SyncSeedSummary,
+    LibraryPreferences, LibrarySortMode, NewLibraryEntry, RaindropEntryMapping,
+    SyncCrdtOperation, SyncCrdtPrepareSummary, SyncEntryFolderRow, SyncEntryRow, SyncFolderRow,
+    SyncSeedSummary,
 };

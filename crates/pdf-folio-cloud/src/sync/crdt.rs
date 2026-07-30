@@ -62,10 +62,13 @@ const ENTITY_LIBRARY: &str = "library";
 impl SyncClient {
     /// Returns a lightweight push plan from local sync tracking tables.
     ///
+    /// Local-only: does not contact the remote and does not require a signed-in
+    /// session. Call as [`SyncClient::plan_push`] without constructing a client.
+    ///
     /// # Errors
     ///
     /// Returns an error when local sync metadata cannot be queried.
-    pub fn plan_push(&self, db: &Db, library_id: &str, device_id: &str) -> Result<SyncPlan> {
+    pub fn plan_push(db: &Db, library_id: &str, device_id: &str) -> Result<SyncPlan> {
         let checkpoint = db.sync_checkpoint(library_id, device_id)?;
         let since = checkpoint.unwrap_or(0);
         Ok(SyncPlan {

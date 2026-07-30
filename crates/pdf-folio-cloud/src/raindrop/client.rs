@@ -255,8 +255,7 @@ impl RaindropClient {
         progress(ZIP_DOWNLOADED_PROGRESS_BASIS_POINTS);
         if !bytes.starts_with(b"PK") {
             let preview = String::from_utf8_lossy(&bytes[..bytes.len().min(160)])
-                .replace('\n', " ")
-                .replace('\r', " ");
+                .replace(['\n', '\r'], " ");
             bail!("Raindrop export response was not a ZIP archive. Response preview: {preview}");
         }
         Ok(bytes)
@@ -464,8 +463,7 @@ pub(crate) fn ensure_pdf_response(link: &str, bytes: &[u8]) -> Result<()> {
     }
 
     let preview = String::from_utf8_lossy(&bytes[..bytes.len().min(160)])
-        .replace('\n', " ")
-        .replace('\r', " ");
+        .replace(['\n', '\r'], " ");
     bail!("Downloaded content from {link} was not a PDF. Response preview: {preview}");
 }
 
@@ -605,7 +603,7 @@ impl Raindrop {
                 || file
                     .link
                     .as_deref()
-                    .is_some_and(|link| download_requires_raindrop_auth(link))
+                    .is_some_and(download_requires_raindrop_auth)
         })
     }
 

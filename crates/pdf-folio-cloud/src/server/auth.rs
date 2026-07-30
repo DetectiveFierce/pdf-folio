@@ -55,7 +55,7 @@ pub(crate) async fn exchange_google_code(
     if let Some(secret) = &state.config.google_client_secret {
         form.push(("client_secret", secret.clone()));
     }
-    Ok(state
+    state
         .http
         .post(&state.config.google_token_uri)
         .form(&form)
@@ -66,7 +66,7 @@ pub(crate) async fn exchange_google_code(
         .context("Google rejected the authorization code.")?
         .json::<GoogleTokenResponse>()
         .await
-        .context("Google token response was not JSON.")?)
+        .context("Google token response was not JSON.")
 }
 
 /// Fetches OpenID userinfo (`sub`, optional email) for a Google access token.
@@ -78,7 +78,7 @@ pub(crate) async fn google_userinfo(
     state: &AppState,
     access_token: &str,
 ) -> Result<GoogleUserInfo> {
-    Ok(state
+    state
         .http
         .get(GOOGLE_USERINFO_URI)
         .header(AUTHORIZATION, format!("Bearer {access_token}"))
@@ -89,7 +89,7 @@ pub(crate) async fn google_userinfo(
         .context("Google userinfo rejected the access token.")?
         .json::<GoogleUserInfo>()
         .await
-        .context("Google userinfo response was not JSON.")?)
+        .context("Google userinfo response was not JSON.")
 }
 
 /// Ensures the Google account is on the server allow-list (sub and/or email).

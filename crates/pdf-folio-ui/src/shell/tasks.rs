@@ -26,8 +26,8 @@ use anyhow::Context;
 /// Syncs the multi-library registry with the remote CRDT log.
 ///
 /// When `push_local` is true, local profiles are uploaded before merge. On
-//! completion emits [`Message::LibraryRegistrySyncFinished`]; if
-//! `sync_all_after` is set, shell update then queues per-library auto-sync.
+/// completion emits [`Message::LibraryRegistrySyncFinished`]; if
+/// `sync_all_after` is set, shell update then queues per-library auto-sync.
 pub(crate) fn sync_library_registry_task(
     registry: LibraryRegistryRuntime,
     db_path: PathBuf,
@@ -41,9 +41,7 @@ pub(crate) fn sync_library_registry_task(
             let client = pdf_folio_cloud::sync::SyncClient::new(session);
             client.ensure_remote_schema().await?;
             let db = Db::open(&db_path)?;
-            let rows = push_local
-                .then(|| sync_library_rows_for_registry(&registry))
-                .unwrap_or_default();
+            let rows = if push_local { sync_library_rows_for_registry(&registry) } else { Default::default() };
             let remote_libraries = client
                 .sync_library_registry(&db, &rows, &default_sync_device_id())
                 .await?;

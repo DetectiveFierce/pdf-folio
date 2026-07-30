@@ -181,7 +181,7 @@ fn thumbnail_variant_path(entry_id: &EntryId, size: ThumbnailSize) -> anyhow::Re
 
 fn thumbnail_height_from_rgba_len(len: usize, width: u16) -> Option<u16> {
     let stride = usize::from(width) * 4;
-    if stride == 0 || len < stride || len % stride != 0 {
+    if stride == 0 || len < stride || !len.is_multiple_of(stride) {
         return None;
     }
     let height = len / stride;

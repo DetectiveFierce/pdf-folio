@@ -234,7 +234,7 @@ impl PDFolioApp {
             &self.library.library_entries
         };
         let entries = entries.iter().filter(|entry| {
-            folder_ids.as_ref().map_or(true, |folder_ids| {
+            folder_ids.as_ref().is_none_or(|folder_ids| {
                 entry
                     .folders
                     .iter()
@@ -1226,10 +1226,7 @@ impl PDFolioApp {
         let column_step = (card_width + self.library_grid_column_gap()).max(1.0);
         if !drag.multi {
             let original_layout = self.library_masonry_layout(entries);
-            let Some(entry_index) = entries.iter().position(|entry| entry.id == drag.entry_id)
-            else {
-                return None;
-            };
+            let entry_index = entries.iter().position(|entry| entry.id == drag.entry_id)?;
             for (column_index, column_items) in original_layout.columns.iter().enumerate() {
                 let x = column_index as f32 * column_step;
                 for item in column_items {

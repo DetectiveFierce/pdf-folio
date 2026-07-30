@@ -107,7 +107,7 @@ pub fn import_pdf(db: &Db, path: &Path) -> Result<ImportedEntry> {
     })
 }
 
-fn file_size(path: &Path) -> Option<u64> {
+pub(crate) fn file_size(path: &Path) -> Option<u64> {
     std::fs::metadata(path).ok().map(|metadata| metadata.len())
 }
 
@@ -116,7 +116,7 @@ fn file_size(path: &Path) -> Option<u64> {
 /// # Errors
 ///
 /// Returns an error when an XDG cache directory cannot be resolved or created.
-pub fn thumbnail_cache_dir() -> Result<PathBuf> {
+pub(crate) fn thumbnail_cache_dir() -> Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "pdf-folio", "PDF-Folio")
         .context("Could not find a cache directory for PDF-Folio.")?;
     let dir = project_dirs.cache_dir().join("thumbs");
@@ -185,13 +185,15 @@ fn is_pdf_path(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
-fn title_from_path(path: &Path) -> Option<String> {
+/// Derives a display title from a PDF path stem, or `None` for empty/untitled.
+pub fn title_from_path(path: &Path) -> Option<String> {
     path.file_stem()
         .and_then(|stem| stem.to_str())
         .and_then(clean_import_title)
 }
 
-fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
+/// Collapses whitespace and rejects empty or `"untitled"` titles (max 512 chars).
+pub fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
     let title = value
         .as_ref()
         .split_whitespace()

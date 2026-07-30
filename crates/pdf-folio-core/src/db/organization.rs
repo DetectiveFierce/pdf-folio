@@ -573,8 +573,7 @@ impl Db {
             .map(|entry| entry.entry_id.as_str())
             .collect::<Vec<_>>();
         if !snapshot_entry_ids.is_empty() {
-            let placeholders = std::iter::repeat("?")
-                .take(snapshot_entry_ids.len())
+            let placeholders = std::iter::repeat_n("?", snapshot_entry_ids.len())
                 .collect::<Vec<_>>()
                 .join(", ");
             transaction.execute(

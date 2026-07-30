@@ -92,21 +92,6 @@ pub struct ImportSource {
     pub updated_at: DateTime<Utc>,
 }
 
-/// A Raindrop.io collection mirrored into a local PDF-Folio folder.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RaindropCollectionMapping {
-    /// PDF-Folio import source id.
-    pub source_id: String,
-    /// Raindrop collection id.
-    pub collection_id: i64,
-    /// Local folder id.
-    pub folder_id: FolderId,
-    /// Parent Raindrop collection id.
-    pub parent_collection_id: Option<i64>,
-    /// Most recent remote collection title seen by PDF-Folio.
-    pub title: String,
-}
-
 /// A Raindrop.io item imported into a local PDF-Folio entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RaindropEntryMapping {
@@ -557,14 +542,14 @@ impl LibraryOrganizationSnapshot {
             snapshot
                 .entry_trash_states
                 .iter()
-                .map(|entry| (entry.entry_id.as_str().to_owned(), entry.trashed_at.clone()))
+                .map(|entry| (entry.entry_id.as_str().to_owned(), entry.trashed_at))
                 .collect::<std::collections::HashMap<_, _>>()
         };
         let folder_trash = |snapshot: &Self| {
             snapshot
                 .folders
                 .iter()
-                .map(|folder| (folder.id.as_str().to_owned(), folder.trashed_at.clone()))
+                .map(|folder| (folder.id.as_str().to_owned(), folder.trashed_at))
                 .collect::<std::collections::HashMap<_, _>>()
         };
 

@@ -12,7 +12,7 @@
 //!
 //! # See also
 //!
-//! - [`crate::RaindropCollectionMapping`], [`crate::RaindropEntryMapping`].
+//! - [`crate::RaindropEntryMapping`] for entry provenance rows.
 //! - [`crate::Db::upsert_import_source`] for the parent import-source row.
 //! - [`super::organization`] for general folder APIs used after mapping.
 

@@ -419,6 +419,7 @@ pub fn folder_card_target_at_cursor(
 }
 
 /// First folder whose bounds contain the cursor among precomputed targets.
+#[cfg_attr(not(test), allow(dead_code))] // Exercised by unit tests; production uses related hit-testers.
 pub fn folder_drop_target_at_cursor(
     cursor: Point,
     targets: &[(FolderId, Rectangle)],
@@ -435,6 +436,7 @@ pub fn folder_drop_target_at_cursor(
 }
 
 /// Whether the cursor is over the parent-directory drop strip geometry.
+#[cfg_attr(not(test), allow(dead_code))] // Exercised by unit tests; production uses related hit-testers.
 pub fn parent_directory_target_at_cursor(
     cursor: Point,
     viewport_x: f32,
