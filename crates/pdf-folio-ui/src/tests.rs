@@ -155,8 +155,7 @@ fn selected_render_key_prefers_exact_preview_then_nearest() {
         page: 2,
         width_px: 1000,
     };
-    let keys = vec![
-        TileKey {
+    let keys = [TileKey {
             page: 2,
             width_px: 760,
         },
@@ -167,8 +166,7 @@ fn selected_render_key_prefers_exact_preview_then_nearest() {
         TileKey {
             page: 1,
             width_px: 1000,
-        },
-    ];
+        }];
 
     assert_eq!(
         selected_render_key(keys.iter(), target, Some(760), true),

@@ -465,8 +465,7 @@ impl Db {
             .iter()
             .map(|entry| entry.id.as_str().to_owned())
             .collect::<Vec<_>>();
-        let placeholders = std::iter::repeat("?")
-            .take(entry_ids.len())
+        let placeholders = std::iter::repeat_n("?", entry_ids.len())
             .collect::<Vec<_>>()
             .join(",");
 

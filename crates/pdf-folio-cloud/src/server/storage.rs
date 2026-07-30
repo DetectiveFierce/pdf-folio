@@ -53,13 +53,11 @@ pub(crate) fn presigned_r2_url(
         .ok_or_else(|| anyhow!("R2 endpoint URL has no host."))?;
     let canonical_uri = format!("/{}/{}", config.r2_bucket, percent_encode_path(key));
 
-    let mut query = vec![
-        ("X-Amz-Algorithm".to_owned(), "AWS4-HMAC-SHA256".to_owned()),
+    let mut query = [("X-Amz-Algorithm".to_owned(), "AWS4-HMAC-SHA256".to_owned()),
         ("X-Amz-Credential".to_owned(), credential),
         ("X-Amz-Date".to_owned(), timestamp),
         ("X-Amz-Expires".to_owned(), expires_seconds.to_string()),
-        ("X-Amz-SignedHeaders".to_owned(), "host".to_owned()),
-    ];
+        ("X-Amz-SignedHeaders".to_owned(), "host".to_owned())];
     query.sort_by(|left, right| left.0.cmp(&right.0));
     let canonical_query = query
         .iter()

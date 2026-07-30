@@ -70,7 +70,7 @@ pub(crate) fn library_entry_card<'a>(
                 tokens,
                 content_alpha,
                 tag_row_left_shift,
-                Some(|tag| Message::TagPillClicked(tag)),
+                Some(Message::TagPillClicked),
             )
         });
     }
@@ -130,11 +130,7 @@ pub(crate) fn library_entry_card<'a>(
         media
     };
     let body = column![media, info].spacing(0).width(Length::Fill);
-    let width = if mode == LibraryEntryRenderMode::Floating {
-        Length::Fixed(app.library_grid_card_width())
-    } else {
-        Length::Fixed(app.library_grid_card_width())
-    };
+    let width = Length::Fixed(app.library_grid_card_width());
     let surface = container(body).width(width).clip(true).style(move |_| {
         library_entry_container_style(tokens, Class::LibraryCard, mode, selected, hover_progress)
     });

@@ -248,8 +248,8 @@ fn registry_live_sync_stream(
             else {
                 continue;
             };
-            if remote_sequence > cursor {
-                if output
+            if remote_sequence > cursor
+                && output
                     .send(Message::LibraryRegistryRemoteAvailable {
                         noticed_at: Instant::now(),
                         remote_sequence,
@@ -259,7 +259,6 @@ fn registry_live_sync_stream(
                 {
                     return;
                 }
-            }
         }
     })
 }
@@ -283,8 +282,8 @@ fn live_sync_stream(watch: &LiveSyncWatch) -> impl iced::futures::Stream<Item = 
             else {
                 continue;
             };
-            if remote_sequence > cursor {
-                if output
+            if remote_sequence > cursor
+                && output
                     .send(Message::RemoteSyncAvailable {
                         library_id: watch.library_id.clone(),
                         noticed_at: Instant::now(),
@@ -295,7 +294,6 @@ fn live_sync_stream(watch: &LiveSyncWatch) -> impl iced::futures::Stream<Item = 
                 {
                     return;
                 }
-            }
         }
     })
 }
@@ -308,6 +306,8 @@ fn default_sync_device_id() -> String {
         .unwrap_or_else(|| String::from("local-device"))
 }
 
+// iced::Subscription::run_with requires `fn(&D)`; D is `Vec<PathBuf>`, so take `&Vec`.
+#[allow(clippy::ptr_arg)]
 fn watch_style_directories_stream(
     paths: &Vec<PathBuf>,
 ) -> impl iced::futures::Stream<Item = Message> {
@@ -439,6 +439,8 @@ fn collect_style_files(
     }
 }
 
+// iced::Subscription::run_with requires `fn(&D)`; D is `Vec<PathBuf>`, so take `&Vec`.
+#[allow(clippy::ptr_arg)]
 fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<Item = Message> {
     let paths = paths.clone();
     stream::channel(100, async move |mut output| {

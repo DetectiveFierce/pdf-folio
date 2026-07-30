@@ -283,7 +283,7 @@ impl Default for AppLayoutTokens {
 ///
 /// Loaded from `labels { … }` nodes and component `labels` blocks so product
 /// copy can change without recompiling Rust (when hot-reloading styles).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AppLabelTokens {
     /// App menu names.
     pub app_menu: std::collections::HashMap<String, String>,
@@ -308,18 +308,6 @@ impl AppLabelTokens {
             LabelSection::Text => &self.text,
         };
         source.get(key).map_or(fallback, String::as_str)
-    }
-}
-
-impl Default for AppLabelTokens {
-    fn default() -> Self {
-        Self {
-            app_menu: std::collections::HashMap::new(),
-            app_menu_action: std::collections::HashMap::new(),
-            selection_toolbar_action: std::collections::HashMap::new(),
-            library_sidebar_tab: std::collections::HashMap::new(),
-            text: std::collections::HashMap::new(),
-        }
     }
 }
 
@@ -1187,12 +1175,3 @@ pub fn display_font(weight: iced::font::Weight) -> Font {
     }
 }
 
-/// Icon-size scale in logical pixels for SVG / glyph slots.
-pub struct IconSize;
-
-impl IconSize {
-    /// Compact icon size.
-    pub const SM: f32 = 16.0;
-    /// Default toolbar icon size.
-    pub const MD: f32 = 20.0;
-}

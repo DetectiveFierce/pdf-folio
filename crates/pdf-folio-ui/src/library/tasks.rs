@@ -2134,9 +2134,17 @@ pub(crate) fn import_pdf_with_index(db: &Db, path: PathBuf) -> anyhow::Result<Im
 }
 
 fn attribute_pending_metadata(db: &Db) -> anyhow::Result<()> {
-    for entry in db.get_all_entries()?.into_iter().filter(|entry| {
-        !entry.missing && (!entry.author_attributed || !entry.page_count_attributed)
-    }) {
+    let mut pending = db.entries_needing_author_attribution()?;
+    let page_pending = db.entries_needing_page_count_attribution()?;
+    let mut seen = std::collections::HashSet::new();
+    pending.retain(|entry| seen.insert(entry.id.clone()));
+    for entry in page_pending {
+        if seen.insert(entry.id.clone()) {
+            pending.push(entry);
+        }
+    }
+
+    for entry in pending {
         let doc = open_entry_doc(&entry);
         if !entry.author_attributed {
             let author = doc.as_ref().and_then(attributed_author);

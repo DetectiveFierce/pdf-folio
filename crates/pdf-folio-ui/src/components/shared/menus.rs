@@ -432,7 +432,7 @@ fn wrap_preview_title(label: &str, width: f32, font_size: u32, max_lines: usize)
             .rev()
             .find_map(|(index, character)| character.is_whitespace().then_some(index))
             .filter(|index| *index >= max_chars / 2)
-            .unwrap_or_else(|| candidate.len());
+            .unwrap_or(candidate.len());
         let (line, rest) = remaining.split_at(split_at);
         lines.push(line.trim().to_owned());
         remaining = rest.trim_start();

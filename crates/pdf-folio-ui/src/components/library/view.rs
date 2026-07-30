@@ -10,55 +10,16 @@ use iced::{Element, Length};
 use pdf_folio_core::LibrarySortMode;
 use pdf_folio_style::{
     button_style, container_style, menu_style_for_class, pick_list_style, slider_style, ui_font,
-    Class, ComponentState, FontSize, FontWeight, Spacing, ThemeTokens, VisualOverride,
+    Class, FontSize, FontWeight, Spacing, ThemeTokens,
 };
 use std::time::Duration;
 
 use crate::library::state::LibraryMetadataDensity;
 
-/// LIBRARY SCROLLABLE ID constant used by this module.
-pub const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
-
 /// Returns a copy with alpha applied.
 pub fn with_alpha(mut color: iced::Color, alpha: f32) -> iced::Color {
     color.a *= alpha.clamp(0.0, 1.0);
     color
-}
-
-/// Breadcrumb button.
-pub fn breadcrumb_button<'a, Message: Clone + 'a>(
-    label: String,
-    active: bool,
-    tokens: ThemeTokens,
-    message: Message,
-) -> Element<'a, Message> {
-    button(
-        text(label)
-            .size(FontSize::SM)
-            .font(ui_font(if active {
-                FontWeight::SEMIBOLD
-            } else {
-                FontWeight::MEDIUM
-            }))
-            .color(if active {
-                tokens.text_primary
-            } else {
-                tokens.accent
-            })
-            .wrapping(iced::widget::text::Wrapping::None),
-    )
-    .padding([Spacing::XS, Spacing::SM])
-    .style(move |_, status| {
-        if active {
-            let active_style =
-                tokens.class_styles[Class::SidebarRow.index()].resolve(ComponentState::Active);
-            button_style(tokens, Class::SidebarRow, status).with_visual_override(active_style)
-        } else {
-            button_style(tokens, Class::SidebarRow, status)
-        }
-    })
-    .on_press(message)
-    .into()
 }
 
 /// Library scrollable.
@@ -71,7 +32,7 @@ pub fn library_scrollable<'a, Message: 'a>(
     let scrollbar_width = tokens.primitives.scrollbar_width;
     let scrollbar_spacing = (scrollbar_gutter - scrollbar_width).max(0.0);
     scrollable(content)
-        .id(iced::widget::Id::new(LIBRARY_SCROLLABLE_ID))
+        .id(iced::widget::Id::new(crate::LIBRARY_SCROLLABLE_ID))
         .width(Length::Fill)
         .height(Length::Fill)
         .direction(Direction::Vertical(
@@ -192,27 +153,6 @@ pub fn library_grid_zoom_control<'a, Message: Clone + 'a>(
     )
     .delay(Duration::from_millis(600))
     .into()
-}
-
-/// Library new folder button.
-pub fn library_new_folder_button<'a, Message: 'a>(
-    tokens: ThemeTokens,
-) -> iced::widget::Button<'a, Message> {
-    button(
-        text("New folder")
-            .size(FontSize::MD)
-            .font(ui_font(FontWeight::MEDIUM))
-            .color(tokens.text_secondary),
-    )
-    .padding([
-        tokens.class_styles[Class::LibraryImportButton.index()]
-            .layout
-            .padding_y(Spacing::SM),
-        tokens.class_styles[Class::LibraryImportButton.index()]
-            .layout
-            .padding_x(Spacing::LG),
-    ])
-    .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
 }
 
 /// Library metadata density picker.

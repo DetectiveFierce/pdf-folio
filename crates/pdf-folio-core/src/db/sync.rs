@@ -622,23 +622,6 @@ impl Db {
         Ok(())
     }
 
-    /// Returns when a content-addressed PDF blob was successfully uploaded.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when SQLite cannot query the upload ledger.
-    pub fn sync_blob_uploaded_at(&self, hash: &str) -> Result<Option<i64>> {
-        let connection = self.connection()?;
-        connection
-            .query_row(
-                "SELECT uploaded_at FROM sync_blob_uploads WHERE hash = ?1",
-                params![hash],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("Could not load sync blob upload state.")
-    }
-
     /// Returns local entries whose blobs have not been marked uploaded yet.
     ///
     /// # Errors

@@ -404,67 +404,6 @@ fn fold_latin_diacritic(character: char) -> char {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pdf_folio_core::{PageTextChar, TextRect};
-
-    #[test]
-    fn viewer_find_matches_ignore_case_by_default() {
-        let layer = text_layer(0, "Find find FIND");
-
-        let matches = viewer_find_matches([(&0, &layer)].into_iter(), "find", false, false);
-
-        assert_eq!(matches.len(), 3);
-        assert_eq!(matches[0].start, 0);
-        assert_eq!(matches[1].start, 5);
-        assert_eq!(matches[2].start, 10);
-    }
-
-    #[test]
-    fn viewer_find_matches_can_match_case() {
-        let layer = text_layer(0, "Find find");
-
-        let matches = viewer_find_matches([(&0, &layer)].into_iter(), "find", true, false);
-
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].start, 5);
-    }
-
-    #[test]
-    fn viewer_find_matches_can_match_diacritics() {
-        let layer = text_layer(0, "cafe café");
-
-        let folded = viewer_find_matches([(&0, &layer)].into_iter(), "cafe", false, false);
-        let strict = viewer_find_matches([(&0, &layer)].into_iter(), "cafe", false, true);
-
-        assert_eq!(folded.len(), 2);
-        assert_eq!(strict.len(), 1);
-    }
-
-    fn text_layer(page: u16, text: &str) -> PageTextLayer {
-        PageTextLayer {
-            page,
-            width_points: 100.0,
-            height_points: 100.0,
-            chars: text
-                .chars()
-                .enumerate()
-                .map(|(index, character)| PageTextChar {
-                    index,
-                    text: character.to_string(),
-                    bounds: TextRect {
-                        x: index as f32 * 0.01,
-                        y: 0.1,
-                        width: 0.01,
-                        height: 0.05,
-                    },
-                })
-                .collect(),
-        }
-    }
-}
-
 use crate::viewer::layout::*;
 use crate::*;
 
@@ -964,7 +903,7 @@ impl PDFolioApp {
             }
 
             self.viewer.pending_renders.insert(key, Some(generation));
-            let doc = Arc::clone(&doc);
+            let doc = Arc::clone(doc);
             tasks.push(Task::perform(
                 render_page(doc, key),
                 move |result| match result {
@@ -1032,7 +971,7 @@ impl PDFolioApp {
             }
 
             self.viewer.pending_renders.insert(key, None);
-            let doc = Arc::clone(&doc);
+            let doc = Arc::clone(doc);
             tasks.push(Task::perform(
                 render_page(doc, key),
                 |result| match result {
@@ -1623,5 +1562,66 @@ impl PDFolioApp {
         }
 
         self.visible_page_range().start
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pdf_folio_core::{PageTextChar, TextRect};
+
+    #[test]
+    fn viewer_find_matches_ignore_case_by_default() {
+        let layer = text_layer(0, "Find find FIND");
+
+        let matches = viewer_find_matches([(&0, &layer)].into_iter(), "find", false, false);
+
+        assert_eq!(matches.len(), 3);
+        assert_eq!(matches[0].start, 0);
+        assert_eq!(matches[1].start, 5);
+        assert_eq!(matches[2].start, 10);
+    }
+
+    #[test]
+    fn viewer_find_matches_can_match_case() {
+        let layer = text_layer(0, "Find find");
+
+        let matches = viewer_find_matches([(&0, &layer)].into_iter(), "find", true, false);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].start, 5);
+    }
+
+    #[test]
+    fn viewer_find_matches_can_match_diacritics() {
+        let layer = text_layer(0, "cafe café");
+
+        let folded = viewer_find_matches([(&0, &layer)].into_iter(), "cafe", false, false);
+        let strict = viewer_find_matches([(&0, &layer)].into_iter(), "cafe", false, true);
+
+        assert_eq!(folded.len(), 2);
+        assert_eq!(strict.len(), 1);
+    }
+
+    fn text_layer(page: u16, text: &str) -> PageTextLayer {
+        PageTextLayer {
+            page,
+            width_points: 100.0,
+            height_points: 100.0,
+            chars: text
+                .chars()
+                .enumerate()
+                .map(|(index, character)| PageTextChar {
+                    index,
+                    text: character.to_string(),
+                    bounds: TextRect {
+                        x: index as f32 * 0.01,
+                        y: 0.1,
+                        width: 0.01,
+                        height: 0.05,
+                    },
+                })
+                .collect(),
+        }
     }
 }

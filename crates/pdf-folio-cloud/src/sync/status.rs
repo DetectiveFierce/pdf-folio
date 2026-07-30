@@ -1,4 +1,4 @@
-//! Sync status, report, plan, and checkpoint types.
+//! Sync status, report, and plan types.
 //!
 //! These are pure data structures returned by [`super::crdt`] and [`super::run`]
 //! methods so UI and CLI code can display counters without depending on
@@ -13,8 +13,6 @@
 //! # Related
 //!
 //! Produced by: [`super::crdt`], [`super::run`], [`super::cli`]
-
-use chrono::{DateTime, Utc};
 
 /// Synthetic CRDT stream id for app-level library registry operations.
 ///
@@ -33,17 +31,6 @@ pub struct SyncLibraryRow {
     pub updated_at: i64,
     /// Tombstone timestamp, when deleted.
     pub deleted_at: Option<i64>,
-}
-
-/// Durable sync checkpoint for one device/library pair.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncCheckpoint {
-    /// Local library identifier.
-    pub library_id: String,
-    /// Stable device identifier.
-    pub device_id: String,
-    /// Last fully completed sync time.
-    pub last_synced_at: DateTime<Utc>,
 }
 
 /// Counts of local work a future push/pull pass should perform.

@@ -19,7 +19,7 @@ use iced::widget::{column, row};
 /// Builds the full viewer-mode element tree for the current app state.
 pub(crate) fn view_viewer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let sidebar: Element<'_, Message> = if app.viewer.toc_open {
-        view_sidebar(app).into()
+        view_sidebar(app)
     } else {
         container("").width(Length::Shrink).into()
     };

@@ -172,140 +172,6 @@ fn is_escape(key: &keyboard::Key) -> bool {
     matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use iced::keyboard::key;
-
-    #[test]
-    fn ctrl_f_opens_search_even_when_event_is_captured() {
-        let message = keyboard_event_message(ctrl_key_event("f", None), event::Status::Captured);
-
-        assert!(matches!(
-            message,
-            Some(Message::ShortcutPressed(Shortcut::FocusSearch))
-        ));
-    }
-
-    #[test]
-    fn ctrl_c_copies_even_when_event_is_captured() {
-        let message = keyboard_event_message(ctrl_key_event("c", None), event::Status::Captured);
-
-        assert!(matches!(
-            message,
-            Some(Message::ShortcutPressed(Shortcut::Copy))
-        ));
-    }
-
-    #[test]
-    fn ctrl_k_opens_palette_even_when_event_is_captured() {
-        let message = keyboard_event_message(ctrl_key_event("k", None), event::Status::Captured);
-
-        assert!(matches!(
-            message,
-            Some(Message::ShortcutPressed(Shortcut::OpenCommandPalette))
-        ));
-    }
-
-    #[test]
-    fn captured_non_ctrl_shortcuts_are_ignored() {
-        let message = keyboard_event_message(
-            key_event("f", None, keyboard::Modifiers::default()),
-            event::Status::Captured,
-        );
-
-        assert!(message.is_none());
-    }
-
-    #[test]
-    fn i_toggles_library_inspector_when_event_is_not_captured() {
-        let message = keyboard_event_message(
-            key_event("i", Some("i"), keyboard::Modifiers::default()),
-            event::Status::Ignored,
-        );
-
-        assert!(matches!(
-            message,
-            Some(Message::ShortcutPressed(Shortcut::ToggleLibraryInspector))
-        ));
-    }
-
-    #[test]
-    fn i_does_not_toggle_library_inspector_when_event_is_captured() {
-        let message = keyboard_event_message(
-            key_event("i", Some("i"), keyboard::Modifiers::default()),
-            event::Status::Captured,
-        );
-
-        assert!(message.is_none());
-    }
-
-    #[test]
-    fn b_toggles_library_sidebar_when_event_is_not_captured() {
-        let message = keyboard_event_message(
-            key_event("b", Some("b"), keyboard::Modifiers::default()),
-            event::Status::Ignored,
-        );
-
-        assert!(matches!(
-            message,
-            Some(Message::ShortcutPressed(Shortcut::ToggleLibrarySidebar))
-        ));
-    }
-
-    #[test]
-    fn b_does_not_toggle_library_sidebar_when_event_is_captured() {
-        let message = keyboard_event_message(
-            key_event("b", Some("b"), keyboard::Modifiers::default()),
-            event::Status::Captured,
-        );
-
-        assert!(message.is_none());
-    }
-
-    #[test]
-    fn escape_closes_overlays_even_when_event_is_captured() {
-        let message = keyboard_event_message(escape_event(), event::Status::Captured);
-
-        assert!(matches!(
-            message,
-            Some(Message::ShortcutPressed(Shortcut::Escape))
-        ));
-    }
-
-    fn ctrl_key_event(character: &'static str, text: Option<&'static str>) -> Event {
-        key_event(character, text, keyboard::Modifiers::CTRL)
-    }
-
-    fn key_event(
-        character: &'static str,
-        text: Option<&'static str>,
-        modifiers: keyboard::Modifiers,
-    ) -> Event {
-        Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Character(character.into()),
-            modified_key: keyboard::Key::Character(character.into()),
-            physical_key: key::Physical::Code(key::Code::KeyF),
-            location: keyboard::Location::Standard,
-            modifiers,
-            text: text.map(Into::into),
-            repeat: false,
-        })
-    }
-
-    fn escape_event() -> Event {
-        Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(keyboard::key::Named::Escape),
-            modified_key: keyboard::Key::Named(keyboard::key::Named::Escape),
-            physical_key: key::Physical::Code(key::Code::Escape),
-            location: keyboard::Location::Standard,
-            modifiers: keyboard::Modifiers::default(),
-            text: None,
-            repeat: false,
-        })
-    }
-}
-
 // Shortcut action handling lives with keyboard shortcut mapping.
 
 /// Applies a recognized [`Shortcut`] to `app`, returning any follow-up tasks.
@@ -546,5 +412,139 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
             }
             Task::none()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::keyboard::key;
+
+    #[test]
+    fn ctrl_f_opens_search_even_when_event_is_captured() {
+        let message = keyboard_event_message(ctrl_key_event("f", None), event::Status::Captured);
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::FocusSearch))
+        ));
+    }
+
+    #[test]
+    fn ctrl_c_copies_even_when_event_is_captured() {
+        let message = keyboard_event_message(ctrl_key_event("c", None), event::Status::Captured);
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::Copy))
+        ));
+    }
+
+    #[test]
+    fn ctrl_k_opens_palette_even_when_event_is_captured() {
+        let message = keyboard_event_message(ctrl_key_event("k", None), event::Status::Captured);
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::OpenCommandPalette))
+        ));
+    }
+
+    #[test]
+    fn captured_non_ctrl_shortcuts_are_ignored() {
+        let message = keyboard_event_message(
+            key_event("f", None, keyboard::Modifiers::default()),
+            event::Status::Captured,
+        );
+
+        assert!(message.is_none());
+    }
+
+    #[test]
+    fn i_toggles_library_inspector_when_event_is_not_captured() {
+        let message = keyboard_event_message(
+            key_event("i", Some("i"), keyboard::Modifiers::default()),
+            event::Status::Ignored,
+        );
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::ToggleLibraryInspector))
+        ));
+    }
+
+    #[test]
+    fn i_does_not_toggle_library_inspector_when_event_is_captured() {
+        let message = keyboard_event_message(
+            key_event("i", Some("i"), keyboard::Modifiers::default()),
+            event::Status::Captured,
+        );
+
+        assert!(message.is_none());
+    }
+
+    #[test]
+    fn b_toggles_library_sidebar_when_event_is_not_captured() {
+        let message = keyboard_event_message(
+            key_event("b", Some("b"), keyboard::Modifiers::default()),
+            event::Status::Ignored,
+        );
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::ToggleLibrarySidebar))
+        ));
+    }
+
+    #[test]
+    fn b_does_not_toggle_library_sidebar_when_event_is_captured() {
+        let message = keyboard_event_message(
+            key_event("b", Some("b"), keyboard::Modifiers::default()),
+            event::Status::Captured,
+        );
+
+        assert!(message.is_none());
+    }
+
+    #[test]
+    fn escape_closes_overlays_even_when_event_is_captured() {
+        let message = keyboard_event_message(escape_event(), event::Status::Captured);
+
+        assert!(matches!(
+            message,
+            Some(Message::ShortcutPressed(Shortcut::Escape))
+        ));
+    }
+
+    fn ctrl_key_event(character: &'static str, text: Option<&'static str>) -> Event {
+        key_event(character, text, keyboard::Modifiers::CTRL)
+    }
+
+    fn key_event(
+        character: &'static str,
+        text: Option<&'static str>,
+        modifiers: keyboard::Modifiers,
+    ) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character(character.into()),
+            modified_key: keyboard::Key::Character(character.into()),
+            physical_key: key::Physical::Code(key::Code::KeyF),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: text.map(Into::into),
+            repeat: false,
+        })
+    }
+
+    fn escape_event() -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            modified_key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            physical_key: key::Physical::Code(key::Code::Escape),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::default(),
+            text: None,
+            repeat: false,
+        })
     }
 }

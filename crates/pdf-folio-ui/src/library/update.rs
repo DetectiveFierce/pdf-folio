@@ -2202,7 +2202,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         }
         Message::ExportFilenameTemplateChanged(template) => {
             if let Some(dialog) = app.library.export_dialog.as_mut() {
-                dialog.filename_template = template.clone();
+                dialog.filename_template = *template;
             }
             Some(Task::none())
         }

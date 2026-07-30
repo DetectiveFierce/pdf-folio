@@ -1,9 +1,9 @@
-//! Library-oriented styled widgets: cards, list rows, and selection checkboxes.
+//! Library selection checkboxes (entry and master select-all).
 //!
-//! Grid cards and list rows are iced buttons styled with
+//! Entry cards/rows are composed in the UI crate against
 //! [`Class::LibraryCard`](crate::Class::LibraryCard) /
-//! [`Class::LibraryRow`](crate::Class::LibraryRow). Selection chrome includes
-//! per-entry checkboxes and the master (select-all) control with partial state.
+//! [`Class::LibraryRow`](crate::Class::LibraryRow); this module owns only the
+//! shared selection chrome.
 
 use iced::widget::{button, container, text, Svg};
 use iced::{Element, Length};
@@ -12,26 +12,6 @@ use crate::classes::{button_style, Class};
 use crate::tokens::{ui_font, FontSize, FontWeight, ThemeTokens};
 
 const CHECK_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"##;
-
-/// Creates a library card button from arbitrary content.
-pub fn library_card<'a, Message: 'a>(
-    content: impl Into<Element<'a, Message>>,
-    tokens: ThemeTokens,
-) -> iced::widget::Button<'a, Message> {
-    button(content)
-        .width(Length::FillPortion(1))
-        .style(move |_, status| button_style(tokens, Class::LibraryCard, status))
-}
-
-/// Creates a library list-row button from arbitrary content.
-pub fn library_row<'a, Message: 'a>(
-    content: impl Into<Element<'a, Message>>,
-    tokens: ThemeTokens,
-) -> iced::widget::Button<'a, Message> {
-    button(content)
-        .width(Length::Fill)
-        .style(move |_, status| button_style(tokens, Class::LibraryRow, status))
-}
 
 /// Selection state represented by the library master checkbox.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

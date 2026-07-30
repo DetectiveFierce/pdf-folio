@@ -434,11 +434,6 @@ pub fn pick_list_style(
     .with_visual_override(override_style)
 }
 
-/// Overlay menu stylesheet using [`Class::MenuPanel`] defaults.
-pub fn menu_style(tokens: ThemeTokens) -> overlay::menu::Style {
-    menu_style_for_class(tokens, Class::MenuPanel)
-}
-
 /// Overlay menu stylesheet for an arbitrary panel `class`.
 pub fn menu_style_for_class(tokens: ThemeTokens, class: Class) -> overlay::menu::Style {
     let override_style = tokens.class_styles[class.index()].resolve(ComponentState::Normal);

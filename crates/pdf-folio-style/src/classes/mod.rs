@@ -14,7 +14,7 @@
 //! | [`text_input_style`] | `text_input` |
 //! | [`scrollable_style`] / [`sidebar_scrollable_style`] | `scrollable` |
 //! | [`slider_style`] | `slider` |
-//! | [`pick_list_style`] / [`menu_style`] | pick list / overlay menu |
+//! | [`pick_list_style`] / [`menu_style_for_class`] | pick list / overlay menu |
 //! | [`progress_bar_style`] | `progress_bar` |
 //!
 //! Submodules split the surface area: [`core`] (shell chrome), [`library`]
@@ -315,7 +315,7 @@ pub trait VisualOverride {
 }
 
 pub use core::{
-    button_style, container_style, menu_style, menu_style_for_class, mix_color, pick_list_style,
+    button_style, container_style, menu_style_for_class, mix_color, pick_list_style,
     progress_bar_style, scrollable_style, side_border_for_class, side_border_for_style,
     slider_style, text_input_style,
 };

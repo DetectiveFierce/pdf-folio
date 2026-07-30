@@ -14,6 +14,7 @@
 //! centralized in [`confirmation_copy`].
 
 use crate::components::library::cards::{document_preview_lines, ghost_tags_row};
+use crate::components::library::metadata::format_file_size;
 use crate::library::view::*;
 use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
 use crate::*;
@@ -1324,7 +1325,7 @@ fn raindrop_pdf_row<'a>(
         meta.push(collection.to_owned());
     }
     if let Some(file_size) = pdf.file_size {
-        meta.push(format_remote_file_size(file_size));
+        meta.push(format_file_size(file_size));
     }
 
     let tag_row = if pdf.tags.is_empty() {
@@ -1409,15 +1410,6 @@ fn raindrop_thumbnail<'a>(
             .clip(true)
             .style(move |_| container_style(tokens, Class::PagePlaceholder))
             .into()
-    }
-}
-
-fn format_remote_file_size(bytes: u64) -> String {
-    let kib = bytes as f64 / 1024.0;
-    if kib < 1024.0 {
-        format!("{kib:.0} KiB")
-    } else {
-        format!("{:.1} MiB", kib / 1024.0)
     }
 }
 

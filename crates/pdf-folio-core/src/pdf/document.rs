@@ -253,8 +253,8 @@ impl PdfDoc {
                     bounds: TextRect {
                         x: x.clamp(0.0, 1.0),
                         y: y.clamp(0.0, 1.0),
-                        width: width.max(0.0).min(1.0),
-                        height: height.max(0.0).min(1.0),
+                        width: width.clamp(0.0, 1.0),
+                        height: height.clamp(0.0, 1.0),
                     },
                 });
             }

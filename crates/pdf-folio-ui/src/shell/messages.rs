@@ -29,10 +29,10 @@
 //! | Multi-library | `OpenLibrarySwitcher`, `SelectLibrary`, `CreateLibrary`, `DeleteLibrary` |
 //! | File dialogs | `OpenFileDialog`, `FileSelected`, `Import*Dialog`, `ExportDestinationSelected` |
 //! | Document open/render | `DocumentOpened`, `PageRendered`, `LibraryDocumentOpened`, `DocumentError` |
-//! | Viewer navigation | `ScrollChanged`, `Viewport*`, `Jump*`, `PreviousPage` / `NextPage` |
+//! | Viewer navigation | `Viewport*`, `Jump*`, `PreviousPage` / `NextPage` |
 //! | Viewer zoom | `ZoomIn` / `ZoomOut` / `ZoomSet`, `ZoomPresetSelected`, `ZoomRenderSettled` |
 //! | Viewer text / find | `ViewerText*`, `OpenViewerFind`, `ViewerFind*`, `CopyViewerTextSelection` |
-//! | Outline / sidebar | `ToggleOutlineNode`, `ToggleTocPanel`, `ViewerSidebarTabSelected` |
+//! | Outline / sidebar | `ToggleOutlineNode`, `ToggleSidebar`, `ViewerSidebarTabSelected` |
 //! | Library data load | `LibraryLoaded`, `LibraryFoldersLoaded`, `LibraryRefresh`, `LibraryError` |
 //! | Library selection | `LibraryEntryClicked`, `EntryCheckboxToggled`, `SelectAll*`, clipboard |
 //! | Library drag | `BeginLibraryEntryDrag`, `FolderDrag*`, `End*Drag`, `ManualEntryOrderSaved` |
@@ -284,8 +284,6 @@ pub enum Message {
         width: u16,
         height: u16,
     },
-    /// Scroll offset changed.
-    ScrollChanged(f32),
     /// Scroll offset and viewport size changed.
     ViewportChanged {
         horizontal_offset: f32,
@@ -407,9 +405,7 @@ pub enum Message {
     StartPageInputEdit,
     /// Submit the jump-to-page overlay.
     SubmitJump,
-    /// Toggle the table-of-contents panel.
-    ToggleTocPanel,
-    /// Toggle the sidebar.
+    /// Toggle the viewer sidebar (TOC / thumbnails rail).
     ToggleSidebar,
     /// Switch the active open-PDF viewer sidebar tab.
     ViewerSidebarTabSelected(ViewerSidebarTab),

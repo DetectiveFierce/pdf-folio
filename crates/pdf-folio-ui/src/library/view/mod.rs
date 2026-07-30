@@ -365,7 +365,6 @@ pub(crate) fn view_library_breadcrumb_row<'a>(
                 Length::Shrink
             })
             .clip(true),
-        library_quick_filter_chips(app, tokens),
         library_filter_summary(app, tokens, narrow),
     ]
     .spacing(Spacing::MD)
@@ -563,14 +562,6 @@ pub(crate) fn library_history_icon_button<'a>(
     )
     .delay(Duration::from_millis(400))
     .into()
-}
-
-/// Reading / recent / missing smart-filter chip row.
-pub(crate) fn library_quick_filter_chips<'a>(
-    _app: &'a PDFolioApp,
-    _tokens: ThemeTokens,
-) -> Element<'a, Message> {
-    container("").width(Length::Shrink).into()
 }
 
 /// Compact label describing active search and smart filters.

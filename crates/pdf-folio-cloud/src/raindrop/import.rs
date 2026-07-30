@@ -31,16 +31,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use blake3::Hasher;
 use directories::ProjectDirs;
 use pdf_folio_core::PdfDoc;
 use pdf_folio_core::{
-    Db, EntryId, FolderId, ImportSummary, ImportedEntry, IndexDocument, NewLibraryEntry,
-    RaindropEntryMapping, SearchIndex,
+    clean_import_title, hash_file, title_from_path, Db, EntryId, FolderId, ImportSummary,
+    ImportedEntry, IndexDocument, NewLibraryEntry, RaindropEntryMapping, SearchIndex,
 };
 
 use super::auth::resolve_access_token;
@@ -291,10 +289,10 @@ async fn import_prepared_raindrops(
 ) -> Result<RaindropImportSummary> {
     let created_folders = match &destination {
         RaindropImportDestination::PreserveRaindropFolders => {
-            mirror_collections(db, &source_id, &collections, None)?
+            mirror_collections(db, source_id, &collections, None)?
         }
         RaindropImportDestination::PreserveRaindropFoldersUnder(root_folder_id) => {
-            mirror_collections(db, &source_id, &collections, root_folder_id.as_ref())?
+            mirror_collections(db, source_id, &collections, root_folder_id.as_ref())?
         }
         RaindropImportDestination::LibraryRoot | RaindropImportDestination::LocalFolder(_) => {
             Vec::new()
@@ -332,7 +330,7 @@ async fn import_prepared_raindrops(
             });
         }
     }
-    let storage_dir = raindrop_storage_dir(&source_id)?;
+    let storage_dir = raindrop_storage_dir(source_id)?;
     let import = match import_strategy {
         RaindropImportStrategy::ZipExport => {
             let (uploaded_raindrops, linked_raindrops): (Vec<_>, Vec<_>) = raindrops
@@ -341,8 +339,8 @@ async fn import_prepared_raindrops(
                 .partition(Raindrop::has_uploaded_file);
             let mut import = match import_raindrop_pdfs_from_zip(
                 db,
-                &client,
-                &source_id,
+                client,
+                source_id,
                 &storage_dir,
                 &uploaded_raindrops,
                 &destination,
@@ -376,8 +374,8 @@ async fn import_prepared_raindrops(
             if !linked_raindrops.is_empty() {
                 let linked_import = import_raindrop_pdfs_individually(
                     db,
-                    &client,
-                    &source_id,
+                    client,
+                    source_id,
                     &storage_dir,
                     &linked_raindrops,
                     &destination,
@@ -391,8 +389,8 @@ async fn import_prepared_raindrops(
         RaindropImportStrategy::IndividualFiles => {
             import_raindrop_pdfs_individually(
                 db,
-                &client,
-                &source_id,
+                client,
+                source_id,
                 &storage_dir,
                 &raindrops,
                 &destination,
@@ -968,7 +966,8 @@ fn import_pdf_with_metadata(
     let doc = PdfDoc::open(path)?;
     let page_count = doc.page_count();
     page_progress(IMPORT_PROGRESS_UNITS_PER_PDF / 5);
-    let title = clean_import_title(remote_title)
+    let title = remote_title
+        .and_then(clean_import_title)
         .or_else(|| attributed_title(&doc))
         .or_else(|| title_from_path(path));
     let author = attributed_author(&doc);
@@ -1010,56 +1009,22 @@ fn import_pdf_with_metadata(
     })
 }
 
-fn clean_import_title(value: Option<&str>) -> Option<String> {
-    let title = value?.split_whitespace().collect::<Vec<_>>().join(" ");
-    if title.is_empty() || title.eq_ignore_ascii_case("untitled") {
-        None
-    } else {
-        Some(title.chars().take(512).collect())
-    }
-}
-
-fn title_from_path(path: &Path) -> Option<String> {
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .and_then(|value| clean_import_title(Some(value)))
-}
-
 fn attributed_title(doc: &PdfDoc) -> Option<String> {
     doc.metadata_title()
         .ok()
         .flatten()
-        .and_then(|title| clean_import_title(Some(&title)))
+        .and_then(clean_import_title)
 }
 
 fn attributed_author(doc: &PdfDoc) -> Option<String> {
     doc.metadata_author()
         .ok()
         .flatten()
-        .and_then(|author| clean_import_title(Some(&author)))
+        .and_then(clean_import_title)
 }
 
 fn file_size(path: &Path) -> Option<u64> {
     fs::metadata(path).ok().map(|metadata| metadata.len())
-}
-
-fn hash_file(path: &Path) -> Result<String> {
-    let mut file =
-        fs::File::open(path).with_context(|| format!("Could not open {}.", path.display()))?;
-    let mut hasher = Hasher::new();
-    let mut buffer = [0_u8; 64 * 1024];
-
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .with_context(|| format!("Could not read {}.", path.display()))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-
-    Ok(hasher.finalize().to_hex().to_string())
 }
 
 fn raindrop_storage_dir(source_id: &str) -> Result<PathBuf> {

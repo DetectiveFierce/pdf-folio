@@ -73,6 +73,7 @@ pub fn reorder_entry_ids_for_drag(
 }
 
 /// How many entries in `entries` are part of the current drag (placeholder slots).
+#[cfg_attr(not(test), allow(dead_code))] // Exercised by unit tests.
 pub fn dragged_placeholder_count(entries: &[EntryId], dragged_entries: &[EntryId]) -> usize {
     let dragged = dragged_entries.iter().collect::<HashSet<_>>();
     entries

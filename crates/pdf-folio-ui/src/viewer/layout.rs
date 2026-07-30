@@ -114,13 +114,13 @@ pub(crate) fn selected_render_key<'a>(
         .copied()
         .collect::<Vec<_>>();
 
-    if include_exact && keys.iter().any(|candidate| *candidate == target) {
+    if include_exact && keys.contains(&target) {
         return Some(target);
     }
 
     if let Some(width_px) = preview_width_px {
         let preview = TileKey { width_px, ..target };
-        if preview != target && keys.iter().any(|candidate| *candidate == preview) {
+        if preview != target && keys.contains(&preview) {
             return Some(preview);
         }
     }
