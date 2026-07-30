@@ -13,13 +13,13 @@
 //!
 //! [`clap`]: https://docs.rs/clap
 
-mod sync_cli;
+mod cli;
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use sync_cli::{run_sync_command, SyncArgs};
+use cli::{run_sync_command, SyncArgs};
 use tracing_subscriber::EnvFilter;
 
 /// Command-line arguments for PDF-Folio.

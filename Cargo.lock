@@ -4232,7 +4232,7 @@ dependencies = [
  "clap",
  "directories",
  "pdf-folio-cloud",
- "pdf-folio-db",
+ "pdf-folio-core",
  "pdf-folio-ui",
  "reqwest",
  "serde",
