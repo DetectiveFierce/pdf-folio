@@ -10,6 +10,10 @@ use super::*;
 use iced::widget::column;
 
 /// Grid-mode card for one library entry (thumbnail, title, meta, selection).
+///
+/// Builds media + info chrome at the current grid zoom, applies hover lift,
+/// and wires drag / context-menu / hover messages when `mode` is Normal.
+/// Placeholder and Floating modes omit interaction handlers and use ghost alpha.
 pub(crate) fn library_entry_card<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -166,7 +170,10 @@ pub(crate) fn library_entry_card<'a>(
     }
 }
 
-/// Compact list-mode row for one library entry.
+/// Compact list-mode row for one library entry (checkbox, thumb, meta, progress).
+///
+/// Same interaction wiring as [`library_entry_card`] but uses list layout tokens
+/// (fixed thumbnail/progress widths). Floating mode uses a fixed preview width.
 pub(crate) fn library_entry_row<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -304,6 +311,7 @@ pub(crate) fn library_entry_row<'a>(
     }
 }
 
+/// Horizontal tag chips for compact card/row density; optional press handler per tag.
 fn compact_tags_row<'a>(
     tags: Vec<String>,
     tokens: ThemeTokens,
@@ -345,6 +353,11 @@ fn compact_tags_row<'a>(
 }
 
 /// Container style for selected/hover/drag states on an entry tile.
+///
+/// Interpolates Normal↔Hovered visual tokens by `hover_progress` (`0..=1`),
+/// then overlays Selected when checked. Placeholder uses Disabled chrome;
+/// Floating uses Active (elevated) chrome. `class` is typically `LibraryCard`
+/// or `LibraryRow`.
 pub(crate) fn library_entry_container_style(
     tokens: ThemeTokens,
     class: Class,
@@ -421,6 +434,7 @@ pub(crate) fn library_entry_container_style(
     style
 }
 
+/// Linearly blend two style-book shadows by `progress` in `0.0..=1.0` (for hover/lift).
 fn interpolate_shadow(
     from: Option<crate::style::BoxShadow>,
     to: Option<crate::style::BoxShadow>,
@@ -439,7 +453,10 @@ fn interpolate_shadow(
     })
 }
 
-/// Opacity for entry content while dragging (ghost vs solid).
+/// Opacity for entry content while dragging (`0..=1`; ghost vs solid).
+///
+/// Placeholder mode uses `library_drag_placeholder_content_alpha`; Normal and
+/// Floating stay fully opaque.
 pub(crate) fn library_entry_content_alpha(app: &PDFolioApp, mode: LibraryEntryRenderMode) -> f32 {
     if mode == LibraryEntryRenderMode::Placeholder {
         app.layout().library_drag_placeholder_content_alpha
@@ -448,7 +465,10 @@ pub(crate) fn library_entry_content_alpha(app: &PDFolioApp, mode: LibraryEntryRe
     }
 }
 
-/// Thumbnail image region for a grid card, with placeholder when missing.
+/// Thumbnail image region for a grid card, with document-preview lines when missing.
+///
+/// Width matches the current card width; height is aspect-scaled and capped by
+/// `library_card_media_max_height`. Prefers the zoom-appropriate thumbnail tier.
 pub(crate) fn card_thumbnail_media<'a>(
     app: &'a PDFolioApp,
     entry_id: &EntryId,
@@ -487,6 +507,10 @@ pub(crate) fn card_thumbnail_media<'a>(
 }
 
 /// Iced image element from a cached `ThumbnailView`, scaled to the target size.
+///
+/// `width` is logical px; height follows cover aspect up to
+/// `thumbnail_max_height_ratio * width`. Falls back to a `"PDF"` placeholder
+/// when no Default-tier thumb is cached. Used by list rows and detail panels.
 pub(crate) fn thumbnail_element<'a>(
     app: &'a PDFolioApp,
     entry_id: &EntryId,

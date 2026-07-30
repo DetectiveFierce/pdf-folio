@@ -1,17 +1,34 @@
 //! # Application menus
 //!
-//! Menu bar / library switcher structures and item builders shared by the shell.
+//! Menu bar and multi-library switcher chrome under `components::shared::menus`.
+//! Hosts the full-screen library profile grid (previews, open/create/delete
+//! actions) and asset-backed overflow icon glyphs used by shell menus.
+//!
+//! ## Ownership
+//!
+//! Presentation for `AppMode::LibrarySwitcher`: reads
+//! `app.libraries.profiles` and previews, emits switcher `Message`s handled by
+//! shell update. Not the OS-native menu bar implementation—those bindings live
+//! elsewhere in the shell.
+//!
+//! Related: [`super::root_surface`] routes to this view; command-driven
+//! library actions also appear in [`super::command_palette`].
 
 use crate::*;
 use iced::widget::image;
 use iced::widget::{button, column, row, stack, Svg};
 use iced::ContentFit;
 
+/// Horizontal ⋯ overflow icon for compact toolbar menus (asset-backed).
 const OVERFLOW_HORIZONTAL_SVG: &[u8] =
     include_bytes!("../../../assets/icons/overflow-horizontal.svg");
+/// Vertical ⋮ overflow icon for panel/header menus (asset-backed).
 const OVERFLOW_VERTICAL_SVG: &[u8] = include_bytes!("../../../assets/icons/overflow-vertical.svg");
 
-/// Library switcher panel listing vault profiles with previews and actions.
+/// Full-screen switcher listing vault profiles with previews and create card.
+///
+/// Active profile is highlighted; non-active cards emit `SelectLibrary`.
+/// Includes a trailing “new library” card and a back control to library mode.
 pub(crate) fn view_library_switcher(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let card_width = app.layout().metric("LibrarySwitcher", "card_width", 230.0);
     let card_height = app.layout().metric("LibrarySwitcher", "card_height", 362.0);
@@ -71,6 +88,7 @@ pub(crate) fn view_library_switcher(app: &PDFolioApp, tokens: ThemeTokens) -> El
         .into()
 }
 
+/// Library switcher card: preview grid, name, PDF count, and overflow menu pin.
 fn library_profile_card<'a>(
     app: &'a PDFolioApp,
     profile: &'a LibraryProfile,
@@ -185,6 +203,7 @@ fn library_profile_card<'a>(
     layered.into()
 }
 
+/// Trailing “Create New Library” card that opens the library name dialog.
 fn new_library_card(
     layout: &crate::style::AppLayoutTokens,
     tokens: ThemeTokens,
@@ -254,6 +273,7 @@ fn new_library_card(
         .into()
 }
 
+/// Thumbnail mosaic for a library profile card, or empty-state panel when no previews.
 fn library_preview_panel<'a>(
     layout: &crate::style::AppLayoutTokens,
     preview: Option<&'a crate::library::registry::LibraryPreview>,
@@ -325,6 +345,7 @@ fn library_preview_panel<'a>(
         .into()
 }
 
+/// Placeholder panel text (“No PDFs”) when a library has no preview thumbnails.
 fn library_empty_preview_panel(
     layout: &crate::style::AppLayoutTokens,
     tokens: ThemeTokens,
@@ -343,6 +364,7 @@ fn library_empty_preview_panel(
     .into()
 }
 
+/// One PDF cover tile (image + wrapped title) inside a library preview mosaic.
 fn library_preview_pdf_tile<'a>(
     layout: &crate::style::AppLayoutTokens,
     thumbnail: &'a crate::library::registry::LibraryPreviewThumbnail,
@@ -395,6 +417,7 @@ fn library_preview_pdf_tile<'a>(
     .into()
 }
 
+/// Word-wrap a preview title into up to `max_lines`, ellipsizing the last line if needed.
 fn wrap_preview_title(label: &str, width: f32, font_size: u32, max_lines: usize) -> String {
     const ELLIPSIS: &str = "...";
 
@@ -441,6 +464,7 @@ fn wrap_preview_title(label: &str, width: f32, font_size: u32, max_lines: usize)
     lines.join("\n")
 }
 
+/// Vertical ellipsis glyph under a preview column when more PDFs exist than shown tiles.
 fn library_preview_column_ellipsis(
     layout: &crate::style::AppLayoutTokens,
     tokens: ThemeTokens,
@@ -463,6 +487,7 @@ fn library_preview_column_ellipsis(
         .into()
 }
 
+/// Horizontal ⋯ button that toggles the rename/delete overflow menu on a profile card.
 fn library_card_menu_button<'a>(
     layout: &crate::style::AppLayoutTokens,
     profile: &'a LibraryProfile,
@@ -491,6 +516,7 @@ fn library_card_menu_button<'a>(
     .into()
 }
 
+/// Floating Rename / Delete menu for a library profile card.
 fn library_card_overflow_menu<'a>(
     app: &'a PDFolioApp,
     profile: &'a LibraryProfile,
@@ -530,6 +556,7 @@ fn library_card_overflow_menu<'a>(
         .into()
 }
 
+/// Pixel height of the two-item profile overflow menu (for pin placement above the button).
 fn library_card_overflow_menu_height(app: &PDFolioApp) -> f32 {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let item_height = tokens.class_styles[Class::MenuItem.index()]
@@ -540,6 +567,7 @@ fn library_card_overflow_menu_height(app: &PDFolioApp) -> f32 {
     item_height * 2.0 + panel_layout.padding_y(Spacing::XS) * 2.0
 }
 
+/// One row inside the library profile overflow menu.
 fn library_card_menu_row<'a>(
     label: &'a str,
     enabled: bool,
@@ -591,6 +619,7 @@ fn library_card_menu_row<'a>(
     }
 }
 
+/// Resolve themed text color for `class`/`state`, falling back to `fallback`.
 fn class_text_color(
     tokens: ThemeTokens,
     class: Class,

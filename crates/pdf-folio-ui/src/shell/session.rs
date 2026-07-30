@@ -30,81 +30,134 @@ use pdf_folio_core::{EntryId, FolderId, LibrarySortMode};
 
 use crate::*;
 
+/// On-disk `session.json` schema version; mismatched files are ignored on load.
 const SESSION_SCHEMA_VERSION: u16 = 1;
 
 /// Versioned on-disk snapshot of app mode, window, viewer, and library UI.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AppSession {
+    /// Schema version; mismatched values cause the session file to be ignored.
     version: u16,
+    /// Id of the vault that was active when the session was written.
     #[serde(default = "default_session_library_id")]
     pub(crate) active_library_id: String,
+    /// Full-screen surface to restore (`Library` or `Viewer`).
     mode: SessionMode,
+    /// Logical window size captured at last snapshot.
     window: SessionWindow,
+    /// Theme id string for appearance restore.
     appearance: SessionAppearance,
+    /// Open document path/page/zoom/find state.
     pub(crate) viewer: SessionViewer,
+    /// Library layout, filters, selection, and sidebar state.
     library: SessionLibrary,
 }
 
+/// Full-screen surface restored from session (`Library` or `Viewer`).
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum SessionMode {
+    /// Restore into the library manager surface.
     Library,
+    /// Restore into the PDF viewer for the saved document.
     Viewer,
 }
 
+/// Logical window dimensions captured for the next launch.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct SessionWindow {
+    /// Logical window width at snapshot time.
     width: f32,
+    /// Logical window height at snapshot time.
     height: f32,
 }
 
+/// Appearance fields restored from session (currently theme only).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct SessionAppearance {
+    /// Theme id (`"light"` / `"dark"`) applied on restore.
     theme: String,
 }
 
 /// Viewer portion of an [`AppSession`]: document identity, page, zoom, find.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SessionViewer {
+    /// Absolute path of the open PDF, if any.
     pub(crate) document_path: Option<PathBuf>,
+    /// Library entry id string for the open document, when known.
     entry_id: Option<String>,
+    /// Zero-based page index to restore.
     page: u16,
+    /// Vertical scroll offset within the document.
     scroll_offset: f32,
+    /// Horizontal scroll/pan offset within the document.
     horizontal_offset: f32,
+    /// Viewer scroll mode id (`page`, `vertical`, `horizontal`, `wrapped`).
     scroll_mode: String,
+    /// Viewer spread mode id (`none`, `odd`, `even`).
     spread_mode: String,
+    /// Rendered page width in logical pixels.
     zoom_width: u16,
+    /// Whether the outline / TOC sidebar was open.
     toc_open: bool,
+    /// Viewer sidebar tab id (`contents` / `thumbnails`).
     sidebar_tab: String,
+    /// Expanded outline node paths for the TOC tree.
     expanded_outline_paths: Vec<Vec<usize>>,
+    /// Whether the find-in-document bar was open.
     find_open: bool,
+    /// Find-in-document query string.
     find_query: String,
+    /// Whether all find matches were highlighted.
     find_highlight_all: bool,
+    /// Whether find matching was case-sensitive.
     find_match_case: bool,
+    /// Whether find matching respected diacritics.
     find_match_diacritics: bool,
 }
 
+/// Library layout, filters, selection, and sidebar state for session restore.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct SessionLibrary {
+    /// Compact list layout vs masonry grid.
     compact_view_mode: bool,
+    /// Masonry grid card scale factor.
     grid_zoom: f32,
+    /// Metadata density id (`minimal` / `standard` / `detailed`).
     metadata_density: String,
+    /// Library sort mode as its wire/string form.
     sort_mode: String,
+    /// Selected folder id string, or root when `None`.
     selected_folder: Option<String>,
+    /// Details/inspector folder id string, if any.
     details_folder_id: Option<String>,
+    /// Search box contents.
     search_query: String,
+    /// Vertical scroll offset of the library content pane.
     scroll_offset: f32,
+    /// Left sidebar width in logical pixels.
     tag_sidebar_width: f32,
+    /// Whether the left sidebar was open.
     tag_sidebar_open: bool,
+    /// Library sidebar tab id (`files` / `tags`).
     sidebar_tab: String,
+    /// Whether the library root tree node was expanded.
     tree_root_expanded: bool,
+    /// Folder ids whose tree children were collapsed.
     collapsed_folder_ids: Vec<String>,
+    /// Whether the folder details section was open.
     folder_details_sidebar_open: bool,
+    /// Active tag filter string, if any.
     active_tag_filter: Option<String>,
+    /// Reading-progress filter id (`unread` / `reading` / `finished`), if any.
     active_reading_filter: Option<String>,
+    /// Whether only missing-file entries were shown.
     missing_filter_active: bool,
+    /// Multi-selected entry id strings.
     selected_entry_ids: Vec<String>,
+    /// Shift-selection anchor entry id string, if any.
     selection_anchor: Option<String>,
+    /// Details editor entry id string, if any.
     details_entry_id: Option<String>,
 }
 
@@ -366,6 +419,7 @@ impl PDFolioApp {
         }
     }
 
+    /// True when the open document matches the session entry id or file path.
     fn document_matches_session(&self, session: &AppSession) -> bool {
         if let Some(session_entry_id) = session.viewer.entry_id.as_deref() {
             return self
@@ -420,18 +474,21 @@ pub(crate) fn save_app_session(session: &AppSession) -> Result<()> {
     Ok(())
 }
 
+/// Absolute path to `session.json` under the PDF-Folio XDG data directory.
 fn session_path() -> Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "pdf-folio", "PDF-Folio")
         .context("Could not find a data directory for PDF-Folio.")?;
     Ok(project_dirs.data_dir().join("session.json"))
 }
 
+/// Serializes an optional folder id as its string form for session JSON.
 fn folder_id_to_string(folder_id: &Option<FolderId>) -> Option<String> {
     folder_id
         .as_ref()
         .map(|folder_id| folder_id.as_str().to_owned())
 }
 
+/// Parses `id` only when it still exists in the loaded folder list.
 fn valid_folder_id(id: Option<&str>, folders: &[Folder]) -> Option<FolderId> {
     let id = id?;
     folders
@@ -440,6 +497,7 @@ fn valid_folder_id(id: Option<&str>, folders: &[Folder]) -> Option<FolderId> {
         .then(|| FolderId::new(id))
 }
 
+/// Parses `id` only when it still exists among loaded library entries.
 fn valid_entry_id(id: &str, entries: &[LibraryEntry]) -> Option<EntryId> {
     entries
         .iter()
@@ -447,6 +505,7 @@ fn valid_entry_id(id: &str, entries: &[LibraryEntry]) -> Option<EntryId> {
         .then(|| EntryId::new(id))
 }
 
+/// Wire form of [`AppTheme`] written into session appearance.
 fn theme_id(theme: AppTheme) -> &'static str {
     match theme {
         AppTheme::Light => "light",
@@ -454,6 +513,7 @@ fn theme_id(theme: AppTheme) -> &'static str {
     }
 }
 
+/// Restores [`AppTheme`] from session JSON; unknown values become dark.
 fn parse_theme(value: &str) -> AppTheme {
     match value {
         "light" => AppTheme::Light,
@@ -461,6 +521,7 @@ fn parse_theme(value: &str) -> AppTheme {
     }
 }
 
+/// Wire form of [`ViewerScrollMode`] for session viewer state.
 fn viewer_scroll_mode_id(mode: ViewerScrollMode) -> &'static str {
     match mode {
         ViewerScrollMode::Page => "page",
@@ -470,6 +531,7 @@ fn viewer_scroll_mode_id(mode: ViewerScrollMode) -> &'static str {
     }
 }
 
+/// Restores scroll mode from session JSON; defaults to continuous vertical.
 fn parse_viewer_scroll_mode(value: &str) -> ViewerScrollMode {
     match value {
         "page" => ViewerScrollMode::Page,
@@ -479,6 +541,7 @@ fn parse_viewer_scroll_mode(value: &str) -> ViewerScrollMode {
     }
 }
 
+/// Wire form of [`ViewerSpreadMode`] for session viewer state.
 fn viewer_spread_mode_id(mode: ViewerSpreadMode) -> &'static str {
     match mode {
         ViewerSpreadMode::None => "none",
@@ -487,6 +550,7 @@ fn viewer_spread_mode_id(mode: ViewerSpreadMode) -> &'static str {
     }
 }
 
+/// Restores spread mode from session JSON; unknown values mean no spreads.
 fn parse_viewer_spread_mode(value: &str) -> ViewerSpreadMode {
     match value {
         "odd" => ViewerSpreadMode::Odd,
@@ -495,6 +559,7 @@ fn parse_viewer_spread_mode(value: &str) -> ViewerSpreadMode {
     }
 }
 
+/// Wire form of [`LibrarySidebarTab`] for session library state.
 fn library_sidebar_tab_id(tab: LibrarySidebarTab) -> &'static str {
     match tab {
         LibrarySidebarTab::Files => "files",
@@ -502,6 +567,7 @@ fn library_sidebar_tab_id(tab: LibrarySidebarTab) -> &'static str {
     }
 }
 
+/// Restores the library sidebar tab; unknown values become the files tree.
 fn parse_library_sidebar_tab(value: &str) -> LibrarySidebarTab {
     match value {
         "tags" => LibrarySidebarTab::Tags,
@@ -509,6 +575,7 @@ fn parse_library_sidebar_tab(value: &str) -> LibrarySidebarTab {
     }
 }
 
+/// Wire form of [`ViewerSidebarTab`] for session viewer state.
 fn viewer_sidebar_tab_id(tab: ViewerSidebarTab) -> &'static str {
     match tab {
         ViewerSidebarTab::Contents => "contents",
@@ -516,6 +583,7 @@ fn viewer_sidebar_tab_id(tab: ViewerSidebarTab) -> &'static str {
     }
 }
 
+/// Restores the viewer sidebar tab; unknown values become contents/outline.
 fn parse_viewer_sidebar_tab(value: &str) -> ViewerSidebarTab {
     match value {
         "thumbnails" => ViewerSidebarTab::Thumbnails,
@@ -523,6 +591,7 @@ fn parse_viewer_sidebar_tab(value: &str) -> ViewerSidebarTab {
     }
 }
 
+/// Wire form of [`LibraryMetadataDensity`] for session library state.
 fn metadata_density_id(density: LibraryMetadataDensity) -> &'static str {
     match density {
         LibraryMetadataDensity::Minimal => "minimal",
@@ -531,6 +600,7 @@ fn metadata_density_id(density: LibraryMetadataDensity) -> &'static str {
     }
 }
 
+/// Restores metadata density; unknown values become standard.
 fn parse_metadata_density(value: &str) -> LibraryMetadataDensity {
     match value {
         "minimal" => LibraryMetadataDensity::Minimal,
@@ -539,6 +609,7 @@ fn parse_metadata_density(value: &str) -> LibraryMetadataDensity {
     }
 }
 
+/// Wire form of [`LibraryReadingFilter`] for session library state.
 fn reading_filter_id(filter: LibraryReadingFilter) -> &'static str {
     match filter {
         LibraryReadingFilter::Unread => "unread",
@@ -547,6 +618,7 @@ fn reading_filter_id(filter: LibraryReadingFilter) -> &'static str {
     }
 }
 
+/// Restores the reading-progress filter; unknown values become in-progress.
 fn parse_reading_filter(value: &str) -> LibraryReadingFilter {
     match value {
         "unread" => LibraryReadingFilter::Unread,
@@ -555,11 +627,14 @@ fn parse_reading_filter(value: &str) -> LibraryReadingFilter {
     }
 }
 
+/// Serde default for [`AppSession::active_library_id`] when older sessions omit it.
 fn default_session_library_id() -> String {
     String::from("default")
 }
 
+/// Fallback allow-listed Google email when `PDF_FOLIO_ALLOWED_GOOGLE_EMAIL` is unset.
 const DEFAULT_ALLOWED_GOOGLE_EMAIL: &str = "aidanjwagner03@gmail.com";
+/// Fallback CRDT sync server base URL when `PDF_FOLIO_SYNC_SERVER` is unset.
 const DEFAULT_SYNC_SERVER_BASE_URL: &str = "http://mind-palace:53148";
 
 /// Sync sign-in gate: expected allow-list email, server URL, and auth phase.
@@ -568,19 +643,35 @@ const DEFAULT_SYNC_SERVER_BASE_URL: &str = "http://mind-palace:53148";
 /// library. Loaded from cached cloud session on startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncAuthRuntime {
+    /// Current Google auth phase for the sync gate UI.
     pub state: SyncAuthState,
+    /// Allow-listed email address this library is locked to.
     pub expected_email: String,
+    /// Base URL of the CRDT sync server.
     pub server_base_url: String,
+    /// Last sign-in or allow-list error message for the sign-in surface.
     pub error: Option<String>,
 }
 
 /// Auth phase for the Google sync gate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncAuthState {
+    /// No valid session; show the sign-in surface.
     SignedOut,
+    /// Browser OAuth is in progress.
     SigningIn,
-    SignedIn { email: String, expires_at: String },
-    WrongAccount { email: Option<String> },
+    /// Active session for the allow-listed email.
+    SignedIn {
+        /// Email of the signed-in Google account.
+        email: String,
+        /// RFC3339 expiry timestamp of the cloud session.
+        expires_at: String,
+    },
+    /// A session exists but its email is not on the allow list.
+    WrongAccount {
+        /// Email from the rejected session, when known.
+        email: Option<String>,
+    },
 }
 
 impl SyncAuthRuntime {
@@ -621,6 +712,7 @@ impl SyncAuthRuntime {
         }
     }
 
+    /// Test-only auth runtime that starts already signed in for the expected email.
     #[cfg(test)]
     fn signed_in_for_tests(expected_email: String, server_base_url: String) -> Self {
         Self {
@@ -699,6 +791,7 @@ pub(crate) fn sync_sign_in_task(expected_email: String, server_base_url: String)
     )
 }
 
+/// Allow-listed Google email from env, or [`DEFAULT_ALLOWED_GOOGLE_EMAIL`].
 fn expected_google_email() -> String {
     std::env::var("PDF_FOLIO_ALLOWED_GOOGLE_EMAIL")
         .ok()
@@ -706,6 +799,7 @@ fn expected_google_email() -> String {
         .unwrap_or_else(|| DEFAULT_ALLOWED_GOOGLE_EMAIL.to_owned())
 }
 
+/// Sync server base URL from env, or [`DEFAULT_SYNC_SERVER_BASE_URL`].
 fn sync_server_base_url() -> String {
     std::env::var("PDF_FOLIO_SYNC_SERVER")
         .ok()
@@ -713,6 +807,7 @@ fn sync_server_base_url() -> String {
         .unwrap_or_else(|| DEFAULT_SYNC_SERVER_BASE_URL.to_owned())
 }
 
+/// OAuth client id from `PDF_FOLIO_GOOGLE_CLIENT_ID` or a `secrets/client_secret_*.json`.
 fn load_google_client_id_from_secrets() -> Option<String> {
     std::env::var("PDF_FOLIO_GOOGLE_CLIENT_ID")
         .ok()
@@ -740,6 +835,7 @@ fn load_google_client_id_from_secrets() -> Option<String> {
         })
 }
 
+/// True when `session` is still valid and its email matches the allow list.
 fn session_matches_expected_email(session: &Session, expected_email: &str) -> bool {
     session.is_valid()
         && session

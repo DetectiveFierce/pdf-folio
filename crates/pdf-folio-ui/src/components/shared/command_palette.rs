@@ -1,13 +1,25 @@
 //! # Command palette
 //!
-//! Overlay capture layer and filtered command list for keyboard-driven actions.
+//! Keyboard-driven command overlay under `components::shared::command_palette`.
+//! Provides a full-window capture layer that dismisses on outside click and a
+//! searchable list filtered by the current command surface (library vs viewer).
+//!
+//! ## Ownership
+//!
+//! Presentation only: reads `app.chrome.command_palette_*` query and selection
+//! index, and visibility from `crate::shell::commands`. Running a selected
+//! command emits `Message`s handled by shell/domain update. Stacked by
+//! [`super::root_surface`] above domain content when the palette is open.
+//!
+//! Related: [`super::menus`] for library-switcher chrome, [`super::context_menu`]
+//! for pointer-driven actions on the same surfaces.
 
 use crate::shell::commands::{command_matches, library_commands, CommandDanger};
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{column, row};
 
-/// Full-window click-catcher that dismisses the palette when clicked.
+/// Full-window transparent click-catcher that closes the palette on press.
 pub(crate) fn command_palette_capture_layer<'a>() -> Element<'a, Message> {
     pin(
         mouse_area(container("").width(Length::Fill).height(Length::Fill))
@@ -18,7 +30,11 @@ pub(crate) fn command_palette_capture_layer<'a>() -> Element<'a, Message> {
     .into()
 }
 
-/// Searchable command list overlay for the current command surface.
+/// Centered searchable command list for the active command surface.
+///
+/// Filters visible/enabled commands by `command_palette_query`, highlights the
+/// selected index, and sizes the panel from layout metrics clamped to the
+/// current viewport.
 pub(crate) fn view_command_palette(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let panel_width = app
         .layout()

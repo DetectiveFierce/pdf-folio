@@ -1,7 +1,13 @@
 //! # Reusable library card chrome
 //!
-//! Generic (message-parameterized) widgets for document previews, drop zones,
-//! and tag rows. Domain entry cards wrap these with app-specific messages.
+//! Generic (message-parameterized) widgets under `components::library::cards`
+//! for document previews, drag insertion markers, and tag pill rows. Domain
+//! entry cards in `crate::library::view` wrap these with concrete `Message`
+//! constructors and selection chrome.
+//!
+//! Also supplies placeholder “page line” previews when thumbnails are missing
+//! (reused by the viewer thumbnail sidebar). Related: [`super::view`] for the
+//! scrollable that hosts cards, [`super::drag`] for reorder gap geometry.
 
 use iced::widget::{column, container, row, text};
 use iced::{Element, Length};
@@ -108,6 +114,7 @@ pub fn library_drop_zone_row<'a, Message: 'a>(
         .into()
 }
 
+/// Semi-transparent insertion-marker style for drag reorder drop zones.
 fn translucent_drop_zone_style(tokens: ThemeTokens) -> iced::widget::container::Style {
     let mut style = container_style(tokens, Class::DragInsertionMarker);
     if let Some(iced::Background::Color(background)) = style.background {

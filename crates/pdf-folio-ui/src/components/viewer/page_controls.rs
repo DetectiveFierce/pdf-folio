@@ -1,11 +1,25 @@
 //! # Page navigation controls
 //!
-//! Previous/next controls and jump-to-page dialog for the open document.
+//! Page chrome under `components::viewer::page_controls` for the open
+//! document: previous/next chevrons, current-page readout with inline edit,
+//! and a modal jump-to-page dialog.
+//!
+//! ## Ownership
+//!
+//! Embedded in [`super::toolbar`]; emits `PreviousPage` / `NextPage` /
+//! `StartPageInputEdit` / `Jump*` / `CloseOverlay` messages handled by viewer
+//! and shell update. Does not own document page count—callers pass
+//! `current_page` and `page_count`.
+//!
+//! Related: zoom readout in [`super::zoom`]; outline jumps in [`super::outline`].
 
 use crate::*;
 use iced::widget::{row, Svg};
 
-/// Page number display with prev/next and jump entry points.
+/// Compact prev / page-number / next control for the viewer toolbar.
+///
+/// Double-clicking the page number starts inline edit (`page_input_editing`);
+/// otherwise the label shows the 1-based `current_page` against `page_count`.
 pub(crate) fn viewer_page_control<'a>(
     app: &'a PDFolioApp,
     current_page: u16,
@@ -72,6 +86,7 @@ pub(crate) fn viewer_page_control<'a>(
     .into()
 }
 
+/// Compact SVG chevron button for previous/next page on the viewer toolbar.
 fn viewer_page_chevron_button<'a>(
     layout: &crate::style::AppLayoutTokens,
     icon: &'static [u8],
@@ -102,6 +117,7 @@ fn viewer_page_chevron_button<'a>(
         })
 }
 
+/// Resolve themed text color for `class`/`state`, falling back to `fallback`.
 fn class_text_color(
     tokens: ThemeTokens,
     class: Class,
@@ -114,7 +130,10 @@ fn class_text_color(
         .unwrap_or(fallback)
 }
 
-/// Modal to jump to a specific page number.
+/// Overlay dialog for jumping to a typed page number (`Go` / Enter / Cancel).
+///
+/// Stacked by the root surface when the jump overlay is open; max page comes
+/// from the loaded document’s page count.
 pub(crate) fn view_jump_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let max_page = app.viewer.doc.as_ref().map_or(0, |doc| doc.page_count());

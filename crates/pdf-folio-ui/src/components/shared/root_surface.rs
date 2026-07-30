@@ -1,7 +1,19 @@
 //! # Root surface composition
 //!
-//! Top-level `view` that switches on app mode and stacks global overlays
-//! (menus, dialogs, loading). Domain modules supply library/viewer subtrees.
+//! Top-level application `view` under `components::shared::root_surface`.
+//! Switches on `AppMode` (signed-out, library switcher, library, viewer) and
+//! stacks global overlays: command palette, context menus, confirmation and
+//! import/export dialogs, error banners, and loading layers.
+//!
+//! ## Ownership
+//!
+//! Single entry point composed by the iced `Application::view` path. Domain
+//! modules supply library and viewer subtrees; this module only routes and
+//! layers chrome. Prefer adding new global overlays here rather than inside
+//! domain views so stacking order stays consistent.
+//!
+//! Related children: [`super::command_palette`], [`super::context_menu`],
+//! [`super::loading`], [`super::error_banner`], [`super::menus`].
 
 use crate::components::shared::command_palette::{
     command_palette_capture_layer, view_command_palette,
@@ -27,6 +39,7 @@ use iced::widget::{column, row, stack};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
+/// Cap on startup-probe view timing logs when `PDF_FOLIO_STARTUP_PROBE` is set.
 static VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
 /// Compose the full application surface for the current `PDFolioApp` state.
@@ -195,6 +208,7 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     element
 }
 
+/// Signed-out landing: branding, auth status copy, and Google sign-in action.
 fn view_signed_out(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let signing_in = matches!(app.sync_auth.state, SyncAuthState::SigningIn);
     let button_label = if signing_in {
@@ -258,6 +272,7 @@ fn view_signed_out(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message
         .into()
 }
 
+/// Create/rename library name modal stacked over the switcher or library shell.
 fn view_library_name_dialog(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let Some(dialog) = app.libraries.name_dialog.as_ref() else {
         return container("").into();

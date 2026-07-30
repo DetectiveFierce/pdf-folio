@@ -17,6 +17,10 @@ use crate::*;
 use iced::widget::{column, row};
 
 /// Builds the full viewer-mode element tree for the current app state.
+///
+/// Toolbar above a horizontal split of optional TOC/thumbnail sidebar and the
+/// main column (error banner, jump dialog, document canvas). Command-palette
+/// and other chrome overlays are composed by the shared root surface.
 pub(crate) fn view_viewer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let sidebar: Element<'_, Message> = if app.viewer.toc_open {
         view_sidebar(app)

@@ -65,7 +65,9 @@ use crate::tokens::{
     VisualBorder, VisualStyle,
 };
 
+/// KDL value helpers (colors, numbers, font weights, node arguments).
 mod parser;
+/// Bundled/user style path resolution and directory walk order.
 mod sources;
 
 use parser::*;
@@ -177,15 +179,25 @@ impl StyleBook {
     }
 }
 
+/// Mutable accumulator while merging ordered KDL sources into a book.
+///
+/// Holds partially built themes plus global layout/labels before
+/// [`RawStyleBook::compile`] validates required themes and freezes tokens.
 #[derive(Debug, Default)]
 struct RawStyleBook {
+    /// Named theme palettes accumulated from `theme "…"` nodes.
     themes: HashMap<String, RawTheme>,
+    /// Global layout metrics from top-level `layout { … }` nodes.
     layout: AppLayoutTokens,
+    /// Chrome label maps from top-level `labels { … }` nodes.
     labels: AppLabelTokens,
 }
 
+/// One theme during parse: a full [`ThemeTokens`] value that may still receive
+/// component-state overrides scoped with `theme="…"`.
 #[derive(Debug, Clone)]
 struct RawTheme {
+    /// Resolved palette, primitives, and class styles for this theme id.
     tokens: ThemeTokens,
 }
 
@@ -1003,6 +1015,12 @@ impl RawStyleBook {
     }
 }
 
+/// Parses a component-state KDL node into a [`VisualStyle`].
+///
+/// Reads flat properties (`background`, `text`, `border`, `border_width`,
+/// `radius`) and nested children (`colors`, `border`, `rounding`/`radius`,
+/// `shadow`). The `theme` property is ignored here (scoping is handled by the
+/// caller). `name` is the source path used in error messages.
 fn parse_visual_style(
     name: &str,
     node: &KdlNode,
@@ -1069,6 +1087,8 @@ fn parse_visual_style(
     Ok(style)
 }
 
+/// Parses a nested `colors { … }` block: `background`, `text`/`text_color`,
+/// `border`/`border_color` (each a color expression against `tokens`).
 fn parse_visual_colors(
     name: &str,
     node: &KdlNode,
@@ -1101,6 +1121,10 @@ fn parse_visual_colors(
     Ok(())
 }
 
+/// Parses a nested `border { … }` block into [`VisualBorder`] / legacy fields.
+///
+/// Flat props: `width`/`border_width`, `color`/`border`/`border_color`, `radius`.
+/// Child nodes `top`/`right`/`bottom`/`left` set per-side width/color.
 fn parse_visual_border(
     name: &str,
     node: &KdlNode,
@@ -1152,6 +1176,8 @@ fn parse_visual_border(
     Ok(())
 }
 
+/// Parses one border side node (`top`/`right`/`bottom`/`left`): `width` and
+/// `color` (or `border_width` / `border` / `border_color` aliases).
 fn parse_border_side(
     name: &str,
     node: &KdlNode,
@@ -1177,6 +1203,8 @@ fn parse_border_side(
     Ok(side)
 }
 
+/// Merges a uniform width/color overlay onto an existing [`VisualBorder`], or
+/// builds one from the legacy pair when none is present.
 const fn merge_uniform_border_property(
     current: Option<VisualBorder>,
     width: Option<f32>,
@@ -1189,14 +1217,18 @@ const fn merge_uniform_border_property(
     }
 }
 
+/// Sets all sides' width on `border` via a uniform legacy merge.
 const fn apply_border_width(border: VisualBorder, width: f32) -> VisualBorder {
     border.merged(VisualBorder::from_legacy(Some(width), None))
 }
 
+/// Sets all sides' color on `border` via a uniform legacy merge.
 const fn apply_border_color(border: VisualBorder, color: Color) -> VisualBorder {
     border.merged(VisualBorder::from_legacy(None, Some(color)))
 }
 
+/// Parses a `rounding`/`radius` node: uniform `radius` (or positional arg) plus
+/// optional `top_left`/`top_right`/`bottom_right`/`bottom_left` overrides.
 fn parse_corner_radius(
     name: &str,
     node: &KdlNode,
@@ -1225,6 +1257,8 @@ fn parse_corner_radius(
     Ok(radius)
 }
 
+/// Parses a nested `shadow { … }` node: `offset_x`/`x`, `offset_y`/`y`,
+/// `blur_radius`/`blur`, and `color` (defaults to `$shadow`).
 fn parse_box_shadow(name: &str, node: &KdlNode, tokens: &ThemeTokens) -> Result<BoxShadow, String> {
     let mut shadow = BoxShadow {
         offset_x: 0.0,
@@ -1247,6 +1281,8 @@ fn parse_box_shadow(name: &str, node: &KdlNode, tokens: &ThemeTokens) -> Result<
     Ok(shadow)
 }
 
+/// Parses layout spacing from 1, 2, or 4 positional numeric args (CSS-like
+/// uniform / axes / sides) on nodes such as `padding` or `margin`.
 fn parse_box_spacing(name: &str, node: &KdlNode) -> Result<BoxSpacing, String> {
     let values = node
         .entries()
@@ -1266,6 +1302,7 @@ fn parse_box_spacing(name: &str, node: &KdlNode) -> Result<BoxSpacing, String> {
     }
 }
 
+/// Parses a nested `text { … }` node: `size` (u32) and `weight` (keyword string).
 fn parse_component_text(name: &str, node: &KdlNode) -> Result<ComponentTextStyle, String> {
     let mut text = ComponentTextStyle::EMPTY;
     for entry in node.entries() {
@@ -1287,6 +1324,7 @@ fn parse_component_text(name: &str, node: &KdlNode) -> Result<ComponentTextStyle
     Ok(text)
 }
 
+/// Mutable map for one [`LabelSection`] inside [`AppLabelTokens`].
 fn label_map_mut(
     labels: &mut AppLabelTokens,
     section: LabelSection,
@@ -1300,6 +1338,7 @@ fn label_map_mut(
     }
 }
 
+/// Maps a KDL component name string onto a [`Class`] variant (`"LibraryCard"`, …).
 fn parse_class(value: &str) -> Option<Class> {
     Some(match value {
         "AppShell" => Class::AppShell,
@@ -1377,6 +1416,7 @@ fn parse_class(value: &str) -> Option<Class> {
     })
 }
 
+/// Maps a KDL state node name onto a [`ComponentState`] (`normal`, `hovered`, …).
 fn parse_state(value: &str) -> Option<ComponentState> {
     Some(match value {
         "normal" => ComponentState::Normal,
@@ -1391,6 +1431,7 @@ fn parse_state(value: &str) -> Option<ComponentState> {
     })
 }
 
+/// Writes a `color "token" "…"` value into the matching [`ThemeTokens`] field.
 fn set_theme_color(tokens: &mut ThemeTokens, token: &str, color: Color) -> Result<(), String> {
     match token {
         "background" => tokens.background = color,
@@ -1410,6 +1451,7 @@ fn set_theme_color(tokens: &mut ThemeTokens, token: &str, color: Color) -> Resul
     Ok(())
 }
 
+/// Writes a numeric `primitive "token" value` into [`PrimitiveTokens`].
 fn set_primitive(tokens: &mut PrimitiveTokens, token: &str, value: f32) -> Result<(), String> {
     match token {
         "page_shadow_offset_x" => tokens.page_shadow_offset_x = value,
@@ -1472,6 +1514,7 @@ fn set_primitive(tokens: &mut PrimitiveTokens, token: &str, value: f32) -> Resul
     Ok(())
 }
 
+/// Writes a color primitive (`viewer_find_fill`, `viewer_find_selected_fill`).
 fn set_primitive_color(
     tokens: &mut PrimitiveTokens,
     token: &str,
@@ -1485,6 +1528,7 @@ fn set_primitive_color(
     Ok(())
 }
 
+/// Writes a `metric "token" value` layout number into [`AppLayoutTokens`].
 fn set_layout_metric(tokens: &mut AppLayoutTokens, token: &str, value: f32) -> Result<(), String> {
     match token {
         "window_width" => tokens.window_width = value,
@@ -1558,6 +1602,7 @@ fn set_layout_metric(tokens: &mut AppLayoutTokens, token: &str, value: f32) -> R
     Ok(())
 }
 
+/// Writes a `count "token" value` layout integer into [`AppLayoutTokens`].
 fn set_layout_count(tokens: &mut AppLayoutTokens, token: &str, value: usize) -> Result<(), String> {
     match token {
         "library_overscan_rows" => tokens.library_overscan_rows = value,
@@ -1613,6 +1658,8 @@ pub fn fallback_light_tokens() -> ThemeTokens {
     tokens
 }
 
+/// Seeds a minimal set of class styles on fallback palettes so UI chrome has
+/// paint before KDL component blocks are applied (or when styles fail to load).
 fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
     for class in [
         Class::AppShell,
@@ -1735,6 +1782,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
     }
 }
 
+/// Merges `style` into `tokens.class_styles[class][state]` (used by fallbacks).
 fn set_class_state(
     tokens: &mut ThemeTokens,
     class: Class,

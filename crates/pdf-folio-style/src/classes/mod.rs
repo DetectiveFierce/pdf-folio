@@ -301,8 +301,11 @@ impl Class {
     }
 }
 
+/// Shell chrome stylesheets (container, button, input, scrollable, …).
 pub mod core;
+/// Library-specific stylesheet helpers (sidebar scrollable).
 pub mod library;
+/// Viewer canvas primitive styles (page shadow, find highlights, …).
 pub mod viewer;
 
 /// Applies a parsed KDL [`VisualStyle`] on top of an iced widget style.

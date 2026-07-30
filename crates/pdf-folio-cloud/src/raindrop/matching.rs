@@ -174,11 +174,17 @@ pub(crate) fn extract_selected_pdfs_from_zip(
 
 /// Indexes selected raindrops by normalized name, stem, and size for ZIP matching.
 pub(crate) struct ZipMatchIndex {
+    /// Normalized file name → candidate raindrop indices.
     names: HashMap<String, Vec<usize>>,
+    /// Normalized file stem → candidate raindrop indices.
     stems: HashMap<String, Vec<usize>>,
+    /// Declared file size → candidate raindrop indices.
     sizes: HashMap<u64, Vec<usize>>,
+    /// Per-raindrop normalized name (parallel to the source slice).
     name_by_index: Vec<Option<String>>,
+    /// Per-raindrop normalized stem (parallel to the source slice).
     stem_by_index: Vec<Option<String>>,
+    /// Per-raindrop declared size when positive (parallel to the source slice).
     size_by_index: Vec<Option<u64>>,
 }
 

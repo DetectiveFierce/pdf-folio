@@ -1,6 +1,18 @@
 //! # Sync status indicators
 //!
-//! Small status glyphs/labels for cloud sync state in toolbars.
+//! Compact toolbar chrome under `components::shared::sync_status` that
+//! reflects cloud sync state for the active library: in-progress spinner,
+//! queued ellipsis, or last-synced checkmark with a tooltip timestamp.
+//!
+//! ## Ownership
+//!
+//! Reads `app.sync_*` and auth state; emits no messages (pure indicator).
+//! Hidden when the user is signed out. Spinner geometry reuses
+//! [`HistoryRestoreSpinner`] from `components::viewer::canvas`; muted colors
+//! use `with_alpha` from `components::library::view`.
+//!
+//! Related: blocking restore overlays in [`super::loading`]; auth flows live
+//! in the shell, not this module.
 
 use crate::components::library::view::with_alpha;
 use crate::components::viewer::canvas::HistoryRestoreSpinner;
@@ -9,9 +21,13 @@ use chrono::{DateTime, Local};
 use iced::widget::canvas;
 use std::time::{Duration, SystemTime};
 
+/// Checkmark glyph shown when sync is idle and the last run completed.
 const SYNC_CHECK_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"##;
 
-/// Toolbar indicator reflecting library cloud sync status.
+/// Library toolbar glyph for cloud sync: spinner, check, or queued ellipsis.
+///
+/// Tooltip text describes the current phase (“Syncing changes”, queue wait,
+/// or “Last synced at …”). Returns an empty shrink element when signed out.
 pub(crate) fn library_sync_indicator(
     app: &PDFolioApp,
     tokens: ThemeTokens,
@@ -86,6 +102,7 @@ pub(crate) fn library_sync_indicator(
     .into()
 }
 
+/// Tooltip string for idle sync: “Last synced at …” or “never”.
 fn last_sync_tooltip_label(last_synced_at: Option<SystemTime>) -> String {
     match last_synced_at {
         Some(time) => format!("Last synced at {}", format_local_time(time)),
@@ -93,6 +110,7 @@ fn last_sync_tooltip_label(last_synced_at: Option<SystemTime>) -> String {
     }
 }
 
+/// Local wall-clock time for sync tooltips (`%-I:%M:%S %p`).
 fn format_local_time(time: SystemTime) -> String {
     let local: DateTime<Local> = time.into();
     local.format("%-I:%M:%S %p").to_string()

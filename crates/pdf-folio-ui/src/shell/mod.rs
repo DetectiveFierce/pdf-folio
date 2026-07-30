@@ -31,13 +31,23 @@
 
 use crate::*;
 
+/// Root application state: [`PDFolioApp`], modes, and chrome runtimes.
 pub mod app;
+/// Command palette / menu registry and enablement helpers.
 pub(crate) mod commands;
+/// Widget ids, animation timings, and shared option lists.
 pub(crate) mod constants;
+/// Crate-wide [`Message`] vocabulary and related enums.
 pub mod messages;
+/// OS file-manager reveal and path URI helpers.
 pub(crate) mod platform;
+/// Session persistence and Google sync auth runtime.
 pub(crate) mod session;
+/// Keyboard binding → [`Message`] / shortcut handling.
 pub(crate) mod shortcuts;
+/// iced subscription tree (watchers, sync ticks, input).
 pub(crate) mod subscriptions;
+/// Shell-owned async work (registry sync fan-out, auto-sync).
 pub(crate) mod tasks;
+/// Top-level iced reducer; delegates library/viewer first.
 pub(crate) mod update;

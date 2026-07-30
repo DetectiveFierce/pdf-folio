@@ -43,12 +43,21 @@
 //! that needs `Db`, session persistence, or multi-field app mutation here.
 
 pub(crate) use crate::components::library::{drag, filters, metadata, selection};
+/// Imperative methods on `PDFolioApp` for selection, drag, clipboard, and history.
 pub(crate) mod actions;
+/// Derived library lists (tags, visible-entry refresh, thumbnail request windows).
 pub(crate) mod data;
+/// Zoom limits, filtered/sorted visible entries, and scroll geometry.
 pub(crate) mod layout;
+/// Multi-vault profiles (`libraries.json`), switch/create/rename/delete, and previews.
 pub mod registry;
+/// Viewport windowing, masonry layout, and hover/drop flash animations.
 pub(crate) mod state;
+/// Async/blocking DB and filesystem tasks that emit library `Message`s.
 pub(crate) mod tasks;
+/// Cover thumbnail cache keys and disk/async render helpers.
 pub(crate) mod thumbnails;
+/// Library-domain `Message` handler (`Option<Task>` when claimed).
 pub(crate) mod update;
+/// Library-mode view composition (root pane, sidebar, entry grid, folder cards).
 pub(crate) mod view;

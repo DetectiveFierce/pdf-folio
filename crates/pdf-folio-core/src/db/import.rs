@@ -107,6 +107,12 @@ pub fn import_pdf(db: &Db, path: &Path) -> Result<ImportedEntry> {
     })
 }
 
+/// Best-effort on-disk byte length for a PDF path.
+///
+/// Used when building [`crate::NewLibraryEntry::file_size`] during import so the
+/// library row can show size without re-statting later. Returns `None` when
+/// metadata cannot be read (missing file, permission error, …) rather than
+/// failing the whole import.
 pub(crate) fn file_size(path: &Path) -> Option<u64> {
     std::fs::metadata(path).ok().map(|metadata| metadata.len())
 }
@@ -161,6 +167,7 @@ pub fn hash_file(path: &Path) -> Result<String> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
+/// Recursive directory walk that appends PDF file paths under `root` into `files`.
 fn scan_pdf_files_into(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     for entry in fs::read_dir(root)
         .with_context(|| format!("Could not read import folder: {}.", root.display()))?
@@ -179,6 +186,7 @@ fn scan_pdf_files_into(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+/// True when `path` has a `.pdf` extension (case-insensitive).
 fn is_pdf_path(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -263,6 +271,7 @@ impl Db {
     }
 }
 
+/// Maps an `import_sources` SELECT row into an [`ImportSource`].
 fn row_to_import_source(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportSource> {
     let created_at: i64 = row.get(4)?;
     let updated_at: i64 = row.get(5)?;

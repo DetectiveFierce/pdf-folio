@@ -14,8 +14,11 @@
 //! Prefer these builders when the same chrome appears in multiple views; reach
 //! for class stylesheets directly when composing one-off layouts.
 
+/// Shared chrome builders (toolbar buttons, tags, empty states, …).
 pub mod core;
+/// Library selection checkboxes (entry + master).
 pub mod library;
+/// Viewer-specific builders (TOC entry).
 pub mod viewer;
 
 pub use core::{

@@ -170,12 +170,18 @@ pub struct AppLayoutTokens {
 }
 
 impl AppLayoutTokens {
-    /// Returns the default app window size as expected by iced.
+    /// Default window size as `[width, height]` for iced's application settings.
+    ///
+    /// Backed by `window_width` / `window_height` from `application.kdl` (or defaults).
     pub fn window_size(&self) -> [f32; 2] {
         [self.window_width, self.window_height]
     }
 
-    /// Returns an extra KDL-backed component metric.
+    /// Looks up an open-ended KDL metric keyed as `{component}.{property}`.
+    ///
+    /// Populated by `layout { metric … }` / component layout extras when the
+    /// field is not a fixed struct member. Returns `fallback` when the key is
+    /// absent so call sites can keep a hard-coded safety value.
     pub fn metric(&self, component: &str, property: &str, fallback: f32) -> f32 {
         self.metrics
             .get(&format!("{component}.{property}"))
@@ -183,7 +189,10 @@ impl AppLayoutTokens {
             .unwrap_or(fallback)
     }
 
-    /// Returns an extra KDL-backed component count.
+    /// Looks up an open-ended KDL integer count keyed as `{component}.{property}`.
+    ///
+    /// Same map as [`Self::metric`] but for discrete values (column counts, …).
+    /// Returns `fallback` when the key is missing.
     pub fn count(&self, component: &str, property: &str, fallback: usize) -> usize {
         self.counts
             .get(&format!("{component}.{property}"))
@@ -191,13 +200,13 @@ impl AppLayoutTokens {
             .unwrap_or(fallback)
     }
 
-    /// Stores an extra KDL-backed component metric.
+    /// Records a metric during style-book parse (`Component.property` → f32).
     pub fn set_metric(&mut self, component: &str, property: &str, value: f32) {
         self.metrics
             .insert(format!("{component}.{property}"), value);
     }
 
-    /// Stores an extra KDL-backed component count.
+    /// Records a count during style-book parse (`Component.property` → usize).
     pub fn set_count(&mut self, component: &str, property: &str, value: usize) {
         self.counts.insert(format!("{component}.{property}"), value);
     }
@@ -298,7 +307,10 @@ pub struct AppLabelTokens {
 }
 
 impl AppLabelTokens {
-    /// Returns a configured label or the supplied fallback.
+    /// Resolves a KDL label under `section`/`key`, or `fallback` when unset.
+    ///
+    /// Call sites pass a compile-time English fallback so missing KDL never
+    /// blanks chrome (menus, selection toolbar, sidebar tabs, misc status).
     pub fn get<'a>(&'a self, section: LabelSection, key: &str, fallback: &'a str) -> &'a str {
         let source = match section {
             LabelSection::AppMenu => &self.app_menu,
@@ -311,34 +323,34 @@ impl AppLabelTokens {
     }
 }
 
-/// Label namespaces accepted by `AppLabelTokens`.
+/// Label map namespace passed to [`AppLabelTokens::get`] (mirrors KDL label sections).
 #[derive(Debug, Clone, Copy)]
 pub enum LabelSection {
-    /// App menu names.
+    /// Top-level menu titles (`File`, `Edit`, …).
     AppMenu,
-    /// App menu command labels.
+    /// Individual app-menu command captions.
     AppMenuAction,
-    /// Selection toolbar command labels.
+    /// Multi-select / selection toolbar command captions.
     SelectionToolbarAction,
-    /// Library sidebar tab labels.
+    /// Library sidebar tab titles (Tags, Folders, …).
     LibrarySidebarTab,
-    /// Miscellaneous text.
+    /// Catch-all short status and chrome strings.
     Text,
 }
 
-/// Horizontal text alignment tokens.
+/// Semantic horizontal text alignment (independent of LTR/RTL iced left/right).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextAlignment {
-    /// Align text to the start edge.
+    /// Leading edge (maps to iced Left in LTR).
     Start,
-    /// Center text.
+    /// Horizontal center.
     Center,
-    /// Align text to the end edge.
+    /// Trailing edge (maps to iced Right in LTR).
     End,
 }
 
 impl TextAlignment {
-    /// Converts to iced's horizontal text alignment.
+    /// iced horizontal alignment used by text widgets / factories.
     pub const fn horizontal(self) -> iced::alignment::Horizontal {
         match self {
             Self::Start => iced::alignment::Horizontal::Left,
@@ -348,19 +360,19 @@ impl TextAlignment {
     }
 }
 
-/// Content alignment tokens for containers and layout helpers.
+/// Semantic content alignment for containers and layout helpers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentAlignment {
-    /// Align content to the start edge.
+    /// Leading / top edge depending on axis.
     Start,
-    /// Center content.
+    /// Centered on the chosen axis.
     Center,
-    /// Align content to the end edge.
+    /// Trailing / bottom edge depending on axis.
     End,
 }
 
 impl ContentAlignment {
-    /// Converts to iced's horizontal content alignment.
+    /// Horizontal iced alignment (Start→Left, End→Right in LTR).
     pub const fn horizontal(self) -> iced::alignment::Horizontal {
         match self {
             Self::Start => iced::alignment::Horizontal::Left,
@@ -369,7 +381,7 @@ impl ContentAlignment {
         }
     }
 
-    /// Converts to iced's vertical content alignment.
+    /// Vertical iced alignment (Start→Top, End→Bottom).
     pub const fn vertical(self) -> iced::alignment::Vertical {
         match self {
             Self::Start => iced::alignment::Vertical::Top,
@@ -379,27 +391,31 @@ impl ContentAlignment {
     }
 }
 
-/// Theme color tokens used by PDF-Folio views.
+/// Optional paint overrides for one class state (from KDL `component` blocks).
+///
+/// Each field is `None` until KDL or a theme sets it. Merged with
+/// [`VisualStyle::merged`] so `Hovered` / `Pressed` only specify deltas over
+/// `Normal`. Consumed by `classes::*` when building iced stylesheets.
 #[derive(Debug, Clone, Copy)]
 pub struct VisualStyle {
-    /// Background color override.
+    /// Fill color when the widget draws a solid background.
     pub background: Option<Color>,
-    /// Text color override.
+    /// Foreground / label color for the widget contents.
     pub text_color: Option<Color>,
-    /// Border color override.
+    /// Legacy uniform border color (ignored when [`Self::border`] is set).
     pub border_color: Option<Color>,
-    /// Border width override.
+    /// Legacy uniform border width in logical pixels.
     pub border_width: Option<f32>,
-    /// Per-side border overrides.
+    /// Side-aware border override (preferred over uniform border fields).
     pub border: Option<VisualBorder>,
-    /// Radius override.
+    /// Corner radii applied to the widget chrome.
     pub radius: Option<CornerRadius>,
-    /// Shadow override.
+    /// Drop shadow drawn behind elevated surfaces.
     pub shadow: Option<BoxShadow>,
 }
 
 impl VisualStyle {
-    /// Empty style override.
+    /// No overrides — resolve falls through to theme defaults / other states.
     pub const EMPTY: Self = Self {
         background: None,
         text_color: None,
@@ -410,7 +426,9 @@ impl VisualStyle {
         shadow: None,
     };
 
-    /// Merges another style over this one.
+    /// Layer-merge: each `Some` field in `overlay` replaces the base field.
+    ///
+    /// Nested [`VisualBorder`] values merge side-by-side rather than wholesale replace.
     pub const fn merged(self, overlay: Self) -> Self {
         Self {
             background: match overlay.background {
@@ -447,16 +465,16 @@ impl VisualStyle {
     }
 }
 
-/// Box shadow styling for components.
+/// Drop-shadow parameters mapped onto iced's `Shadow` (KDL `shadow { … }`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoxShadow {
-    /// Horizontal shadow offset.
+    /// Horizontal offset in logical pixels (positive = right).
     pub offset_x: f32,
-    /// Vertical shadow offset.
+    /// Vertical offset in logical pixels (positive = down).
     pub offset_y: f32,
-    /// Shadow blur radius.
+    /// Gaussian blur radius in logical pixels.
     pub blur_radius: f32,
-    /// Shadow color.
+    /// Shadow tint (usually a translucent token color).
     pub color: Color,
 }
 
@@ -470,23 +488,26 @@ impl From<BoxShadow> for iced::Shadow {
     }
 }
 
-/// Border styling for one side of a component.
+/// Optional width/color for a single edge of a [`VisualBorder`].
+///
+/// Used by the side-border widget path when iced’s uniform border is insufficient
+/// (e.g. only a bottom hairline under a toolbar).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BorderSide {
-    /// Side width in logical pixels.
+    /// Edge thickness in logical pixels (`None` = inherit / no override).
     pub width: Option<f32>,
-    /// Side color.
+    /// Edge color (`None` = inherit / no override).
     pub color: Option<Color>,
 }
 
 impl BorderSide {
-    /// Empty side override.
+    /// No side override (transparent to merge / side-border extractors).
     pub const EMPTY: Self = Self {
         width: None,
         color: None,
     };
 
-    /// Creates a side with both width and color set.
+    /// Fully specified side for KDL or programmatic uniform borders.
     pub const fn new(width: f32, color: Color) -> Self {
         Self {
             width: Some(width),
@@ -494,7 +515,7 @@ impl BorderSide {
         }
     }
 
-    /// Merges another side override over this one.
+    /// Field-wise merge; `overlay` `Some` values win.
     pub const fn merged(self, overlay: Self) -> Self {
         Self {
             width: match overlay.width {
@@ -509,21 +530,25 @@ impl BorderSide {
     }
 }
 
-/// Border styling for each side of a component.
+/// Per-side border overrides from KDL (`border { top …; … }`) or code.
+///
+/// When sides differ, `classes` clear iced’s uniform border and the
+/// `borders::side_border` wrapper paints each edge. When all four sides match,
+/// [`Self::uniform_style`] can feed iced’s native border instead.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VisualBorder {
-    /// Top side.
+    /// Top edge.
     pub top: BorderSide,
-    /// Right side.
+    /// Right edge.
     pub right: BorderSide,
-    /// Bottom side.
+    /// Bottom edge.
     pub bottom: BorderSide,
-    /// Left side.
+    /// Left edge.
     pub left: BorderSide,
 }
 
 impl VisualBorder {
-    /// Empty border override.
+    /// All sides empty (no side-border paint from this override).
     pub const EMPTY: Self = Self {
         top: BorderSide::EMPTY,
         right: BorderSide::EMPTY,
@@ -531,7 +556,7 @@ impl VisualBorder {
         left: BorderSide::EMPTY,
     };
 
-    /// Creates a border with the same style on each side.
+    /// Same width/color on every edge (typical KDL `border width=… color=…`).
     pub const fn uniform(width: f32, color: Color) -> Self {
         let side = BorderSide::new(width, color);
         Self {
@@ -542,7 +567,7 @@ impl VisualBorder {
         }
     }
 
-    /// Creates a partial border from legacy uniform fields.
+    /// Builds a four-side border from legacy flat `border_width` / `border_color`.
     pub const fn from_legacy(width: Option<f32>, color: Option<Color>) -> Self {
         let side = BorderSide { width, color };
         Self {
@@ -553,7 +578,7 @@ impl VisualBorder {
         }
     }
 
-    /// Merges another border override over this one.
+    /// Side-wise merge for stacking Normal → Hovered state borders.
     pub const fn merged(self, overlay: Self) -> Self {
         Self {
             top: self.top.merged(overlay.top),
@@ -563,7 +588,7 @@ impl VisualBorder {
         }
     }
 
-    /// Returns the border as a native iced border when all sides match.
+    /// `(width, color)` when all four sides are fully specified and equal; else `None`.
     pub fn uniform_style(self) -> Option<(f32, Color)> {
         let width = self.top.width?;
         let color = self.top.color?;
@@ -576,21 +601,21 @@ impl VisualBorder {
     }
 }
 
-/// Border radius values for each corner.
+/// Per-corner radii in logical pixels (KDL `radius` / iced `border::Radius`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CornerRadius {
-    /// Top-left corner radius.
+    /// Top-left corner.
     pub top_left: f32,
-    /// Top-right corner radius.
+    /// Top-right corner.
     pub top_right: f32,
-    /// Bottom-right corner radius.
+    /// Bottom-right corner.
     pub bottom_right: f32,
-    /// Bottom-left corner radius.
+    /// Bottom-left corner.
     pub bottom_left: f32,
 }
 
 impl CornerRadius {
-    /// Creates a radius with the same value for each corner.
+    /// Same radius on every corner (most chrome); prefer [`Radius`] scale constants.
     pub const fn uniform(value: f32) -> Self {
         Self {
             top_left: value,
@@ -612,50 +637,56 @@ impl From<CornerRadius> for iced::border::Radius {
     }
 }
 
-/// Per-state style overrides for one semantic class.
+/// Full style payload for one [`Class`]: states, layout, and text from KDL.
+///
+/// Stored in `ThemeTokens.class_styles[class.index()]`. Widget factories read
+/// `layout` / `text`; stylesheet helpers call [`ClassStyle::resolve`].
 #[derive(Debug, Clone, Copy)]
 pub struct ClassStyle {
-    /// State overrides ordered by `ComponentState::index`.
+    /// Paint overrides indexed by [`ComponentState::index`] (`Normal`, `Hovered`, …).
     pub states: [VisualStyle; ComponentState::COUNT],
-    /// Layout overrides for this component.
+    /// Size/padding/margin/spacing from the component’s `layout { … }` block.
     pub layout: ComponentLayout,
-    /// Text styling overrides for this component.
+    /// Default font size/weight from the component’s `text { … }` block.
     pub text: ComponentTextStyle,
 }
 
 impl ClassStyle {
-    /// Empty class style.
+    /// Zeroed class: no paint, layout, or text overrides.
     pub const EMPTY: Self = Self {
         states: [VisualStyle::EMPTY; ComponentState::COUNT],
         layout: ComponentLayout::EMPTY,
         text: ComponentTextStyle::EMPTY,
     };
 
-    /// Returns the resolved style for a component state.
+    /// `Normal` style merged with the requested state (state fields win).
     pub fn resolve(self, state: ComponentState) -> VisualStyle {
         self.states[ComponentState::Normal.index()].merged(self.states[state.index()])
     }
 }
 
-/// Layout properties that can be attached to a styled component in KDL.
+/// Size and box-model properties from a KDL `layout { … }` block on a component.
+///
+/// Widget factories (e.g. `toolbar_button`) call the `padding_*` / `margin_*`
+/// helpers so missing sides fall back to axis values or a [`Spacing`] constant.
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentLayout {
-    /// Fixed width in logical pixels.
+    /// Fixed width in logical pixels when set.
     pub width: Option<f32>,
-    /// Fill-portion width for row/column layouts.
+    /// iced `Length::FillPortion` width when set (row/column children).
     pub width_portion: Option<u16>,
-    /// Fixed height in logical pixels.
+    /// Fixed height in logical pixels when set.
     pub height: Option<f32>,
-    /// Component padding.
+    /// Inner padding (KDL `padding` shorthand or per-side).
     pub padding: BoxSpacing,
-    /// External component margin/gutter.
+    /// Outer margin/gutter around the component.
     pub margin: BoxSpacing,
-    /// Child spacing.
+    /// Gap between children when the component is a layout container.
     pub spacing: Option<f32>,
 }
 
 impl ComponentLayout {
-    /// Empty component layout.
+    /// No layout overrides — callers must supply their own fallbacks.
     pub const EMPTY: Self = Self {
         width: None,
         width_portion: None,
@@ -665,7 +696,7 @@ impl ComponentLayout {
         spacing: None,
     };
 
-    /// Merges another layout over this one.
+    /// Field-wise merge for stacking theme defaults under component KDL.
     pub const fn merged(self, overlay: Self) -> Self {
         Self {
             width: match overlay.width {
@@ -689,68 +720,70 @@ impl ComponentLayout {
         }
     }
 
-    /// Returns horizontal padding, falling back to uniform padding.
+    /// Horizontal padding: left/right if set, else `fallback` (typically a [`Spacing`] constant).
+    ///
+    /// Backs iced `.padding([y, x])` on buttons and inputs when KDL omits sides.
     pub fn padding_x(self, fallback: f32) -> f32 {
         self.padding.horizontal(fallback)
     }
 
-    /// Returns vertical padding, falling back to uniform padding.
+    /// Vertical padding: top/bottom if set, else `fallback`.
     pub fn padding_y(self, fallback: f32) -> f32 {
         self.padding.vertical(fallback)
     }
 
-    /// Returns left padding.
+    /// Left padding; falls back to [`Self::padding_x`] then `fallback`.
     pub fn padding_left(self, fallback: f32) -> f32 {
         self.padding
             .left
             .unwrap_or_else(|| self.padding_x(fallback))
     }
 
-    /// Returns right padding.
+    /// Right padding; falls back to [`Self::padding_x`] then `fallback`.
     pub fn padding_right(self, fallback: f32) -> f32 {
         self.padding
             .right
             .unwrap_or_else(|| self.padding_x(fallback))
     }
 
-    /// Returns top padding.
+    /// Top padding; falls back to [`Self::padding_y`] then `fallback`.
     pub fn padding_top(self, fallback: f32) -> f32 {
         self.padding.top.unwrap_or_else(|| self.padding_y(fallback))
     }
 
-    /// Returns bottom padding.
+    /// Bottom padding; falls back to [`Self::padding_y`] then `fallback`.
     pub fn padding_bottom(self, fallback: f32) -> f32 {
         self.padding
             .bottom
             .unwrap_or_else(|| self.padding_y(fallback))
     }
 
-    /// Returns horizontal margin.
+    /// Horizontal margin: left/right if set, else `fallback`.
     pub fn margin_x(self, fallback: f32) -> f32 {
         self.margin.horizontal(fallback)
     }
 
-    /// Returns vertical margin.
+    /// Vertical margin: top/bottom if set, else `fallback`.
     pub fn margin_y(self, fallback: f32) -> f32 {
         self.margin.vertical(fallback)
     }
 
-    /// Returns left margin.
+    /// Left margin; falls back to [`Self::margin_x`] then `fallback`.
     pub fn margin_left(self, fallback: f32) -> f32 {
         self.margin.left.unwrap_or_else(|| self.margin_x(fallback))
     }
 
-    /// Returns right margin.
+    /// Right margin; falls back to [`Self::margin_x`] then `fallback`.
     pub fn margin_right(self, fallback: f32) -> f32 {
         self.margin.right.unwrap_or_else(|| self.margin_x(fallback))
     }
 
-    /// Returns top margin.
+    /// Top margin; falls back to [`Self::margin_y`] then `fallback`.
     pub fn margin_top(self, fallback: f32) -> f32 {
         self.margin.top.unwrap_or_else(|| self.margin_y(fallback))
     }
 
-    /// Returns bottom margin.
+    /// Bottom margin; falls back to [`Self::margin_y`] then `fallback`.
     pub fn margin_bottom(self, fallback: f32) -> f32 {
         self.margin
             .bottom
@@ -758,21 +791,24 @@ impl ComponentLayout {
     }
 }
 
-/// CSS-like box spacing values for padding and margin.
+/// CSS-like optional sides for KDL padding/margin shorthands.
+///
+/// Parsed from `padding 8`, `padding 4 12`, or `padding top=…` style nodes.
+/// Unset sides stay `None` so [`ComponentLayout`] helpers can apply scale fallbacks.
 #[derive(Debug, Clone, Copy)]
 pub struct BoxSpacing {
-    /// Top spacing.
+    /// Top side when explicitly set in KDL.
     pub top: Option<f32>,
-    /// Right spacing.
+    /// Right side when explicitly set in KDL.
     pub right: Option<f32>,
-    /// Bottom spacing.
+    /// Bottom side when explicitly set in KDL.
     pub bottom: Option<f32>,
-    /// Left spacing.
+    /// Left side when explicitly set in KDL.
     pub left: Option<f32>,
 }
 
 impl BoxSpacing {
-    /// Empty spacing.
+    /// All sides unset (inherit fallbacks from layout helpers).
     pub const EMPTY: Self = Self {
         top: None,
         right: None,
@@ -780,7 +816,7 @@ impl BoxSpacing {
         left: None,
     };
 
-    /// Uniform spacing.
+    /// Same value on every side (KDL single-number padding/margin).
     pub const fn uniform(value: f32) -> Self {
         Self {
             top: Some(value),
@@ -790,7 +826,7 @@ impl BoxSpacing {
         }
     }
 
-    /// Axis spacing, ordered like iced/CSS shorthand: vertical, horizontal.
+    /// Two-value CSS/iced shorthand: `vertical` top/bottom, `horizontal` left/right.
     pub const fn axes(vertical: f32, horizontal: f32) -> Self {
         Self {
             top: Some(vertical),
@@ -800,7 +836,7 @@ impl BoxSpacing {
         }
     }
 
-    /// Four-value spacing, ordered top, right, bottom, left.
+    /// Four-value CSS order: top, right, bottom, left.
     pub const fn sides(top: f32, right: f32, bottom: f32, left: f32) -> Self {
         Self {
             top: Some(top),
@@ -810,7 +846,7 @@ impl BoxSpacing {
         }
     }
 
-    /// Merges another spacing value over this one.
+    /// Field-wise merge; overlay `Some` sides replace the base.
     pub const fn merged(self, overlay: Self) -> Self {
         Self {
             top: match overlay.top {
@@ -841,23 +877,25 @@ impl BoxSpacing {
     }
 }
 
-/// Text properties that can be attached to a styled component in KDL.
+/// Optional font size/weight from a KDL `text { … }` block on a component.
+///
+/// Widget factories fall back to [`FontSize`] / [`FontWeight`] constants when unset.
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentTextStyle {
-    /// Font size in logical pixels.
+    /// Font size in logical pixels when set by theme/component KDL.
     pub size: Option<u32>,
-    /// Font weight.
+    /// iced font weight when set (`regular` / `medium` / `semibold` / `bold` in KDL).
     pub weight: Option<iced::font::Weight>,
 }
 
 impl ComponentTextStyle {
-    /// Empty component text style.
+    /// No text overrides — factories use scale defaults.
     pub const EMPTY: Self = Self {
         size: None,
         weight: None,
     };
 
-    /// Merges another text style over this one.
+    /// Field-wise merge for theme → component stacking.
     pub const fn merged(self, overlay: Self) -> Self {
         Self {
             size: match overlay.size {
@@ -872,114 +910,117 @@ impl ComponentTextStyle {
     }
 }
 
-/// Runtime style values that are not represented by iced's widget styles.
+/// Drawing metrics that are not iced stylesheet fields (viewer, trees, chrome sizes).
+///
+/// Defaults live in Rust; theme/component KDL can override individual keys via the
+/// style book. Stored on [`ThemeTokens::primitives`].
 #[derive(Debug, Clone, Copy)]
 pub struct PrimitiveTokens {
-    /// Viewer page shadow x offset.
+    /// PDF page drop-shadow X offset for the viewer canvas.
     pub page_shadow_offset_x: f32,
-    /// Viewer page shadow y offset.
+    /// PDF page drop-shadow Y offset for the viewer canvas.
     pub page_shadow_offset_y: f32,
-    /// Unselected viewer find highlight fill.
+    /// Unselected find-in-document highlight fill on the canvas.
     pub viewer_find_fill: Color,
-    /// Selected viewer find highlight fill.
+    /// Active find match highlight fill on the canvas.
     pub viewer_find_selected_fill: Color,
-    /// Mix factor for viewer text-selection fill.
+    /// Mix toward accent when building text-selection fill.
     pub viewer_text_selection_mix: f32,
-    /// Alpha for viewer text-selection fill.
+    /// Alpha applied to the text-selection overlay fill.
     pub viewer_text_selection_alpha: f32,
-    /// Progress bar girth.
+    /// Progress-bar thickness (girth) for library/import rails.
     pub progress_girth: f32,
-    /// Slider rail width.
+    /// Slider track thickness (library grid zoom, etc.).
     pub slider_rail_width: f32,
-    /// Slider handle radius.
+    /// Slider thumb radius.
     pub slider_handle_radius: f32,
-    /// Standard scrollbar rail width.
+    /// Main document scrollable rail width.
     pub scrollbar_width: f32,
-    /// Standard scrollbar scroller width.
+    /// Main document scrollbar thumb width.
     pub scrollbar_scroller_width: f32,
-    /// Sidebar scrollbar rail width.
+    /// Sidebar scrollable rail width (denser chrome).
     pub sidebar_scrollbar_width: f32,
-    /// Sidebar scrollbar scroller width.
+    /// Sidebar scrollbar thumb width.
     pub sidebar_scrollbar_scroller_width: f32,
-    /// Scrollbar radius.
+    /// Scrollbar thumb corner radius.
     pub scrollbar_radius: f32,
-    /// Auto-scroll affordance radius.
+    /// Middle-click auto-scroll affordance corner radius.
     pub auto_scroll_radius: f32,
-    /// Auto-scroll affordance shadow blur.
+    /// Auto-scroll affordance drop-shadow blur.
     pub auto_scroll_shadow_blur: f32,
-    /// Generated document preview line spacing.
+    /// Placeholder “document lines” spacing on generated previews.
     pub document_preview_line_spacing: f32,
-    /// Generated document preview minimum line width.
+    /// Minimum width of a generated preview body line.
     pub document_preview_min_line_width: f32,
-    /// Generated document preview heading line height.
+    /// Height of the bold heading line in generated previews.
     pub document_preview_heading_line_height: f32,
-    /// Generated document preview body line height.
+    /// Height of body lines in generated previews.
     pub document_preview_body_line_height: f32,
-    /// Generated document preview line radius.
+    /// Corner radius of generated preview line stubs.
     pub document_preview_line_radius: f32,
-    /// Flush media background mix amount.
+    /// Mix amount for flush media card backgrounds toward surface.
     pub flush_media_background_mix: f32,
-    /// Library view toggle icon size.
+    /// Icon size for library grid/list view toggles.
     pub library_view_toggle_icon_size: f32,
-    /// Library grid zoom value label width.
+    /// Width reserved for the grid-zoom percentage label.
     pub library_grid_zoom_label_width: f32,
-    /// Library metadata-density picker width.
+    /// Width of the metadata-density pick list.
     pub library_metadata_picker_width: f32,
-    /// Library sort picker menu height.
+    /// Max height of the library sort dropdown panel.
     pub library_sort_menu_height: f32,
-    /// Parent-directory drop icon width.
+    /// “Up one folder” drop-target icon width.
     pub folder_parent_icon_width: f32,
-    /// Parent-directory drop icon height.
+    /// “Up one folder” drop-target icon height.
     pub folder_parent_icon_height: f32,
-    /// Folder card glyph size.
+    /// Folder glyph size inside folder cards.
     pub folder_icon_size: f32,
-    /// Folder icon capsule width.
+    /// Capsule width behind the folder glyph.
     pub folder_icon_container_width: f32,
-    /// Folder icon capsule height.
+    /// Capsule height behind the folder glyph.
     pub folder_icon_container_height: f32,
-    /// Folder icon capsule background accent mix.
+    /// Accent mix for the folder glyph capsule background.
     pub folder_icon_background_mix: f32,
-    /// Library switcher sidebar icon size.
+    /// Library switcher row icon size in the sidebar.
     pub library_switcher_sidebar_icon_size: f32,
-    /// Library switcher sidebar icon slot size.
+    /// Hit target slot around the switcher icon.
     pub library_switcher_sidebar_icon_slot: f32,
-    /// Library switcher sidebar button height.
+    /// Library switcher row height.
     pub library_switcher_sidebar_button_height: f32,
-    /// Library switcher sidebar text width.
+    /// Label width beside the library switcher icon.
     pub library_switcher_sidebar_text_width: f32,
-    /// Sidebar chevron icon size.
+    /// Expand/collapse chevron glyph size in trees.
     pub sidebar_chevron_icon_size: f32,
-    /// Sidebar chevron button size.
+    /// Expand/collapse chevron button size.
     pub sidebar_chevron_button_size: f32,
-    /// Sidebar chevron button padding.
+    /// Expand/collapse chevron button padding.
     pub sidebar_chevron_button_padding: f32,
-    /// File tree indent width per depth level.
+    /// Extra left indent per depth level in the library file tree.
     pub file_tree_indent_width: f32,
-    /// File tree maximum indentation.
+    /// Cap on cumulative file-tree indentation.
     pub file_tree_max_indent: f32,
-    /// File tree metadata width per character.
+    /// Estimated width per metadata character in tree rows.
     pub file_tree_meta_char_width: f32,
-    /// File tree minimum metadata width.
+    /// Minimum metadata column width in tree rows.
     pub file_tree_meta_min_width: f32,
-    /// File tree maximum metadata width.
+    /// Maximum metadata column width in tree rows.
     pub file_tree_meta_max_width: f32,
-    /// File tree row vertical padding.
+    /// Vertical padding inside a file-tree row.
     pub file_tree_row_padding_y: f32,
-    /// Raindrop import tree indent width per depth level.
+    /// Indent per depth in the Raindrop import collection tree.
     pub raindrop_tree_indent_width: f32,
-    /// Raindrop import tree maximum indentation.
+    /// Cap on Raindrop import tree indentation.
     pub raindrop_tree_max_indent: f32,
-    /// Raindrop import tree fold control width.
+    /// Width of the fold control column in the Raindrop tree.
     pub raindrop_tree_fold_width: f32,
-    /// Raindrop import tree row vertical padding.
+    /// Vertical padding inside a Raindrop tree row.
     pub raindrop_tree_row_padding_y: f32,
-    /// Raindrop import new-folder icon size.
+    /// “New folder” icon size in Raindrop import UI.
     pub raindrop_new_folder_icon_size: f32,
-    /// App menu separator height.
+    /// Hairline height for app-menu separators.
     pub menu_separator_height: f32,
-    /// Context menu separator height.
+    /// Hairline height for context-menu separators.
     pub context_menu_separator_height: f32,
-    /// Selection toolbar menu button height.
+    /// Height of overflow/menu buttons in the selection toolbar.
     pub selection_menu_button_height: f32,
 }
 
@@ -1046,36 +1087,37 @@ impl Default for PrimitiveTokens {
 /// Fully resolved palette, per-class styles, and drawing primitives for one theme.
 ///
 /// Obtained from [`crate::StyleBook::tokens`] or [`crate::AppTheme::tokens`].
-/// Views should treat this as an immutable snapshot for a single frame.
+/// Views should treat this as an immutable snapshot for a single frame. Named
+/// colors come from `themes/*.kdl`; class paint/layout from `components/**/*.kdl`.
 #[derive(Debug, Clone, Copy)]
 pub struct ThemeTokens {
-    /// Window background.
+    /// Root window / app-shell background (`background` theme token).
     pub background: Color,
-    /// Toolbar and sidebar surface.
+    /// Default chrome surface for toolbars and sidebars (`surface`).
     pub surface: Color,
-    /// Elevated surface color.
+    /// Elevated panels, menus, and cards (`surface_raised`).
     pub surface_raised: Color,
-    /// Primary text color.
+    /// Primary body/control label color (`text_primary`).
     pub text_primary: Color,
-    /// Secondary text color.
+    /// Secondary/muted labels and metadata (`text_secondary`).
     pub text_secondary: Color,
-    /// Accent color for active controls.
+    /// Interactive accent for selection, links, and active thumbs (`accent`).
     pub accent: Color,
-    /// Border color.
+    /// Default hairline / rail color (`border`).
     pub border: Color,
-    /// Error color.
+    /// Destructive/error emphasis (`error`).
     pub error: Color,
-    /// Viewer canvas background.
+    /// PDF viewer canvas backdrop behind pages (`canvas`).
     pub canvas: Color,
-    /// Placeholder page fill.
+    /// Unrendered page placeholder fill (`placeholder`).
     pub placeholder: Color,
-    /// Focus outline color.
+    /// Keyboard focus ring color (`focus`).
     pub focus: Color,
-    /// Subtle shadow color.
+    /// Shared shadow tint for elevated chrome and page drop shadows (`shadow`).
     pub shadow: Color,
-    /// Per-class style overrides loaded from KDL.
+    /// Per-[`Class`] paint/layout/text loaded from component KDL.
     pub class_styles: [ClassStyle; Class::COUNT],
-    /// Primitive drawing and sizing tokens loaded from KDL.
+    /// Non-palette metrics (scrollbars, find highlights, tree indents, …).
     pub primitives: PrimitiveTokens,
 }
 
@@ -1157,7 +1199,9 @@ pub const UI_FONT_FAMILY: &str = "IBM Plex Sans";
 /// Display / brand font family name (Vollkorn), registered from bundled bytes.
 pub const DISPLAY_FONT_FAMILY: &str = "Vollkorn";
 
-/// iced [`Font`] for the primary UI face at the given weight.
+/// iced [`Font`] for IBM Plex Sans at `weight` (UI chrome, body, controls).
+///
+/// Prefer this over ad-hoc families so bundled font registration stays in sync.
 pub fn ui_font(weight: iced::font::Weight) -> Font {
     Font {
         family: font::Family::Name(UI_FONT_FAMILY),
@@ -1166,7 +1210,7 @@ pub fn ui_font(weight: iced::font::Weight) -> Font {
     }
 }
 
-/// iced [`Font`] for the display face at the given weight.
+/// iced [`Font`] for Vollkorn at `weight` (section headings, brand display).
 pub fn display_font(weight: iced::font::Weight) -> Font {
     Font {
         family: font::Family::Name(DISPLAY_FONT_FAMILY),

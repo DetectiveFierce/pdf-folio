@@ -16,9 +16,13 @@
 //! Methods on `PDFolioApp` here open the switcher, swap `app.db`, reset
 //! library runtime state, and refresh folders/entries for the new vault.
 
+/// Switcher cover previews loaded from each vault database.
 pub(crate) mod preview;
+/// Load/create/rename/delete vaults and `libraries.json` paths under app data.
 pub(crate) mod session;
+/// `LibraryProfile`, `LibraryRegistryRuntime`, name dialogs, and preview payloads.
 pub(crate) mod state;
+/// Merge remote sync library rows into the local multi-library registry.
 pub(crate) mod tasks;
 
 pub(crate) use preview::*;

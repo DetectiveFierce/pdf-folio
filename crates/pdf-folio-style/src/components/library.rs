@@ -11,6 +11,7 @@ use iced::{Element, Length};
 use crate::classes::{button_style, Class};
 use crate::tokens::{ui_font, FontSize, FontWeight, ThemeTokens};
 
+/// Embedded checkmark SVG for entry selection checkboxes (recolored via iced Svg style).
 const CHECK_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"##;
 
 /// Selection state represented by the library master checkbox.
@@ -57,6 +58,7 @@ pub fn master_checkbox<'a, Message: Clone + 'a>(
     .on_press(on_click)
 }
 
+/// Sized, class-styled button shell shared by entry and master checkboxes.
 fn checkbox_button<'a, Message: Clone + 'a>(
     content: Element<'a, Message>,
     tokens: ThemeTokens,
@@ -70,6 +72,7 @@ fn checkbox_button<'a, Message: Clone + 'a>(
         .style(move |_, status| button_style(tokens, class, status))
 }
 
+/// Check SVG mark when `checked`, otherwise an empty spacer of the same size.
 fn selection_checkbox_mark<'a, Message: 'a>(
     checked: bool,
     tokens: ThemeTokens,
@@ -97,6 +100,7 @@ fn selection_checkbox_mark<'a, Message: 'a>(
     }
 }
 
+/// Bold centered text mark used by the master checkbox (empty / − / ✓).
 fn checkbox_text_mark<'a, Message: 'a>(
     label: &'static str,
     tokens: ThemeTokens,

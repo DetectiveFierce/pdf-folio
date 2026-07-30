@@ -31,6 +31,11 @@ use anyhow::{Context, Result};
 use pdf_folio_cloud::sync::{cached_session, BlobCache, SyncClient};
 use pdf_folio_core::Db;
 
+/// Process entry: one-shot CRDT metadata sync + remote hydration for a single library DB.
+///
+/// # Errors
+///
+/// Returns an error when args, session, local DB, or remote sync operations fail.
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse()?;
@@ -68,10 +73,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// CLI flags for `crdt-sync-once` (`--db`, `--library-id`, `--device-id`).
 #[derive(Debug)]
 struct Args {
+    /// Path to the local library SQLite database.
     db: PathBuf,
+    /// Library stream id to sync.
     library_id: String,
+    /// Stable device id for CRDT cursors and op attribution.
     device_id: String,
 }
 

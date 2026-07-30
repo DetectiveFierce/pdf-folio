@@ -41,48 +41,67 @@ pub struct TursoToken {
     pub expires_at: DateTime<Utc>,
 }
 
-/// One SQL-over-HTTP cell value.
+/// One Hrana SQL-over-HTTP cell value (`type` + payload) for Turso `/v2/pipeline`.
+///
+/// Wire shape matches libSQL’s tagged JSON encoding. Prefer the constructors
+/// ([`TursoValue::text`], [`TursoValue::integer`], …) when binding args so
+/// integers stay string-encoded as Hrana requires.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TursoValue {
-    /// SQL NULL.
+    /// SQL `NULL` (`{"type":"null"}`).
     Null,
-    /// Integer values are encoded as strings by Hrana.
-    Integer { value: String },
-    /// Floating-point values are encoded as numbers by Hrana.
-    Float { value: String },
-    /// Text value.
-    Text { value: String },
-    /// Base64 blob value.
-    Blob { base64: String },
+    /// Integer cell; Hrana encodes the digits as a **string** (`{"type":"integer","value":"42"}`).
+    Integer {
+        /// Decimal integer digits (may include a leading `-`).
+        value: String,
+    },
+    /// Floating-point cell encoded as a string payload for symmetric bind/read.
+    Float {
+        /// Decimal or scientific float digits.
+        value: String,
+    },
+    /// UTF-8 text cell (`{"type":"text","value":"…"}`).
+    Text {
+        /// Column text contents.
+        value: String,
+    },
+    /// Binary cell as base64 (`{"type":"blob","base64":"…"}`).
+    Blob {
+        /// Standard base64 of the blob bytes.
+        base64: String,
+    },
 }
 
 impl TursoValue {
-    /// Creates a text value.
+    /// Binds a UTF-8 text argument (`type: text`).
     pub fn text(value: impl Into<String>) -> Self {
         Self::Text {
             value: value.into(),
         }
     }
 
-    /// Creates an integer value.
+    /// Binds an `i64` as a Hrana integer (digits stringified for the wire).
     pub fn integer(value: i64) -> Self {
         Self::Integer {
             value: value.to_string(),
         }
     }
 
-    /// Creates a nullable text value.
+    /// Binds `Some(text)` or SQL `NULL` when the optional is empty.
     pub fn nullable_text(value: Option<&str>) -> Self {
         value.map(Self::text).unwrap_or(Self::Null)
     }
 
-    /// Creates a nullable integer value.
+    /// Binds `Some(i64)` as integer or SQL `NULL` when the optional is empty.
     pub fn nullable_integer(value: Option<i64>) -> Self {
         value.map(Self::integer).unwrap_or(Self::Null)
     }
 
-    /// Reads the value as a string.
+    /// Reads text/integer/float cells as a string; errors on `NULL` or blob.
+    ///
+    /// Integers and floats return their wire digit strings so callers can parse
+    /// with [`Self::as_i64`] when a numeric type is required.
     pub fn as_string(&self) -> Result<String> {
         match self {
             Self::Text { value } | Self::Integer { value } | Self::Float { value } => {
@@ -93,7 +112,7 @@ impl TursoValue {
         }
     }
 
-    /// Reads the value as an optional string.
+    /// Like [`Self::as_string`] but maps SQL `NULL` to `Ok(None)`.
     pub fn as_optional_string(&self) -> Result<Option<String>> {
         match self {
             Self::Null => Ok(None),
@@ -101,14 +120,14 @@ impl TursoValue {
         }
     }
 
-    /// Reads the value as an integer.
+    /// Parses an integer/float/text cell as `i64` (errors on `NULL`/blob/non-numeric).
     pub fn as_i64(&self) -> Result<i64> {
         self.as_string()?
             .parse()
             .context("Turso integer value was not a valid i64.")
     }
 
-    /// Reads the value as an optional integer.
+    /// Like [`Self::as_i64`] but maps SQL `NULL` to `Ok(None)`.
     pub fn as_optional_i64(&self) -> Result<Option<i64>> {
         match self {
             Self::Null => Ok(None),
@@ -124,8 +143,11 @@ impl TursoValue {
 /// that inject env credentials directly.
 #[derive(Debug, Clone)]
 pub struct TursoRemote {
+    /// Shared HTTP client for Hrana pipeline requests.
     http: reqwest::Client,
+    /// Database URL (`libsql://…` or `https://…`); converted to HTTP for the pipeline.
     database_url: String,
+    /// Bearer auth token for the database.
     auth_token: String,
 }
 
@@ -219,7 +241,9 @@ impl TursoRemote {
 /// [`TursoClient::remote`] hits `GET /token/turso` with the session bearer JWT.
 #[derive(Debug, Clone)]
 pub struct TursoClient {
+    /// Shared HTTP client for control-plane credential requests.
     http: reqwest::Client,
+    /// Session JWT + server base URL used to mint Turso credentials.
     session: Session,
 }
 
@@ -269,6 +293,11 @@ impl TursoClient {
     }
 }
 
+/// Converts a Turso `libsql://` URL to `https://` for Hrana HTTP; leaves `http(s)://` as-is.
+///
+/// # Errors
+///
+/// Returns an error for unsupported URL schemes.
 fn http_database_url(database_url: &str) -> Result<String> {
     let trimmed = database_url.trim_end_matches('/');
     if let Some(rest) = trimmed.strip_prefix("libsql://") {
@@ -280,37 +309,64 @@ fn http_database_url(database_url: &str) -> Result<String> {
     }
 }
 
+/// Hrana `POST /v2/pipeline` body: optional stream baton + ordered requests.
 #[derive(Debug, Serialize)]
 struct PipelineRequest {
+    /// Stream resume token when continuing a multi-step pipeline (`None` = new stream).
     baton: Option<String>,
+    /// Ordered Hrana requests executed on the same stream.
     requests: Vec<StreamRequest>,
 }
 
+/// One Hrana pipeline request (`type` tag) sent to Turso SQL-over-HTTP.
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum StreamRequest {
-    Execute { stmt: Statement },
-    Sequence { sql: String },
+    /// Run a single prepared statement with bound args (`type: execute`).
+    Execute {
+        /// Statement SQL + positional args.
+        stmt: Statement,
+    },
+    /// Run a multi-statement SQL script without returning row sets (`type: sequence`).
+    Sequence {
+        /// Semicolon-separated SQL (schema migrations, batch DDL/DML).
+        sql: String,
+    },
+    /// Close the Hrana stream after prior requests (`type: close`).
     Close,
 }
 
+/// Bound SQL statement payload inside an [`StreamRequest::Execute`].
 #[derive(Debug, Serialize)]
 struct Statement {
+    /// SQL text with `?` placeholders matching `args` length.
     sql: String,
+    /// Positional Hrana values; omitted from JSON when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     args: Vec<TursoValue>,
 }
 
+/// Top-level Hrana pipeline response: one result entry per request.
 #[derive(Debug, Deserialize)]
 struct PipelineResponse {
+    /// Parallel array of ok/error results for each request in the pipeline.
     results: Vec<StreamResult>,
 }
 
+/// Per-request Hrana result envelope (`type: ok` | `type: error`).
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum StreamResult {
-    Ok { response: StreamResponse },
-    Error { error: TursoError },
+    /// Successful request; body depends on the matching request type.
+    Ok {
+        /// Typed response payload (execute rows, sequence ack, …).
+        response: StreamResponse,
+    },
+    /// Failed request with a server-side SQL/protocol error.
+    Error {
+        /// Error code/message from Turso/libSQL.
+        error: TursoError,
+    },
 }
 
 impl StreamResult {
@@ -329,33 +385,47 @@ impl StreamResult {
     }
 }
 
+/// Successful Hrana response body variants nested under [`StreamResult::Ok`].
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum StreamResponse {
+    /// Rows from an `execute` request.
     Execute {
+        /// Column metadata + row matrix.
         result: StatementResult,
     },
+    /// Ack for a `sequence` request (no row payload).
     Sequence,
+    /// Ack for a `close` request.
     Close,
+    /// Forward-compatible catch-all for unknown response types.
     #[serde(other)]
     Other,
 }
 
+/// Thin wrapper used when extracting the first execute result from a pipeline.
 #[derive(Debug, Deserialize)]
 struct ExecuteResponse {
+    /// Statement result rows/cols.
     result: StatementResult,
 }
 
+/// Row set returned by a successful Hrana `execute`.
 #[derive(Debug, Deserialize)]
 struct StatementResult {
+    /// Column descriptors (name/decltype); currently unused by callers.
     #[serde(rename = "cols")]
     _cols: Vec<Value>,
+    /// Result rows as `TursoValue` cells in column order.
     rows: Vec<Vec<TursoValue>>,
 }
 
+/// Hrana error object carried by [`StreamResult::Error`].
 #[derive(Debug, Deserialize)]
 struct TursoError {
+    /// Human-readable SQL/protocol message when provided.
     message: Option<String>,
+    /// Machine-readable error code when provided.
     code: Option<String>,
 }
 

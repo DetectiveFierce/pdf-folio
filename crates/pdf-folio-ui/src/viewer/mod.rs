@@ -29,11 +29,19 @@
 //! Presentational widgets (canvas, toolbar, find bar) live under
 //! `components::viewer` and are composed by [`view`].
 
+/// Open-document runtime fields mounted on `PDFolioApp` (`ViewerRuntime`).
 pub(crate) mod document;
+/// Spread groups, page rect helpers, and render-key selection.
 pub(crate) mod layout;
+/// Jump/scroll/zoom methods on `PDFolioApp` for the open document.
 pub(crate) mod navigation;
+/// Zoom presets, percent math, and render policy after width changes.
 pub(crate) mod rendering;
+/// Scroll/spread modes, text selection, find state, and related helpers.
 pub(crate) mod state;
+/// Open document / render page / zoom debounce iced tasks.
 pub(crate) mod tasks;
+/// Viewer-domain message reducer.
 pub(crate) mod update;
+/// Root toolbar + sidebar + canvas composition for viewer mode.
 pub(crate) mod view;

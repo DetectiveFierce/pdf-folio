@@ -10,10 +10,16 @@
 use super::*;
 use iced::widget::column;
 
+/// Folder glyph asset used on folder cards and floating folder drag previews.
 const FOLDER_CARD_ICON_SVG: &[u8] = include_bytes!("../../../assets/icons/folder-svgrepo-com.svg");
+/// Inline SVG for the “up to parent directory” drop-target strip.
 const PARENT_DIRECTORY_ICON_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 24"><path fill="currentColor" d="M3.4 1.25h6.2c.75 0 1.3.25 1.85.8l3.1 3.1H26c1.1 0 2 .9 2 2V20.7c0 1.1-.9 2-2 2h-5.2v-2.05h5.1V7.3H13.65l-4.05-4H4.05v17.35h10.95V22.7H3.4c-1.1 0-2-.9-2-2V3.25c0-1.1.9-2 2-2z"/><path fill="currentColor" d="M16 9.25l5.25 5.25-1.55 1.55-2.45-2.45v7.65c0 .78-.62 1.4-1.4 1.4h-1.1V13.6l-2.45 2.45-1.55-1.55z"/></svg>"##;
 
 /// Grid of child folder cards for the current navigation folder.
+///
+/// Packs `folders` into rows of [`folder_cards_per_row`], applying drag
+/// placeholder / nesting-target chrome when a folder drag is active.
+/// Emitted by `library::view::root` above the entry grid.
 pub(crate) fn view_folder_cards<'a>(
     app: &'a PDFolioApp,
     folders: Vec<Folder>,
@@ -43,7 +49,10 @@ pub(crate) fn view_folder_cards<'a>(
     rows.into()
 }
 
-/// Column count for the folder-card strip.
+/// Column count for the folder-card strip (at least 1).
+///
+/// Uses the same available width and card pitch as the entry masonry so folder
+/// and PDF grids stay aligned. Logical geometry only — no widget construction.
 pub(crate) fn folder_cards_per_row(app: &PDFolioApp) -> usize {
     let available_width = app.library_available_grid_width();
     let card_pitch = app.library_grid_card_width() + app.layout().library_masonry_gap;
@@ -52,7 +61,11 @@ pub(crate) fn folder_cards_per_row(app: &PDFolioApp) -> usize {
         .max(1.0) as usize
 }
 
-/// Total height reserved for the folder section (including spacing).
+/// Total height reserved for the folder section including the parent drop strip (logical px).
+///
+/// Sum of [`parent_directory_drop_section_height`] and [`folder_cards_height`].
+/// Used by root view virtualization to offset entry scroll into content space,
+/// and by drag hit-testing / scroll compensation in `library::actions`.
 pub(crate) fn folder_cards_section_height(app: &PDFolioApp, folder_count: usize) -> f32 {
     let parent_height = parent_directory_drop_section_height(app);
     if folder_count == 0 {
@@ -62,7 +75,10 @@ pub(crate) fn folder_cards_section_height(app: &PDFolioApp, folder_count: usize)
     parent_height + folder_cards_height(app, folder_count)
 }
 
-/// Height of the folder card grid alone for `folder_count` folders.
+/// Height of the folder card grid alone for `folder_count` folders (logical px).
+///
+/// `rows * folder_grid_row_height + inter-row gaps + bottom margin`. Returns `0`
+/// when there are no folders.
 pub(crate) fn folder_cards_height(app: &PDFolioApp, folder_count: usize) -> f32 {
     if folder_count == 0 {
         return 0.0;
@@ -74,7 +90,9 @@ pub(crate) fn folder_cards_height(app: &PDFolioApp, folder_count: usize) -> f32 
         + Spacing::MD
 }
 
-/// Scroll height reserved when the parent drop strip is visible.
+/// Scroll height reserved when the parent drop strip is visible (logical px).
+///
+/// Zero when the strip is hidden; otherwise drop-box height plus bottom spacing.
 pub(crate) fn parent_directory_drop_section_height(app: &PDFolioApp) -> f32 {
     if app.parent_directory_drop_box_visible() {
         parent_directory_drop_box_height(app) + Spacing::MD
@@ -83,12 +101,17 @@ pub(crate) fn parent_directory_drop_section_height(app: &PDFolioApp) -> f32 {
     }
 }
 
-/// Intrinsic height of the parent-directory drop control.
+/// Intrinsic height of the parent-directory drop control (logical px).
+///
+/// Matches the folder-card row height so the strip lines up with the grid.
 pub(crate) fn parent_directory_drop_box_height(app: &PDFolioApp) -> f32 {
     app.layout().library_folder_grid_row_height
 }
 
 /// Drop target that moves the drag payload to the parent folder.
+///
+/// Highlights when the cursor is over the strip (`ParentDirectoryDropTargetChanged`).
+/// Shown only while a folder/entry drag can move content up one level.
 pub(crate) fn view_parent_directory_drop_box<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -145,6 +168,10 @@ pub(crate) fn view_parent_directory_drop_box<'a>(
 }
 
 /// Single folder card with counts, selection, and drop highlighting.
+///
+/// `mode` selects normal interaction, drag placeholder/ghost, nesting target,
+/// or floating preview. Normal mode starts a folder drag on press (or opens
+/// details in trash view). Drop and flash styles come from `FolderDropTarget`.
 pub(crate) fn folder_grid_card<'a>(
     app: &'a PDFolioApp,
     folder: Folder,
@@ -250,7 +277,9 @@ pub(crate) fn folder_grid_card<'a>(
     }
 }
 
-/// Styled folder glyph used inside folder cards.
+/// Styled folder glyph used inside folder cards (accent SVG in a tag-pill well).
+///
+/// `alpha` multiplies icon and background opacity for drag ghosting.
 pub(crate) fn folder_icon<'a>(tokens: ThemeTokens, alpha: f32) -> Element<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(FOLDER_CARD_ICON_SVG))
         .width(tokens.primitives.folder_icon_size)
@@ -276,7 +305,10 @@ pub(crate) fn folder_icon<'a>(tokens: ThemeTokens, alpha: f32) -> Element<'a, Me
     .into()
 }
 
-/// Opacity for folder card content during drag ghosting.
+/// Opacity for folder card content during drag ghosting (`0..=1`).
+///
+/// Placeholder mode uses `library_drag_placeholder_content_alpha`; all other
+/// render modes stay fully opaque.
 pub(crate) fn folder_card_content_alpha(app: &PDFolioApp, mode: FolderCardRenderMode) -> f32 {
     if mode == FolderCardRenderMode::Placeholder {
         app.layout().library_drag_placeholder_content_alpha
@@ -285,7 +317,10 @@ pub(crate) fn folder_card_content_alpha(app: &PDFolioApp, mode: FolderCardRender
     }
 }
 
-/// Human-readable PDF/child summary for a folder card.
+/// Human-readable PDF/child summary for a folder card (e.g. `"3 PDFs . 1 Folder"`).
+///
+/// Joins non-zero smart counts and child-folder counts; returns `"Empty"` when
+/// the folder has no PDFs, children, or missing files.
 pub(crate) fn folder_meta_label(counts: FolderSmartCounts, child_count: usize) -> String {
     let mut parts = Vec::new();
     if counts.total > 0 {
@@ -305,12 +340,12 @@ pub(crate) fn folder_meta_label(counts: FolderSmartCounts, child_count: usize) -
     }
 }
 
-/// Compact count text for sidebar folder rows.
+/// Compact count text for sidebar folder rows (`"N PDF"` / `"N PDFs"`).
 pub(crate) fn folder_sidebar_count_label(counts: FolderSmartCounts) -> String {
     format_count(counts.total, "PDF")
 }
 
-/// Format `N item` / `N items` style count labels.
+/// Format `N item` / `N items` style count labels (`singular` is the unit word).
 pub(crate) fn format_count(count: usize, singular: &str) -> String {
     if count == 1 {
         format!("1 {singular}")
@@ -319,7 +354,10 @@ pub(crate) fn format_count(count: usize, singular: &str) -> String {
     }
 }
 
-/// Task that snaps the library scrollable to `offset_y` after layout changes.
+/// Task that snaps the library scrollable to `offset_y` (logical px) after layout changes.
+///
+/// Targets `LIBRARY_SCROLLABLE_ID`. Used after parent-drop scroll compensation
+/// and similar geometry shifts so the viewport matches updated content.
 pub(crate) fn scroll_library_to_offset_task(offset_y: f32) -> Task<Message> {
     operation::scroll_to(
         Id::new(LIBRARY_SCROLLABLE_ID),
@@ -332,6 +370,8 @@ pub(crate) fn scroll_library_to_offset_task(offset_y: f32) -> Task<Message> {
 
 impl LibraryRenderItem {
     /// Underlying library entry for any render-item variant (live, ghost, or drop zone).
+    ///
+    /// Drag placeholders reuse the dragged entry for sizing/thumbnail lookup.
     pub(crate) fn entry(&self) -> &LibraryEntry {
         match self {
             Self::Entry(entry) | Self::Ghost(entry) | Self::DropZone(entry) => entry,
@@ -339,6 +379,7 @@ impl LibraryRenderItem {
     }
 }
 
+/// True when dropping dragged entries at `target_index` would change their relative order.
 fn drag_target_changes_order(
     entries: &[LibraryEntry],
     dragged_ids: &[EntryId],
@@ -373,6 +414,10 @@ fn drag_target_changes_order(
 }
 
 /// Map visible entries to render items (normal vs drag-placeholder modes).
+///
+/// Without an active entry drag, every entry is [`LibraryRenderItem::Entry`].
+/// During drag, delegates to [`library_render_items_for_drag`] for ghosts and
+/// drop-zone insertion. Consumed by root view masonry layout.
 pub(crate) fn library_render_items(
     app: &PDFolioApp,
     entries: &[LibraryEntry],
@@ -388,6 +433,10 @@ pub(crate) fn library_render_items(
 }
 
 /// Build the drag-time render list with placeholders for dragged entries.
+///
+/// Dragged rows become [`LibraryRenderItem::Ghost`]; when the drop target is
+/// a reorder index (not a folder), inserts a [`LibraryRenderItem::DropZone`]
+/// if that reorder would change order. Supports single- and multi-drag.
 pub(crate) fn library_render_items_for_drag(
     entries: &[LibraryEntry],
     drag: &LibraryDragState,
@@ -474,7 +523,9 @@ pub(crate) fn library_render_items_for_drag(
     items
 }
 
-/// Index of the shortest masonry column (for packing).
+/// Index of the shortest masonry column (for packing); `0` when `column_heights` is empty.
+///
+/// Shared by live masonry layout and drag packing so cards land in the lowest column.
 pub(crate) fn shortest_column_index(column_heights: &[f32]) -> usize {
     column_heights
         .iter()
@@ -485,6 +536,10 @@ pub(crate) fn shortest_column_index(column_heights: &[f32]) -> usize {
 }
 
 /// Insertion index under the cursor in a masonry layout during reorder drag.
+///
+/// `content_y` is document-space Y (logical px). Returns the first item whose
+/// midpoint is below the cursor, or one past the last item in the column.
+/// `None` when `column_index` is out of range.
 pub(crate) fn masonry_target_index(
     layout: &LibraryMasonryLayout,
     column_index: usize,
@@ -502,7 +557,10 @@ pub(crate) fn masonry_target_index(
         .or_else(|| column.last().map(|item| item.index + 1))
 }
 
-/// Cursor-following preview for entry drag (single or multi stack).
+/// Cursor-following preview for entry drag (single card/row or multi stack).
+///
+/// `None` when no active entry drag or the dragged entry is not in the visible
+/// set. Pins the preview near the cursor using list/grid offset tokens.
 pub(crate) fn floating_library_drag_preview<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -549,6 +607,9 @@ pub(crate) fn floating_library_drag_preview<'a>(
 }
 
 /// Cursor-following preview while dragging a folder.
+///
+/// Renders a floating [`folder_grid_card`] under the cursor. `None` when no
+/// active folder drag or the folder id is missing from the tree.
 pub(crate) fn floating_folder_drag_preview<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -583,7 +644,10 @@ pub(crate) fn floating_folder_drag_preview<'a>(
     )
 }
 
-/// Stacked card preview for multi-entry drag.
+/// Stacked card preview for multi-entry drag (up to three offset layers + count badge).
+///
+/// Fills missing layers by duplicating the last entry so the stack always has
+/// three cards. Returns `None` when no dragged entries are visible.
 pub(crate) fn multi_drag_stack_preview<'a>(
     app: &'a PDFolioApp,
     drag: &LibraryDragState,
@@ -629,7 +693,7 @@ pub(crate) fn multi_drag_stack_preview<'a>(
     )
 }
 
-/// One layer in the multi-drag stack preview.
+/// One layer in the multi-drag stack preview (floating card/row in ghost chrome).
 pub(crate) fn drag_stack_card<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,

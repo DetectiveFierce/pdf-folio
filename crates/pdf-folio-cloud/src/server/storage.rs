@@ -24,6 +24,7 @@ use sha2::{Digest, Sha256};
 
 use super::config::Config;
 
+/// HMAC-SHA256 type alias used for AWS SigV4 key derivation and signing.
 type HmacSha256 = Hmac<Sha256>;
 
 /// Lifetime of R2 presigned URLs (~15 minutes).
@@ -84,6 +85,11 @@ pub(crate) fn presigned_r2_url(
     Ok(url.to_string())
 }
 
+/// Derives the AWS SigV4 signing key from the secret, date, region, and service.
+///
+/// # Errors
+///
+/// Returns an error when any HMAC step fails.
 fn sigv4_signing_key(secret: &str, date: &str, region: &str, service: &str) -> Result<Vec<u8>> {
     let date_key = hmac_sha256(format!("AWS4{secret}").as_bytes(), date.as_bytes())?;
     let region_key = hmac_sha256(&date_key, region.as_bytes())?;
@@ -91,12 +97,18 @@ fn sigv4_signing_key(secret: &str, date: &str, region: &str, service: &str) -> R
     hmac_sha256(&service_key, b"aws4_request")
 }
 
+/// HMAC-SHA256 digest of `data` under `key`.
+///
+/// # Errors
+///
+/// Returns an error when the key length is invalid for HMAC construction.
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     let mut mac = HmacSha256::new_from_slice(key).context("Could not create HMAC signer.")?;
     mac.update(data);
     Ok(mac.finalize().into_bytes().to_vec())
 }
 
+/// Percent-encodes each path segment while preserving `/` separators.
 fn percent_encode_path(path: &str) -> String {
     path.split('/')
         .map(percent_encode)
@@ -104,6 +116,7 @@ fn percent_encode_path(path: &str) -> String {
         .join("/")
 }
 
+/// AWS-style query/path percent-encoding (`+` → `%20`, `~` unescaped).
 fn percent_encode(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes())
         .collect::<String>()

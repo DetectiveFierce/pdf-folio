@@ -134,6 +134,7 @@ pub(super) fn style_files_in_dir(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// Recursively appends `.kdl` files under `path` (file or directory) to `files`.
 fn collect_kdl_files(path: &Path, files: &mut Vec<PathBuf>) {
     if path.is_file() {
         if path
@@ -154,6 +155,7 @@ fn collect_kdl_files(path: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+/// Sort key so themes load before components before `application` before other.
 fn style_file_order_key(root: &Path, path: &Path) -> (u8, PathBuf) {
     let relative = path.strip_prefix(root).unwrap_or(path);
     let first_component = relative
@@ -170,6 +172,7 @@ fn style_file_order_key(root: &Path, path: &Path) -> (u8, PathBuf) {
     (group, relative.to_path_buf())
 }
 
+/// Relative path under `root` with `/` separators, for matching [`BUNDLED_STYLE_FILES`].
 fn bundled_style_relative_path<'a>(root: &'a Path, path: &'a Path) -> Option<String> {
     path.strip_prefix(root)
         .ok()

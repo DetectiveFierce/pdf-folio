@@ -265,6 +265,85 @@ function renderTemplate(tpl, ctx) {
 
 // ─── sidebar ────────────────────────────────────────────────────────────────
 
+/**
+ * Whether any nav node under `item` (path or anchor child) matches the current page.
+ * Used to expand nested API module trees (including private modules) when active.
+ */
+function navSubtreeContainsOutRel(item, pageMap, currentOutRel) {
+  if (item.path) {
+    const page = pageMap.get(item.path);
+    if (page && page.outRel === currentOutRel) return true;
+  }
+  for (const child of item.children || []) {
+    if (navSubtreeContainsOutRel(child, pageMap, currentOutRel)) return true;
+  }
+  return false;
+}
+
+/**
+ * Render nav children. Supports:
+ * - legacy in-page anchors: `{ title, anchor }` (href on parent page)
+ * - nested routes: `{ title, path, children? }` (API module tree, public + private)
+ */
+function renderNavChildTree(children, parentPage, pageMap, currentOutRel, depth = 1) {
+  const expand = children.some((c) =>
+    navSubtreeContainsOutRel(c, pageMap, currentOutRel)
+  );
+  const parentActive = parentPage && parentPage.outRel === currentOutRel;
+  const open = expand || parentActive;
+  const parts = [];
+  parts.push(
+    `<div class="nav-children depth-${depth}${open ? "" : " is-collapsed"}">`
+  );
+
+  for (const child of children) {
+    if (child.path) {
+      const childPage = pageMap.get(child.path);
+      if (!childPage) {
+        console.warn(`  warn: nav child missing content: ${child.path}`);
+        continue;
+      }
+      const childHref = hrefBetween(currentOutRel, childPage.outRel);
+      const childActive = childPage.outRel === currentOutRel;
+      const hasGrand = Boolean(child.children?.length);
+      const hasActiveDesc =
+        !childActive &&
+        hasGrand &&
+        navSubtreeContainsOutRel(child, pageMap, currentOutRel);
+      parts.push(
+        `<div class="nav-item nav-nested${childActive ? " is-active" : ""}${hasGrand ? " has-children" : ""}${hasActiveDesc ? " has-active-desc" : ""}">`
+      );
+      parts.push(
+        `<a class="nav-link sub${childActive ? " active" : ""}" href="${childHref}">${escapeHtml(child.title)}</a>`
+      );
+      if (hasGrand) {
+        parts.push(
+          renderNavChildTree(
+            child.children,
+            childPage,
+            pageMap,
+            currentOutRel,
+            depth + 1
+          )
+        );
+      }
+      parts.push(`</div>`);
+    } else if (child.anchor && parentPage) {
+      const childHref = hrefBetween(
+        currentOutRel,
+        parentPage.outRel,
+        child.anchor
+      );
+      parts.push(
+        `<a class="nav-link sub" href="${childHref}" data-anchor="${escapeHtml(child.anchor)}">${escapeHtml(child.title)}</a>`
+      );
+    }
+  }
+
+  parts.push(`</div>`);
+  return parts.join("\n");
+}
+
 function buildSidebar(nav, pageMap, currentOutRel) {
   const parts = [];
 
@@ -294,27 +373,28 @@ function buildSidebar(nav, pageMap, currentOutRel) {
       const href = hrefBetween(currentOutRel, page.outRel);
       const isActive = page.outRel === currentOutRel;
       const hasChildren = item.children?.length;
+      const subtreeActive =
+        isActive ||
+        (hasChildren &&
+          navSubtreeContainsOutRel(item, pageMap, currentOutRel));
 
-      parts.push(`<div class="nav-item${isActive ? " is-active" : ""}${hasChildren ? " has-children" : ""}">`);
+      parts.push(
+        `<div class="nav-item${isActive ? " is-active" : ""}${hasChildren ? " has-children" : ""}${subtreeActive && !isActive ? " has-active-desc" : ""}">`
+      );
       parts.push(
         `<a class="nav-link top${isActive ? " active" : ""}" href="${href}">${escapeHtml(item.title)}</a>`
       );
 
       if (hasChildren) {
         parts.push(
-          `<div class="nav-children${isActive ? "" : " is-collapsed"}">`
-        );
-        for (const child of item.children) {
-          const childHref = hrefBetween(
+          renderNavChildTree(
+            item.children,
+            page,
+            pageMap,
             currentOutRel,
-            page.outRel,
-            child.anchor
-          );
-          parts.push(
-            `<a class="nav-link sub" href="${childHref}" data-anchor="${escapeHtml(child.anchor)}">${escapeHtml(child.title)}</a>`
-          );
-        }
-        parts.push(`</div>`);
+            1
+          )
+        );
       }
       parts.push(`</div>`);
     }
@@ -578,13 +658,22 @@ function loadPages() {
   return pageMap;
 }
 
-function flatNavOrder(nav, pageMap) {
-  const order = [];
-  for (const group of nav.groups) {
-    for (const item of group.items || []) {
+function walkNavItems(items, pageMap, order) {
+  for (const item of items || []) {
+    if (item.path) {
       const page = pageMap.get(item.path);
       if (page) order.push(page);
     }
+    if (item.children?.length) {
+      walkNavItems(item.children, pageMap, order);
+    }
+  }
+}
+
+function flatNavOrder(nav, pageMap) {
+  const order = [];
+  for (const group of nav.groups) {
+    walkNavItems(group.items || [], pageMap, order);
   }
   return order;
 }

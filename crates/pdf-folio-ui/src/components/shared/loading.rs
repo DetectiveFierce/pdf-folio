@@ -1,12 +1,23 @@
 //! # Loading overlays
 //!
-//! Full-surface spinners for startup, document open, and history restore.
+//! Full-surface blocking overlays under `components::shared::loading` for
+//! long-running work that should freeze interaction: library history restore,
+//! PDF document open, and startup library preparation.
+//!
+//! ## Ownership
+//!
+//! Reads timing and status fields from `PDFolioApp` and paints spinner /
+//! progress chrome only. Spinners reuse [`HistoryRestoreSpinner`] from
+//! `components::viewer::canvas`. Composition into the view tree is done by
+//! [`super::root_surface`].
+//!
+//! Related: non-blocking progress banners in `components::library::import_status`.
 
 use crate::components::viewer::canvas::HistoryRestoreSpinner;
 use crate::*;
 use iced::widget::{canvas, column};
 
-/// Overlay shown while organization history is being restored.
+/// Dimmed full-window spinner while organization history is being restored.
 pub(crate) fn history_restore_spinner_layer(
     app: &PDFolioApp,
     tokens: ThemeTokens,

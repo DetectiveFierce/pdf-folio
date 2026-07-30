@@ -152,6 +152,7 @@ pub(crate) fn bulk_thumbnail_task(entries: Vec<LibraryEntry>) -> Task<Message> {
     )
 }
 
+/// Open `entry.path` and rewrite all on-disk thumbnail size variants for its id.
 fn rebuild_entry_thumbnail(entry: &LibraryEntry) -> anyhow::Result<()> {
     let doc = PdfDoc::open(&entry.path)?;
     cache_thumbnail_variants(&entry.id, &doc)
@@ -171,6 +172,7 @@ pub(crate) fn cache_thumbnail_variants(entry_id: &EntryId, doc: &PdfDoc) -> anyh
     Ok(())
 }
 
+/// Cache file path for one thumbnail size tier of `entry_id` (default has no size suffix).
 fn thumbnail_variant_path(entry_id: &EntryId, size: ThumbnailSize) -> anyhow::Result<PathBuf> {
     let default_path = thumbnail_path(entry_id)?;
     let Some(suffix) = size.cache_suffix() else {
@@ -179,6 +181,7 @@ fn thumbnail_variant_path(entry_id: &EntryId, size: ThumbnailSize) -> anyhow::Re
     Ok(default_path.with_file_name(format!("{}.{}.rgba", entry_id.as_str(), suffix)))
 }
 
+/// Infer pixel height from raw RGBA byte length given `width` (rejects non-multiples / huge aspect).
 fn thumbnail_height_from_rgba_len(len: usize, width: u16) -> Option<u16> {
     let stride = usize::from(width) * 4;
     if stride == 0 || len < stride || !len.is_multiple_of(stride) {

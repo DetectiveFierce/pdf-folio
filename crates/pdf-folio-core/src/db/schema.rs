@@ -303,6 +303,7 @@ impl Db {
     }
 }
 
+/// Fills null `entries.file_size` from on-disk metadata for non-missing paths.
 fn backfill_file_sizes(connection: &Connection) -> Result<()> {
     let mut statement = connection
         .prepare("SELECT id, path FROM entries WHERE file_size IS NULL AND missing = 0")?;

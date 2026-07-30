@@ -1,17 +1,21 @@
 //! # Library modal dialogs
 //!
-//! View builders for blocking/overlay dialogs used in library mode: confirm
-//! destructive actions, import menus, create folder, import review, export,
-//! tag manager, move picker, and Raindrop connect/import flows.
+//! View builders under `components::library::dialogs` for blocking/overlay
+//! dialogs used in library mode: confirm destructive actions, import menus,
+//! create folder, import review, export, tag manager, move picker, and
+//! Raindrop connect/import flows.
 //!
 //! ## Ownership
 //!
 //! Presentation only: reads dialog state from `PDFolioApp` / chrome and emits
 //! `Message`s. Business logic for the confirmed actions lives in
-//! `crate::library::{update, tasks, actions}`.
+//! `crate::library::{update, tasks, actions}`. Stacked by
+//! `components::shared::root_surface` when the corresponding chrome flags are
+//! set.
 //!
 //! Most dialogs share `modal_container` styling; confirmation copy is
-//! centralized in [`confirmation_copy`].
+//! centralized in [`confirmation_copy`]. Progress-only banners live in
+//! [`super::import_status`].
 
 use crate::components::library::cards::{document_preview_lines, ghost_tags_row};
 use crate::components::library::metadata::format_file_size;
@@ -21,7 +25,9 @@ use crate::*;
 use iced::widget::{column, row, scrollable};
 use pdf_folio_cloud::raindrop::RaindropImportDestination;
 
+/// Raindrop.io developer integrations page opened from the connect dialog.
 const RAINDROP_INTEGRATIONS_URL: &str = "https://app.raindrop.io/settings/integrations";
+/// Folder-with-plus glyph for the “New folder” row in Raindrop import location picker.
 const FOLDER_PLUS_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"##;
 
 /// Generic yes/cancel confirmation overlay; special-cases folder delete.
@@ -184,6 +190,7 @@ pub(crate) fn view_import_menu_dialog(app: &PDFolioApp) -> Element<'_, Message> 
     modal_container(app, tokens, dialog, "ImportMenuDialog", 360.0)
 }
 
+/// Compact metric card (count + label) used in the delete-folder confirmation layout.
 fn delete_folder_count_card<'a>(
     label: &'a str,
     count: usize,
@@ -575,6 +582,7 @@ pub(crate) fn view_tag_manager_dialog(app: &PDFolioApp) -> Element<'_, Message> 
     modal_container(app, tokens, dialog, "TagManagerDialog", 640.0)
 }
 
+/// Toggle-style toolbar button for export dialog option groups (naming, scope, etc.).
 fn export_choice_button<'a>(
     label: &'a str,
     active: bool,
@@ -601,6 +609,9 @@ fn export_choice_button<'a>(
     .style(move |_, status| button_style(tokens, Class::ToolbarButton, status))
 }
 
+/// Centered modal shell: dimmed presentation overlay wrapping a `JumpOverlay` panel.
+///
+/// Width comes from layout metric `metric_group`/`width` with `fallback_width`.
 fn modal_container<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -705,6 +716,7 @@ pub(crate) fn view_library_move_picker_dialog(app: &PDFolioApp) -> Element<'_, M
     .into()
 }
 
+/// Root “Library” row plus recursive folder children for the move-destination picker.
 fn view_move_picker_tree<'a>(
     app: &'a PDFolioApp,
     picker: &'a LibraryMovePicker,
@@ -733,6 +745,7 @@ fn view_move_picker_tree<'a>(
     .into()
 }
 
+/// Recursive folder rows under `parent_id` for the move picker (marks invalid nest targets).
 fn view_move_picker_folder_rows<'a>(
     app: &'a PDFolioApp,
     picker: &'a LibraryMovePicker,
@@ -1028,6 +1041,7 @@ pub(crate) fn view_raindrop_import_dialog(app: &PDFolioApp) -> Element<'_, Messa
     .into()
 }
 
+/// Destination controls for Raindrop import: preserve-structure toggle, location menu, new-folder name.
 fn raindrop_import_location_selector<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -1089,6 +1103,7 @@ fn raindrop_import_location_selector<'a>(
         .into()
 }
 
+/// Scrollable folder tree menu for choosing the Raindrop import root location.
 fn raindrop_import_location_menu<'a>(
     app: &'a PDFolioApp,
     selected_folder: Option<&FolderId>,
@@ -1129,6 +1144,7 @@ fn raindrop_import_location_menu<'a>(
     .into()
 }
 
+/// Recursive indented folder rows for the Raindrop import location tree menu.
 fn raindrop_import_folder_rows<'a>(
     app: &'a PDFolioApp,
     parent_id: Option<&FolderId>,
@@ -1183,6 +1199,7 @@ fn raindrop_import_folder_rows<'a>(
     rows.into()
 }
 
+/// Single selectable row in the Raindrop import location tree (optional fold chevron).
 fn raindrop_import_location_row<'a>(
     label: &'a str,
     depth: usize,
@@ -1257,6 +1274,7 @@ fn raindrop_import_location_row<'a>(
     .into()
 }
 
+/// “New folder” action row (folder-plus icon) at the bottom of the Raindrop location menu.
 fn raindrop_new_folder_row<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(FOLDER_PLUS_SVG))
         .width(tokens.primitives.raindrop_new_folder_icon_size)
@@ -1282,6 +1300,7 @@ fn raindrop_new_folder_row<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
         .into()
 }
 
+/// Display name for the selected Raindrop import root (`"Library"` or folder name).
 fn raindrop_import_root_label(app: &PDFolioApp, root_folder: Option<&FolderId>) -> String {
     root_folder
         .and_then(|folder_id| {
@@ -1293,6 +1312,7 @@ fn raindrop_import_root_label(app: &PDFolioApp, root_folder: Option<&FolderId>) 
         .map_or_else(|| String::from("Library"), |folder| folder.name.clone())
 }
 
+/// Whether `destination` is a preserve-Raindrop-folders variant (structure checkbox state).
 fn raindrop_import_preserves_structure(destination: &RaindropImportDestination) -> bool {
     matches!(
         destination,
@@ -1301,6 +1321,7 @@ fn raindrop_import_preserves_structure(destination: &RaindropImportDestination) 
     )
 }
 
+/// Local folder id that anchors a Raindrop import destination, if any.
 fn raindrop_import_root_folder(destination: &RaindropImportDestination) -> Option<FolderId> {
     match destination {
         RaindropImportDestination::PreserveRaindropFoldersUnder(folder_id) => folder_id.clone(),
@@ -1310,6 +1331,7 @@ fn raindrop_import_root_folder(destination: &RaindropImportDestination) -> Optio
     }
 }
 
+/// Selectable Raindrop PDF candidate row: checkbox, thumbnail, title, meta, and tags.
 fn raindrop_pdf_row<'a>(
     app: &'a PDFolioApp,
     pdf: &'a RaindropPdfCandidate,
@@ -1384,6 +1406,7 @@ fn raindrop_pdf_row<'a>(
         .into()
 }
 
+/// Small cover thumbnail for a Raindrop candidate, or placeholder page lines when missing.
 fn raindrop_thumbnail<'a>(
     app: &'a PDFolioApp,
     pdf: &RaindropPdfCandidate,
@@ -1495,6 +1518,7 @@ pub(crate) fn confirmation_copy<'a>(
     }
 }
 
+/// Count of library entries that belong to `folder_id` or any nested descendant.
 fn folder_delete_entry_count(app: &PDFolioApp, folder_id: &FolderId) -> usize {
     let folder_ids = app.folder_subtree_ids(folder_id);
     app.library
@@ -1509,6 +1533,7 @@ fn folder_delete_entry_count(app: &PDFolioApp, folder_id: &FolderId) -> usize {
         .count()
 }
 
+/// Number of nested folders under `folder_id` (subtree size minus the root itself).
 fn folder_delete_nested_folder_count(app: &PDFolioApp, folder_id: &FolderId) -> usize {
     app.folder_subtree_ids(folder_id).len().saturating_sub(1)
 }

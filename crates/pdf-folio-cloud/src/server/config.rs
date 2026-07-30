@@ -31,7 +31,9 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use url::Url;
 
+/// Default Google OAuth token endpoint when not set in env/credentials file.
 const DEFAULT_GOOGLE_TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
+/// Default R2 bucket name when `PDF_FOLIO_R2_BUCKET` is unset.
 const DEFAULT_R2_BUCKET: &str = "pdf-folio";
 
 /// Fully resolved runtime configuration for the control-plane process.
@@ -131,6 +133,7 @@ impl Config {
     }
 }
 
+/// Reads a non-empty trimmed env var, or `None` when missing/blank.
 fn env_nonempty(key: &str) -> Option<String> {
     env::var(key)
         .ok()
@@ -138,6 +141,11 @@ fn env_nonempty(key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Loads Google OAuth app credentials from env or `client_secret_*.json` under secrets.
+///
+/// # Errors
+///
+/// Returns an error when neither env nor a parseable client secret file is available.
 fn load_google_credentials(secrets_dir: &Path) -> Result<GoogleCredentials> {
     if let Some(client_id) = env_nonempty("PDF_FOLIO_GOOGLE_CLIENT_ID") {
         return Ok(GoogleCredentials {
@@ -178,6 +186,11 @@ fn load_google_credentials(secrets_dir: &Path) -> Result<GoogleCredentials> {
     })
 }
 
+/// Loads Turso URL/token from env or the labeled `turso credentials` secrets file.
+///
+/// # Errors
+///
+/// Returns an error when credentials cannot be read or required labels are missing.
 fn load_turso_credentials(secrets_dir: &Path) -> Result<TursoCredentials> {
     if let (Some(database_url), Some(auth_token)) = (
         env_nonempty("PDF_FOLIO_TURSO_DATABASE_URL"),
@@ -196,6 +209,11 @@ fn load_turso_credentials(secrets_dir: &Path) -> Result<TursoCredentials> {
     })
 }
 
+/// Loads R2 credentials from env or the labeled `cloudflare credentials` secrets file.
+///
+/// # Errors
+///
+/// Returns an error when credentials cannot be read or required labels/URL are missing.
 fn load_r2_credentials(secrets_dir: &Path) -> Result<R2Credentials> {
     if let (Some(account_id), Some(access_key_id), Some(secret_access_key), Some(endpoint)) = (
         env_nonempty("PDF_FOLIO_R2_ACCOUNT_ID"),
@@ -220,6 +238,11 @@ fn load_r2_credentials(secrets_dir: &Path) -> Result<R2Credentials> {
     })
 }
 
+/// Parses `Label: value` lines from a secrets text file.
+///
+/// # Errors
+///
+/// Returns an error when the label is missing or the value is empty.
 fn parse_labeled_secret(text: &str, label: &str) -> Result<String> {
     text.lines()
         .find_map(|line| {
@@ -232,6 +255,11 @@ fn parse_labeled_secret(text: &str, label: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("Missing {label} in secrets file."))
 }
 
+/// Finds the first `http(s)://…` token in a secrets text blob (R2 endpoint).
+///
+/// # Errors
+///
+/// Returns an error when no URL token is present.
 fn parse_labeled_url(text: &str) -> Result<String> {
     text.split_whitespace()
         .find(|word| word.starts_with("https://") || word.starts_with("http://"))
@@ -239,35 +267,53 @@ fn parse_labeled_url(text: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("Missing R2 endpoint URL in Cloudflare credentials."))
 }
 
+/// Intermediate Google OAuth app credentials before merge into [`Config`].
 #[derive(Debug)]
 struct GoogleCredentials {
+    /// OAuth client id.
     client_id: String,
+    /// Optional client secret for confidential clients.
     client_secret: Option<String>,
+    /// Token endpoint URI.
     token_uri: String,
 }
 
+/// Root of Google’s desktop `client_secret_*.json` file.
 #[derive(Debug, Deserialize)]
 struct GoogleCredentialFile {
+    /// Installed-application credential block.
     installed: GoogleInstalledCredentials,
 }
 
+/// `installed` object inside a Google desktop client secret JSON file.
 #[derive(Debug, Deserialize)]
 struct GoogleInstalledCredentials {
+    /// OAuth client id.
     client_id: String,
+    /// Optional client secret.
     client_secret: Option<String>,
+    /// Optional token URI (defaults to Google’s public endpoint).
     token_uri: Option<String>,
 }
 
+/// Intermediate Turso credentials before merge into [`Config`].
 #[derive(Debug)]
 struct TursoCredentials {
+    /// libSQL / Turso database URL.
     database_url: String,
+    /// Database auth token.
     auth_token: String,
 }
 
+/// Intermediate R2 credentials before merge into [`Config`].
 #[derive(Debug)]
 struct R2Credentials {
+    /// Cloudflare account id.
     account_id: String,
+    /// R2 access key id.
     access_key_id: String,
+    /// R2 secret access key.
     secret_access_key: String,
+    /// S3-compatible endpoint URL string.
     endpoint: String,
 }

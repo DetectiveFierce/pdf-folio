@@ -43,9 +43,13 @@
 //!
 //! Binary entry: `src/bin/pdf-folio-sync-server.rs`. Client counterpart: [`crate::sync`].
 
+/// Google exchange, allow-list checks, and session JWT verification.
 mod auth;
+/// Env + secrets-dir configuration for the control-plane process.
 mod config;
+/// Axum routes and request/response DTOs for health, OAuth, and credential minting.
 mod handlers;
+/// R2 SigV4 presign helpers and BLAKE3 hash validation.
 mod storage;
 
 use anyhow::{Context, Result};

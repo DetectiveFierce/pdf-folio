@@ -38,6 +38,9 @@
 //! - [`server`] — axum control plane: config, auth, handlers, R2/Turso helpers
 //! - [`raindrop`] — Raindrop HTTP client, OAuth, import pipeline, ZIP matching
 
+/// Raindrop.io OAuth, REST listing, ZIP matching, and local library import.
 pub mod raindrop;
+/// Single-user sync control plane (Google identity gate + Turso/R2 credential mint).
 pub mod server;
+/// Desktop sync client: Google PKCE, session cache, CRDT, R2 blobs, and CLI.
 pub mod sync;

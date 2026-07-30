@@ -57,24 +57,33 @@ use crate::{
     RaindropImportProgress, RaindropPdfCandidate,
 };
 
+/// Progress events streamed from the Raindrop import background task.
 enum RaindropImportTaskEvent {
+    /// A destination folder was created during the import (for rollback tracking).
     CreatedFolder(FolderId),
+    /// Intermediate status (counts, current title) for the import progress UI.
     Progress(RaindropImportProgress),
+    /// Terminal result: summary on success, or the error that aborted the import.
     Finished(anyhow::Result<pdf_folio_cloud::raindrop::RaindropImportSummary>),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 /// Disk-backed record of a Raindrop import that may still need rollback on cancel/crash.
 pub(crate) struct PendingRaindropRollback {
+    /// Imported PDF rows to delete or clear when rolling back.
     entries: Vec<PendingRaindropRollbackEntry>,
+    /// Folder ids created during the import (as strings) to remove on rollback.
     folders: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 /// One imported PDF path (and whether it was newly inserted) for Raindrop rollback cleanup.
 pub(crate) struct PendingRaindropRollbackEntry {
+    /// Entry id string for DB cleanup.
     id: String,
+    /// Downloaded file path to remove when the import was canceled.
     path: PathBuf,
+    /// Whether this row was newly inserted (vs updating an existing entry).
     inserted: bool,
 }
 
@@ -835,12 +844,14 @@ pub(crate) fn delete_folder_task(db: Arc<Db>, folder_id: FolderId) -> Task<Messa
     )
 }
 
+/// Collect `folder_id` and every descendant folder id under it.
 fn folder_subtree_ids(folders: &[Folder], folder_id: &FolderId) -> HashSet<FolderId> {
     let mut folder_ids = HashSet::new();
     collect_folder_subtree_ids(folders, folder_id, &mut folder_ids);
     folder_ids
 }
 
+/// Recursively insert `folder_id` and its children into `folder_ids` (cycle-safe).
 fn collect_folder_subtree_ids(
     folders: &[Folder],
     folder_id: &FolderId,
@@ -1477,6 +1488,7 @@ pub(crate) fn export_library_entries_task(
     )
 }
 
+/// Copy selected entries to disk (flat, preserve-folders, or zip) per export dialog options.
 fn export_library_entries(
     entries: Vec<LibraryEntry>,
     dialog: LibraryExportDialog,
@@ -1566,6 +1578,7 @@ fn export_library_entries(
     })
 }
 
+/// Pack selected entries into a single ZIP under `destination`, optionally with metadata sidecars.
 fn export_library_entries_zip(
     entries: Vec<LibraryEntry>,
     dialog: LibraryExportDialog,
@@ -1636,6 +1649,7 @@ fn export_library_entries_zip(
     })
 }
 
+/// Resolve a non-colliding path under `target_dir` for `filename`, or `None` when skipping.
 fn export_target_path(
     target_dir: &Path,
     filename: &str,
@@ -1673,6 +1687,7 @@ fn export_target_path(
     }
 }
 
+/// Build a sanitized `.pdf` filename for `entry` using the chosen export template.
 fn export_filename(entry: &LibraryEntry, template: ExportFilenameTemplate) -> String {
     let original = entry
         .path
@@ -1694,6 +1709,7 @@ fn export_filename(entry: &LibraryEntry, template: ExportFilenameTemplate) -> St
     sanitize_pdf_filename(&raw)
 }
 
+/// Sanitize a stem and ensure a `.pdf` extension (falls back to `document.pdf`).
 fn sanitize_pdf_filename(value: &str) -> String {
     let stem = value.strip_suffix(".pdf").unwrap_or(value);
     let stem = sanitize_filename(stem);
@@ -1704,6 +1720,7 @@ fn sanitize_pdf_filename(value: &str) -> String {
     }
 }
 
+/// Replace path-illegal / control characters and collapse whitespace for filesystem names.
 fn sanitize_filename(value: &str) -> String {
     value
         .chars()
@@ -1721,6 +1738,7 @@ fn sanitize_filename(value: &str) -> String {
         .to_owned()
 }
 
+/// Zip-internal path for `entry`: folder hierarchy (or `Unfiled/`) plus `filename`.
 fn archive_path_for_entry(entry: &LibraryEntry, filename: &str) -> String {
     let mut parts = if entry.folders.is_empty() {
         vec![String::from("Unfiled")]
@@ -1735,6 +1753,7 @@ fn archive_path_for_entry(entry: &LibraryEntry, filename: &str) -> String {
     parts.join("/")
 }
 
+/// Deduplicate archive member names by appending ` (n)` before the extension when needed.
 fn unique_archive_name(mut name: String, used_names: &mut HashSet<String>) -> String {
     if used_names.insert(name.clone()) {
         return name;
@@ -1768,6 +1787,7 @@ fn unique_archive_name(mut name: String, used_names: &mut HashSet<String>) -> St
     name
 }
 
+/// Write export metadata CSV to `path` for the given exported entry/path pairs.
 fn write_export_metadata_csv(
     path: &Path,
     rows: &[(LibraryEntry, PathBuf)],
@@ -1779,6 +1799,7 @@ fn write_export_metadata_csv(
     Ok(())
 }
 
+/// Build a CSV string of export metadata rows (optional tags and reading progress columns).
 fn export_metadata_csv_string(
     rows: &[(LibraryEntry, PathBuf)],
     include_tags: bool,
@@ -1825,10 +1846,12 @@ fn export_metadata_csv_string(
     csv
 }
 
+/// Quote a CSV field, doubling internal double-quotes.
 fn csv_cell(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
 
+/// Write export metadata JSON to `path` for the given exported entry/path pairs.
 fn write_export_metadata_json(
     path: &Path,
     rows: &[(LibraryEntry, PathBuf)],
@@ -1842,6 +1865,7 @@ fn write_export_metadata_json(
     Ok(())
 }
 
+/// Serialize export metadata rows as pretty-printed JSON bytes.
 fn export_metadata_json_bytes(
     rows: &[(LibraryEntry, PathBuf)],
     include_tags: bool,
@@ -2019,6 +2043,7 @@ pub(crate) fn apply_watch_event(db: &Db, event: LibraryWatchEvent) -> anyhow::Re
     Ok(())
 }
 
+/// Re-open `entry`'s PDF and update author/page-count attribution in the DB and in-memory row.
 fn refresh_entry_metadata(db: &Db, entry: &mut LibraryEntry) -> anyhow::Result<()> {
     let doc = PdfDoc::open(&entry.path)?;
     let author = attributed_author(&doc);
@@ -2032,10 +2057,12 @@ fn refresh_entry_metadata(db: &Db, entry: &mut LibraryEntry) -> anyhow::Result<(
     Ok(())
 }
 
+/// Replace search-index pages for a single entry (fails the whole batch on open/index error).
 fn reindex_entry(search_index: &SearchIndex, entry: &LibraryEntry) -> anyhow::Result<()> {
     reindex_entries(search_index, std::slice::from_ref(entry))
 }
 
+/// Replace search-index pages for all `entries`, aborting on the first document error.
 fn reindex_entries(search_index: &SearchIndex, entries: &[LibraryEntry]) -> anyhow::Result<()> {
     if entries.is_empty() {
         return Ok(());
@@ -2049,6 +2076,7 @@ fn reindex_entries(search_index: &SearchIndex, entries: &[LibraryEntry]) -> anyh
     Ok(())
 }
 
+/// Reindex entries while collecting per-entry errors; returns `(updated_count, error_messages)`.
 fn reindex_entries_collecting_errors(
     search_index: &SearchIndex,
     entries: &[LibraryEntry],
@@ -2077,6 +2105,7 @@ fn reindex_entries_collecting_errors(
     (updated, errors)
 }
 
+/// Build one search `IndexDocument` per page of `entry` (opens the PDF for text extraction).
 fn index_documents_for_entry(entry: &LibraryEntry) -> anyhow::Result<Vec<IndexDocument>> {
     let doc = PdfDoc::open(&entry.path)?;
     let title = entry_title(entry);
@@ -2133,6 +2162,7 @@ pub(crate) fn import_pdf_with_index(db: &Db, path: PathBuf) -> anyhow::Result<Im
     Ok(ImportedEntry { id, path, inserted })
 }
 
+/// Fill missing author/page-count attribution for all entries still needing it.
 fn attribute_pending_metadata(db: &Db) -> anyhow::Result<()> {
     let mut pending = db.entries_needing_author_attribution()?;
     let page_pending = db.entries_needing_page_count_attribution()?;
@@ -2159,6 +2189,7 @@ fn attribute_pending_metadata(db: &Db) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Open `entry.path` as a `PdfDoc` when the file exists; `None` on missing path or open failure.
 fn open_entry_doc(entry: &LibraryEntry) -> Option<PdfDoc> {
     entry
         .path
@@ -2167,6 +2198,7 @@ fn open_entry_doc(entry: &LibraryEntry) -> Option<PdfDoc> {
         .flatten()
 }
 
+/// Best author for import: PDF metadata, else first-page heuristics.
 fn attributed_author(doc: &PdfDoc) -> Option<String> {
     doc.metadata_author()
         .ok()
@@ -2175,6 +2207,7 @@ fn attributed_author(doc: &PdfDoc) -> Option<String> {
         .or_else(|| author_from_contents(doc))
 }
 
+/// Best title for import from PDF document metadata (cleaned).
 fn attributed_title(doc: &PdfDoc) -> Option<String> {
     doc.metadata_title()
         .ok()
@@ -2189,10 +2222,12 @@ pub(crate) fn title_from_path(path: &Path) -> Option<String> {
 }
 
 #[cfg(not(test))]
+/// Best-effort display title derived from a PDF file path stem.
 fn title_from_path(path: &Path) -> Option<String> {
     title_from_path_inner(path)
 }
 
+/// Shared path-stem → cleaned title used by both test and non-test `title_from_path`.
 fn title_from_path_inner(path: &Path) -> Option<String> {
     path.file_stem()
         .and_then(|stem| stem.to_str())
@@ -2213,6 +2248,7 @@ pub(crate) fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
     }
 }
 
+/// Scan the first few pages for lines that look like author attributions.
 fn author_from_contents(doc: &PdfDoc) -> Option<String> {
     let pages_to_scan = doc.page_count().min(3);
     for page in 0..pages_to_scan {
@@ -2226,6 +2262,7 @@ fn author_from_contents(doc: &PdfDoc) -> Option<String> {
     None
 }
 
+/// Parse a single text line for common author prefixes (`Author:`, `By`, …).
 fn author_from_line(line: &str) -> Option<String> {
     let normalized = line.trim().trim_matches(['.', ',', ';', ':']);
     for prefix in ["Author:", "Authors:", "By:", "Written by "] {
@@ -2239,6 +2276,7 @@ fn author_from_line(line: &str) -> Option<String> {
         .and_then(clean_author_candidate)
 }
 
+/// Normalize and reject implausible author strings (too short/long, URLs, copyright, etc.).
 fn clean_author_candidate(candidate: &str) -> Option<String> {
     let candidate = candidate
         .trim()

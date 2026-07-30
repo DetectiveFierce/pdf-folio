@@ -52,6 +52,7 @@
 
 pub use iced_widget_upstream::*;
 
+/// Patched scrollable with left vertical scrollbar support.
 pub mod scrollable;
 
 #[doc(no_inline)]

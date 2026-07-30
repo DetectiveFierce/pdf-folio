@@ -1,7 +1,16 @@
 //! # Library inspector panel
 //!
-//! Right-hand inspector chrome for library mode: visibility gate and panel
-//! composition for the focused entry or folder.
+//! Right-hand inspector chrome under `components::library::inspector` for
+//! library mode. Gates visibility on app mode and the open flag, then
+//! composes metadata, tags, and folder controls for the focused entry or
+//! folder selection.
+//!
+//! ## Ownership
+//!
+//! Reads `app.library` selection and editor buffers; emits `Message`s for
+//! renames, tag edits, and width resize. Domain persistence stays in
+//! `crate::library::{update, actions}`. Metadata labels come from
+//! [`super::metadata`].
 
 use crate::library::view::*;
 use crate::*;
@@ -69,6 +78,7 @@ pub(crate) fn view_library_inspector(app: &PDFolioApp) -> Element<'_, Message> {
     row![resize_handle, inspector].height(Length::Fill).into()
 }
 
+/// Inspector body when nothing is selected: library name and aggregate counts.
 fn view_library_summary_inspector(
     app: &PDFolioApp,
     width: f32,
@@ -116,6 +126,7 @@ fn view_library_summary_inspector(
     .into()
 }
 
+/// Inspector body for the active tag filter (count + actions on tagged PDFs).
 fn view_tag_inspector<'a>(
     app: &'a PDFolioApp,
     tag: &'a str,

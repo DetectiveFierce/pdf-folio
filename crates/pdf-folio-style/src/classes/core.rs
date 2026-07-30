@@ -15,6 +15,7 @@ use crate::tokens::{BorderWidth, CornerRadius, Radius, ThemeTokens, VisualBorder
 
 use super::{Class, ComponentState, VisualOverride};
 
+/// Applies flat border color/width from `style`, clearing width when a side-border is present.
 fn apply_border_override(border: &mut Border, style: VisualStyle) {
     if let Some(border_color) = style.border_color {
         border.color = border_color;
@@ -27,11 +28,12 @@ fn apply_border_override(border: &mut Border, style: VisualStyle) {
     }
 }
 
-/// Returns a custom border for class styles that provide side-aware border data.
+/// Extracts a paintable per-side border from a resolved [`VisualStyle`], if any side is visible.
 pub fn side_border_for_style(style: VisualStyle) -> Option<VisualBorder> {
     style.border.filter(visual_border_has_visible_side)
 }
 
+/// True when any side has positive width and non-zero alpha color.
 fn visual_border_has_visible_side(border: &VisualBorder) -> bool {
     [border.top, border.right, border.bottom, border.left]
         .into_iter()
@@ -41,7 +43,9 @@ fn visual_border_has_visible_side(border: &VisualBorder) -> bool {
         })
 }
 
-/// Returns a custom per-side border for a class in a component state.
+/// Resolves `class`/`state` paint and returns a side-border when KDL defined one.
+///
+/// Used by chrome wrappers (empty states, panels) that need non-uniform edges.
 pub fn side_border_for_class(
     tokens: ThemeTokens,
     class: Class,

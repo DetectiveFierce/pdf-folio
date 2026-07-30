@@ -54,9 +54,13 @@ use super::status::{
     REGISTRY_LIBRARY_ID,
 };
 
+/// CRDT entity kind for a library PDF entry (content-addressed by BLAKE3 id).
 const ENTITY_ENTRY: &str = "entry";
+/// CRDT entity kind for a library folder node.
 const ENTITY_FOLDER: &str = "folder";
+/// CRDT entity kind for an entry↔folder membership edge.
 const ENTITY_ENTRY_FOLDER: &str = "entry_folder";
+/// CRDT entity kind for app-level library registry records (see [`REGISTRY_LIBRARY_ID`]).
 const ENTITY_LIBRARY: &str = "library";
 
 impl SyncClient {
@@ -529,10 +533,20 @@ impl SyncClient {
 /// Locally prepared CRDT batch: newly generated ops plus still-unpushed ops.
 #[derive(Debug)]
 pub(super) struct PreparedCrdtOperations {
+    /// Counts of ops generated in this snapshot and still waiting to push.
     pub(super) summary: SyncCrdtPrepareSummary,
+    /// Full list of unpushed local ops for this device/library (includes older pending).
     pub(super) pending_operations: Vec<SyncCrdtOperation>,
 }
 
+/// Ensures the entry’s PDF lives in the managed blob cache at `blobs/<hash>.pdf`.
+///
+/// Copies from the library path when the cache miss is a same-hash file; returns
+/// `None` when the source is missing or the hash does not match the entry id.
+///
+/// # Errors
+///
+/// Returns an error when hashing, copy, or install into the cache fails.
 async fn managed_blob_path_for_entry(
     cache: &BlobCache,
     entry: &LibraryEntry,
@@ -590,59 +604,93 @@ async fn managed_blob_path_for_entry(
     Ok(Some(path))
 }
 
+/// JSON payload for an `entry` CRDT operation (LWW register value).
 #[derive(Debug, Serialize, Deserialize)]
 struct EntryPayload {
+    /// Content-addressed entry id (BLAKE3 hex of the PDF).
     id: String,
+    /// Owning library stream id.
     library_id: String,
+    /// Extracted or stored title.
     title: Option<String>,
+    /// Extracted or stored author.
     author: Option<String>,
+    /// User-overridden display title when present.
     #[serde(default)]
     display_title: Option<String>,
+    /// User-overridden display author when present.
     #[serde(default)]
     display_author: Option<String>,
+    /// When true, automatic metadata refresh must not overwrite title/author.
     #[serde(default)]
     metadata_locked: bool,
+    /// Page count when known.
     #[serde(default)]
     page_count: Option<u16>,
+    /// Last-read page index.
     #[serde(default)]
     last_page: u16,
+    /// Last-opened Unix timestamp.
     #[serde(default)]
     opened_at: Option<i64>,
+    /// Sorted tag strings carried on the entry.
     #[serde(default)]
     tags: Vec<String>,
+    /// Whether the PDF file is currently missing on the originating device.
     #[serde(default)]
     missing: bool,
+    /// Payload revision timestamp used for local freshness.
     updated_at: i64,
+    /// Soft-delete (trash) tombstone timestamp.
     deleted_at: Option<i64>,
+    /// Hard purge: local library row should be deleted after materialization.
     #[serde(default)]
     purged: bool,
 }
 
+/// JSON payload for a `folder` CRDT operation.
 #[derive(Debug, Serialize, Deserialize)]
 struct FolderPayload {
+    /// Stable folder id.
     id: String,
+    /// Owning library stream id.
     library_id: String,
+    /// Folder display name.
     name: String,
+    /// Parent folder id, or `None` for a root folder.
     parent_id: Option<String>,
+    /// Payload revision timestamp.
     updated_at: i64,
+    /// Soft-delete tombstone timestamp.
     deleted_at: Option<i64>,
+    /// Hard purge: folder should be removed from the local library tree.
     #[serde(default)]
     purged: bool,
 }
 
+/// JSON payload for an `entry_folder` membership CRDT operation.
 #[derive(Debug, Serialize, Deserialize)]
 struct EntryFolderPayload {
+    /// Entry id of the membership edge.
     entry_id: String,
+    /// Folder id of the membership edge.
     folder_id: String,
+    /// Payload revision timestamp.
     updated_at: i64,
+    /// Tombstone timestamp when the membership was removed.
     deleted_at: Option<i64>,
 }
 
+/// JSON payload for a registry `library` CRDT operation.
 #[derive(Debug, Serialize, Deserialize)]
 struct LibraryPayload {
+    /// Stable library id from the app registry.
     id: String,
+    /// User-visible library name.
     name: String,
+    /// Payload revision timestamp.
     updated_at: i64,
+    /// Tombstone timestamp when the library was deleted.
     deleted_at: Option<i64>,
 }
 
@@ -817,6 +865,14 @@ pub(super) fn prepare_local_crdt_operations(
     })
 }
 
+/// Records a CRDT op for `payload` when its hash differs from the last known entity state.
+///
+/// Returns `true` when a new op was inserted. Unchanged payloads are no-ops so
+/// idle libraries do not grow the log.
+///
+/// # Errors
+///
+/// Returns an error when JSON encoding or local op storage fails.
 fn record_payload_operation<T: Serialize>(
     db: &Db,
     library_id: &str,
@@ -850,6 +906,7 @@ fn record_payload_operation<T: Serialize>(
     db.record_sync_crdt_operation_if_changed(&operation, &payload_hash)
 }
 
+/// Deterministic `op_id` from device, entity key, payload hash, and logical time.
 fn crdt_operation_id(
     device_id: &str,
     entity_kind: &str,
@@ -873,6 +930,7 @@ fn crdt_operation_id(
     format!("crdt-{hash}")
 }
 
+/// Composite CRDT entity id for an entry↔folder membership (`entry\x1ffolder`).
 fn entry_folder_entity_id(
     entry_id: &pdf_folio_core::EntryId,
     folder_id: &pdf_folio_core::FolderId,
@@ -880,6 +938,7 @@ fn entry_folder_entity_id(
     format!("{}\x1f{}", entry_id.as_str(), folder_id.as_str())
 }
 
+/// Unique `(entity_kind, entity_id)` pairs touched by a batch of operations.
 fn affected_entities_for_operations(
     operations: &[SyncCrdtOperation],
 ) -> BTreeSet<(String, String)> {
@@ -889,10 +948,16 @@ fn affected_entities_for_operations(
         .collect()
 }
 
+/// Returns true when `value` looks like a 64-char BLAKE3 hex content hash (entry id).
 fn is_blob_hash(value: &str) -> bool {
     value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
+/// Decodes the LWW-winning entry payload for one entity, if any ops exist.
+///
+/// # Errors
+///
+/// Returns an error when ops cannot be loaded or the winning JSON is invalid.
 fn winning_entry_payload(
     db: &Db,
     library_id: &str,
@@ -907,6 +972,13 @@ fn winning_entry_payload(
         .transpose()
 }
 
+/// Applies a winning entry payload to an existing local library row (metadata, trash, missing).
+///
+/// Hard-purged payloads delete the local entry. Missing local rows are left for hydration.
+///
+/// # Errors
+///
+/// Returns an error when local database writes fail.
 fn apply_entry_payload_to_local(db: &Db, payload: &EntryPayload) -> Result<()> {
     let entry_id = pdf_folio_core::EntryId::new(payload.id.clone());
     if payload.purged {
@@ -937,6 +1009,11 @@ fn apply_entry_payload_to_local(db: &Db, payload: &EntryPayload) -> Result<()> {
     Ok(())
 }
 
+/// Resolves LWW winners for the given entity keys and writes sync + library rows.
+///
+/// # Errors
+///
+/// Returns an error when ops cannot be loaded or materialization writes fail.
 fn materialize_crdt_entities(
     db: &Db,
     library_id: &str,
@@ -953,6 +1030,11 @@ fn materialize_crdt_entities(
     materialize_crdt_winners(db, library_id, winners)
 }
 
+/// Materializes a precomputed map of winning ops into local sync/library state.
+///
+/// # Errors
+///
+/// Returns an error when a payload cannot be decoded or local writes fail.
 fn materialize_crdt_winners(
     db: &Db,
     library_id: &str,
@@ -966,6 +1048,7 @@ fn materialize_crdt_winners(
     Ok(plan)
 }
 
+/// Folds a bag of ops into one LWW winner per `(entity_kind, entity_id)`.
 fn winners_for_operations(
     operations: Vec<SyncCrdtOperation>,
 ) -> BTreeMap<(String, String), SyncCrdtOperation> {
@@ -982,6 +1065,11 @@ fn winners_for_operations(
     winners
 }
 
+/// Loads all local ops for one entity and returns the LWW winner, if any.
+///
+/// # Errors
+///
+/// Returns an error when the local op store cannot be queried.
 fn winning_operation_for_entity(
     db: &Db,
     library_id: &str,
@@ -996,6 +1084,13 @@ fn winning_operation_for_entity(
     .remove(&(entity_kind.to_owned(), entity_id)))
 }
 
+/// Writes one winning op into sync tables and applies library-side state updates.
+///
+/// Unknown entity kinds are ignored. Increments the matching counter on `plan`.
+///
+/// # Errors
+///
+/// Returns an error when payload JSON is invalid or local writes fail.
 fn materialize_crdt_winner(
     db: &Db,
     library_id: &str,
@@ -1083,6 +1178,11 @@ fn operation_wins(candidate: &SyncCrdtOperation, current: &SyncCrdtOperation) ->
     )
 }
 
+/// Records the payload hash of a materialized winner so unchanged entities skip new ops.
+///
+/// # Errors
+///
+/// Returns an error when the local entity-payload cache cannot be written.
 fn remember_materialized_payload(
     db: &Db,
     library_id: &str,
@@ -1103,6 +1203,11 @@ fn remember_materialized_payload(
     )
 }
 
+/// Upserts pulled remote ops into the local store and advances the remote cursor.
+///
+/// # Errors
+///
+/// Returns an error when local op storage or cursor writes fail.
 fn apply_pulled_crdt_operations(
     db: &Db,
     library_id: &str,
@@ -1122,6 +1227,11 @@ fn apply_pulled_crdt_operations(
     Ok(())
 }
 
+/// Inserts local ops into Turso’s `sync_operations` log (`ON CONFLICT DO NOTHING`).
+///
+/// # Errors
+///
+/// Returns an error when a remote insert fails.
 async fn upsert_remote_sync_operations(
     remote: &TursoRemote,
     operations: &[SyncCrdtOperation],
@@ -1151,6 +1261,11 @@ async fn upsert_remote_sync_operations(
     Ok(())
 }
 
+/// Pulls remote CRDT ops with `remote_sequence` greater than `since_sequence`, ordered ascending.
+///
+/// # Errors
+///
+/// Returns an error when the remote query fails or a row cannot be decoded.
 async fn remote_sync_operations_since(
     remote: &TursoRemote,
     library_id: &str,
@@ -1215,6 +1330,11 @@ pub(super) async fn remote_sync_head_sequence(
         .ok_or_else(|| anyhow::anyhow!("Remote CRDT sync head query returned no rows."))
 }
 
+/// Upserts app-level library rows into Turso’s relational `libraries` table (legacy/relational path).
+///
+/// # Errors
+///
+/// Returns an error when a remote upsert fails.
 async fn upsert_remote_libraries(remote: &TursoRemote, rows: &[SyncLibraryRow]) -> Result<()> {
     for row in rows {
         remote
@@ -1247,6 +1367,11 @@ async fn upsert_remote_libraries(remote: &TursoRemote, rows: &[SyncLibraryRow]) 
     Ok(())
 }
 
+/// Upserts entry metadata rows into Turso’s relational `library_entries` table.
+///
+/// # Errors
+///
+/// Returns an error when a remote upsert fails.
 async fn upsert_remote_entries(remote: &TursoRemote, rows: &[SyncEntryRow]) -> Result<()> {
     for row in rows {
         remote
@@ -1274,6 +1399,11 @@ async fn upsert_remote_entries(remote: &TursoRemote, rows: &[SyncEntryRow]) -> R
     Ok(())
 }
 
+/// Upserts folder metadata rows into Turso’s relational `library_folders` table.
+///
+/// # Errors
+///
+/// Returns an error when a remote upsert fails.
 async fn upsert_remote_folders(remote: &TursoRemote, rows: &[SyncFolderRow]) -> Result<()> {
     for row in rows {
         remote
@@ -1301,6 +1431,11 @@ async fn upsert_remote_folders(remote: &TursoRemote, rows: &[SyncFolderRow]) -> 
     Ok(())
 }
 
+/// Upserts entry↔folder memberships into Turso’s relational `library_entry_folders` table.
+///
+/// # Errors
+///
+/// Returns an error when a remote upsert fails.
 async fn upsert_remote_entry_folders(
     remote: &TursoRemote,
     library_id: &str,
@@ -1329,6 +1464,11 @@ async fn upsert_remote_entry_folders(
     Ok(())
 }
 
+/// Loads all app-level library rows from Turso, ordered by name then id.
+///
+/// # Errors
+///
+/// Returns an error when the remote query fails or a row cannot be decoded.
 async fn remote_libraries(remote: &TursoRemote) -> Result<Vec<SyncLibraryRow>> {
     let rows = remote
         .query(
@@ -1351,6 +1491,11 @@ async fn remote_libraries(remote: &TursoRemote) -> Result<Vec<SyncLibraryRow>> {
     Ok(output)
 }
 
+/// Loads relational entry rows newer than `since` for one library (legacy pull path).
+///
+/// # Errors
+///
+/// Returns an error when the remote query fails or a row cannot be decoded.
 async fn remote_entries_updated_since(
     remote: &TursoRemote,
     library_id: &str,
@@ -1380,6 +1525,11 @@ async fn remote_entries_updated_since(
     Ok(output)
 }
 
+/// Loads relational folder rows newer than `since` for one library (legacy pull path).
+///
+/// # Errors
+///
+/// Returns an error when the remote query fails or a row cannot be decoded.
 async fn remote_folders_updated_since(
     remote: &TursoRemote,
     library_id: &str,
@@ -1411,6 +1561,11 @@ async fn remote_folders_updated_since(
     Ok(output)
 }
 
+/// Loads relational membership rows newer than `since` for one library (legacy pull path).
+///
+/// # Errors
+///
+/// Returns an error when the remote query fails or a row cannot be decoded.
 async fn remote_entry_folders_updated_since(
     remote: &TursoRemote,
     library_id: &str,

@@ -1294,10 +1294,15 @@ where
     }
 }
 
+/// Overlay glyph ring drawn at the auto-scroll origin while middle-click scrolling.
 struct AutoScrollIcon<'a, Class> {
+    /// Screen-space center of the auto-scroll indicator.
     origin: Point,
+    /// Draw vertical arrow tips when the content can scroll vertically.
     vertical: bool,
+    /// Draw horizontal arrow tips when the content can scroll horizontally.
     horizontal: bool,
+    /// Theme class used to resolve auto-scroll colors.
     class: &'a Class,
 }
 
@@ -1448,6 +1453,7 @@ where
     }
 }
 
+/// Publishes a viewport change and records `last_scrolled` when the offset moved.
 fn notify_scroll<Message>(
     state: &mut State,
     on_scroll: &Option<Box<dyn Fn(Viewport) -> Message + '_>>,
@@ -1464,6 +1470,7 @@ fn notify_scroll<Message>(
     }
 }
 
+/// Emits `on_scroll` when the relative/absolute offset or bounds change meaningfully.
 fn notify_viewport<Message>(
     state: &mut State,
     on_scroll: &Option<Box<dyn Fn(Viewport) -> Message + '_>>,
@@ -1513,26 +1520,43 @@ fn notify_viewport<Message>(
     true
 }
 
+/// Widget tree state for a [`Scrollable`] (offsets, drag/touch/auto-scroll).
 #[derive(Debug, Clone, Copy)]
 struct State {
+    /// Vertical scroll offset (absolute or relative).
     offset_y: Offset,
+    /// Horizontal scroll offset (absolute or relative).
     offset_x: Offset,
+    /// Current pointer/touch/auto-scroll interaction mode.
     interaction: Interaction,
+    /// Keyboard modifiers last seen (shift-scroll, etc.).
     keyboard_modifiers: keyboard::Modifiers,
+    /// Last viewport published via `on_scroll` (dedupes redundant events).
     last_notified: Option<Viewport>,
+    /// Timestamp of the last successful scroll notification (fade timing).
     last_scrolled: Option<Instant>,
+    /// Whether scrollbars are currently considered visible for drawing.
     is_scrollbar_visible: bool,
 }
 
+/// Active user interaction mode for scrollbar / touch / auto-scroll input.
 #[derive(Debug, Clone, Copy)]
 enum Interaction {
+    /// No drag, touch, or auto-scroll in progress.
     None,
+    /// Vertical scroller grabbed; `f32` is grab offset within the scroller (0–1).
     YScrollerGrabbed(f32),
+    /// Horizontal scroller grabbed; `f32` is grab offset within the scroller (0–1).
     XScrollerGrabbed(f32),
+    /// Touch/finger scroll starting at the given point.
     TouchScrolling(Point),
+    /// Middle-click auto-scroll: origin, current cursor, and last frame time.
     AutoScrolling {
+        /// Point where auto-scroll was initiated.
         origin: Point,
+        /// Latest cursor position while auto-scrolling.
         current: Point,
+        /// Previous animation frame time for delta velocity.
         last_frame: Option<Instant>,
     },
 }
@@ -1565,9 +1589,12 @@ impl operation::Scrollable for State {
     }
 }
 
+/// Scroll position along one axis as absolute pixels or a 0–1 fraction.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Offset {
+    /// Pixel offset from the start of the content.
     Absolute(f32),
+    /// Fraction of the scrollable range (0.0 = start, 1.0 = end).
     Relative(f32),
 }
 
@@ -1763,10 +1790,12 @@ impl State {
     }
 }
 
+/// Computed geometry for the active vertical and/or horizontal rails.
 #[derive(Debug)]
-/// State of both [`Scrollbar`]s.
 struct Scrollbars {
+    /// Vertical rail when content height overflows the viewport.
     y: Option<internals::Scrollbar>,
+    /// Horizontal rail when content width overflows the viewport.
     x: Option<internals::Scrollbar>,
 }
 
@@ -2000,18 +2029,24 @@ impl Scrollbars {
     }
 }
 
+/// Layout geometry helpers for active scrollbar rails (hit-test + drag math).
 pub(super) mod internals {
     use crate::core::{Point, Rectangle};
 
     use super::Anchor;
 
-    #[derive(Debug, Copy, Clone)]
     /// Scrollbar data structure.
+    #[derive(Debug, Copy, Clone)]
     pub struct Scrollbar {
+        /// Full hit-test region including margin around the rail.
         pub total_bounds: Rectangle,
+        /// Drawn rail bounds (without scroller padding).
         pub bounds: Rectangle,
+        /// Thumb geometry when content overflows; `None` when fully visible.
         pub scroller: Option<Scroller>,
+        /// Axis anchor (affects horizontal reverse math for [`Anchor::End`]).
         pub alignment: Anchor,
+        /// True when content fits and the rail is inactive.
         pub disabled: bool,
     }
 

@@ -31,18 +31,28 @@
 
 use std::path::PathBuf;
 
+/// Sort keys, cleaned text, and gap-spaced manual order helpers.
 mod naming;
 
+/// Shared row/DTO types re-exported at this module and the crate root.
 mod types;
 pub use types::*;
 
+/// Import scanning, hashing, thumbnails, and filesystem watching.
 pub mod import;
+/// Entry CRUD, tags, trash, missing-file flags, and path relink.
 pub mod library;
+/// Display overrides, preferences, reading progress, and ratings.
 pub mod metadata;
+/// Folder tree, memberships, manual order, and undo snapshots.
 pub mod organization;
+/// Raindrop.io collection/entry mapping tables.
 pub mod raindrop;
+/// Open/migrate the SQLite file and run schema upgrades.
 pub mod schema;
+/// Tantivy full-text index over page text.
 pub mod search;
+/// Local sync metadata, CRDT op log, and blob upload markers.
 pub mod sync;
 
 /// SQLite-backed PDF-Folio library database handle.

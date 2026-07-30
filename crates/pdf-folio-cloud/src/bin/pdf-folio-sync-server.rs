@@ -22,6 +22,11 @@
 use anyhow::Result;
 use tracing_subscriber::EnvFilter;
 
+/// Process entry: init tracing from `RUST_LOG`, then block on [`pdf_folio_cloud::server::run`].
+///
+/// # Errors
+///
+/// Returns an error when configuration load or the HTTP server fails.
 #[tokio::main]
 async fn main() -> Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));

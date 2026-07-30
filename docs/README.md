@@ -37,6 +37,8 @@ pnpm watch        # rebuild only
 
 In-code `//!` module docs and `///` item docs are the source of truth for the **API Reference** section. `extract-rustdoc.mjs` turns them into Markdown that uses the same site theme (no stock rustdoc HTML). Guide pages link into `api/…`; API pages link back to guides.
 
+**Private modules are included.** A plain `mod foo;` (no `pub`) still gets a full API page, appears in the parent submodule table with a visibility column, and is listed in the sidebar module tree marked `· private`. Module-level private items (`fn`, `const`, `struct`, …) are extracted too; this is a maintainer map of the tree, not a public-API filter.
+
 Edit documentation in the `.rs` files, not under `content/api/`.
 
 Open `http://127.0.0.1:4173/` after `pnpm serve`, or open `site/index.html` from any static file server.

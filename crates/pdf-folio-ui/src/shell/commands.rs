@@ -23,106 +23,197 @@ use crate::*;
 /// Stable identifier for a command-palette / menu command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandId {
+    /// Open a PDF via the native file picker (viewer / global).
     OpenFile,
+    /// Import one or more PDFs into the active library.
     ImportPdf,
+    /// Import every PDF under a chosen folder into the library.
     ImportFolder,
+    /// Start the Raindrop.io import flow.
     ImportRaindrop,
+    /// Leave the viewer and return to the library surface.
     BackToLibrary,
+    /// Reload library entries and folders from the database.
     RefreshLibrary,
+    /// Undo the latest library organization edit.
     UndoLibraryAction,
+    /// Redo the latest undone library organization edit.
     RedoLibraryAction,
+    /// Cut selected PDFs or the focused folder into the in-app clipboard.
     CutLibrarySelection,
+    /// Copy selected PDFs or the focused folder into the in-app clipboard.
     CopyLibrarySelection,
+    /// Paste the in-app clipboard into the active folder scope.
     PasteLibraryClipboard,
+    /// Restore filters/scroll captured before a tag-pill drill-in.
     RestoreTagPillView,
+    /// Clear folder scope and show all PDFs in the library root.
     GoToLibraryRoot,
+    /// Open the trash can browser scope.
     GoToTrash,
+    /// Clear search, tag, folder, reading, and missing filters.
     ClearFilters,
+    /// Select every PDF currently visible in the browser.
     SelectAllVisible,
+    /// Clear the current multi-selection.
     ClearSelection,
+    /// Open the single selected PDF in the viewer.
     OpenSelected,
+    /// Open the move-to-folder picker for the selection.
     MoveSelectionToFolder,
+    /// Move the selection to the trash can (with confirmation).
     MoveSelectionToTrash,
+    /// Add the bulk-tag input string to every selected PDF.
     AddTypedTag,
+    /// Remove the bulk-tag input string from every selected PDF.
     RemoveTypedTag,
+    /// Add selected PDFs to the currently scoped folder.
     AddSelectionToCurrentFolder,
+    /// Remove selected PDFs from the currently scoped folder.
     RemoveSelectionFromCurrentFolder,
+    /// Open the create-folder dialog under the current scope.
     CreateFolder,
+    /// Focus rename for the selected/details folder.
     RenameFolder,
+    /// Open the move picker to re-parent the selected folder.
     MoveFolderTo,
+    /// Re-parent the selected folder to the library root.
     MoveFolderToRoot,
+    /// Promote the selected folder one level toward the root.
     MoveFolderUp,
+    /// Reorder the selected folder earlier among its siblings.
     MoveFolderEarlier,
+    /// Reorder the selected folder later among its siblings.
     MoveFolderLater,
+    /// Move the selected folder to the trash can.
     MoveFolderToTrash,
+    /// Start renaming the active tag filter.
     RenameTag,
+    /// Delete the active tag from every PDF that uses it.
     DeleteTag,
+    /// Open the tag manager merge flow for the active tag.
     MergeTag,
+    /// Persist details-panel title/author overrides for the selected PDF.
     SaveDetails,
+    /// Clear details-panel overrides and restore extracted PDF metadata.
     ResetDetails,
+    /// Re-extract metadata from source files for the selection.
     RefreshMetadata,
+    /// Clear display metadata overrides for the selection.
     ResetDisplayMetadata,
+    /// Recompute title sort keys for the selection.
     ApplyTitleSortCleanup,
+    /// Rebuild cover thumbnails for the selection.
     RebuildThumbnails,
+    /// Rebuild the full-text search index for the selection.
     ReindexFullText,
+    /// Toggle between masonry grid and compact list layout.
     ToggleLibraryLayout,
+    /// Show or hide the left library sidebar.
     ToggleLibrarySidebar,
+    /// Show or hide the right library inspector.
     ToggleLibraryInspector,
+    /// Sort the library by manual order.
     SortManual,
+    /// Sort the library by title A→Z.
     SortTitleAsc,
+    /// Sort the library by title Z→A.
     SortTitleDesc,
+    /// Sort the library by author A→Z.
     SortAuthorAsc,
+    /// Sort the library by author Z→A.
     SortAuthorDesc,
+    /// Sort the library by most recently added.
     SortRecentlyAdded,
+    /// Sort the library by most recently opened.
     SortRecentlyOpened,
+    /// Sort the library by reading progress.
     SortReadingProgress,
+    /// Sort the library by page count.
     SortPageCount,
+    /// Sort the library with missing files first / grouped.
     SortMissingFiles,
+    /// Cycle or set the library metadata density on cards/rows.
     SetMetadataDensity,
+    /// Toggle the missing-files-only filter.
     ToggleMissingFiles,
+    /// Scope the browser to recently added PDFs.
     GoToRecentlyAdded,
+    /// Scope the browser to recently opened PDFs.
     GoToRecentlyOpened,
+    /// Scope the browser to PDFs not filed in any folder.
     GoToUnfiled,
+    /// Jump navigation to a chosen folder (palette stub / future picker).
     GoToFolder,
+    /// Jump navigation to a chosen tag (palette stub / future picker).
     GoToTag,
+    /// Focus the bulk/inspector tag input for the selection.
     AddTagToSelection,
+    /// Open the export dialog for the selected PDFs.
     ExportSelectedPdfs,
+    /// Toggle light/dark theme.
     ToggleTheme,
+    /// Reload KDL style files from disk.
     ReloadStyles,
+    /// Show or hide the viewer outline / TOC sidebar.
     ToggleToc,
+    /// Open the jump-to-page overlay in the viewer.
     JumpToPage,
+    /// Open the find-in-document bar in the viewer.
     FindInDocument,
+    /// Increase viewer zoom.
     ZoomIn,
+    /// Decrease viewer zoom.
     ZoomOut,
+    /// Reset viewer zoom to the default width.
     ResetZoom,
+    /// Use page-at-a-time viewer scrolling.
     SetViewerScrollPage,
+    /// Use continuous vertical viewer scrolling.
     SetViewerScrollVertical,
+    /// Use continuous horizontal viewer scrolling.
     SetViewerScrollHorizontal,
+    /// Use wrapped multi-column viewer scrolling.
     SetViewerScrollWrapped,
+    /// Show single pages without two-page spreads.
     SetViewerSpreadNone,
+    /// Pair pages with odd pages on the left.
     SetViewerSpreadOdd,
+    /// Pair pages with even pages on the left (cover-style).
     SetViewerSpreadEven,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Grouping category for command palette sections.
 pub enum CommandCategory {
+    /// Library-wide maintenance and undo/redo.
     Library,
+    /// Import PDFs from disk or Raindrop.
     Import,
+    /// Multi-select clipboard and bulk selection actions.
     Selection,
+    /// Folder create/rename/move/trash.
     Folder,
+    /// Tag rename/delete/merge and bulk tagging.
     Tag,
+    /// Display metadata and details-panel edits.
     Metadata,
+    /// Export selected PDFs to disk.
     Export,
+    /// Thumbnail rebuild and full-text reindex.
     Maintenance,
+    /// Scope/filter navigation (root, trash, recent, …).
     Navigation,
+    /// Layout, sort, density, and viewer view modes.
     View,
+    /// In-document jump and find.
     Document,
+    /// Theme and style reload.
     Appearance,
 }
 
 impl CommandCategory {
-    /// Returns the user-facing label.
+    /// Section heading shown when grouping commands in the palette UI.
     pub fn label(self) -> &'static str {
         match self {
             Self::Library => "Library",
@@ -144,55 +235,83 @@ impl CommandCategory {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// What kind of target a command operates on (entry, folder, …).
 pub enum CommandTargetKind {
+    /// No specific target; global or mode-level command.
     None,
+    /// Requires library mode / library surface context.
     Library,
+    /// Operates on the selected or details folder.
     Folder,
+    /// Operates on the active tag filter.
     Tag,
+    /// Requires exactly one selected PDF.
     SinglePdf,
+    /// Requires one or more selected PDFs.
     MultiplePdfs,
+    /// Operates on the current search/browse result set.
     SearchResult,
+    /// Requires an open viewer with a document.
     Viewer,
+    /// In-document command (find, jump) while a PDF is open.
     Document,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Danger level used to style destructive commands.
 pub enum CommandDanger {
+    /// Non-destructive; default palette styling.
     Safe,
+    /// Deletes or trashes user data; styled as destructive.
     Destructive,
+    /// Overwrites display or extracted metadata; warn-style affordance.
     OverwritesMetadata,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Which UI surface exposes a command (library, viewer, global).
 pub enum CommandSurface {
+    /// Overflow "more" menu in the library header.
     HeaderMore,
+    /// Unified import chooser dropdown.
     ImportMenu,
+    /// Floating toolbar shown when PDFs are multi-selected.
     SelectionToolbar,
+    /// Full command palette overlay.
     CommandPalette,
 }
 
 #[derive(Debug, Clone, Copy)]
 /// Static specification of a command (id, label, category, surface).
 pub struct CommandSpec {
+    /// Stable id used by palette, menus, and enablement helpers.
     pub id: CommandId,
+    /// Primary user-facing label in palette and menu rows.
     pub label: &'static str,
+    /// Optional embedded icon bytes for menu rows.
     pub icon: Option<&'static [u8]>,
+    /// Optional shortcut hint string shown beside the label.
     pub shortcut: Option<&'static str>,
+    /// Palette section grouping.
     pub category: CommandCategory,
+    /// Kind of selection/context the command expects.
     pub target: CommandTargetKind,
+    /// Visual danger styling for destructive or overwriting actions.
     pub danger: CommandDanger,
+    /// Extra search terms matched by the palette filter.
     pub aliases: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy)]
 /// A command after context resolution (enabled/visible/message).
 pub struct ResolvedCommand {
+    /// Static metadata for this command.
     pub spec: CommandSpec,
+    /// Whether the command can run in the current app state.
     pub enabled: bool,
+    /// Whether the command should appear on the requesting surface.
     pub visible: bool,
 }
 
+/// Static table of every command palette / menu command specification.
 const COMMAND_SPECS: &[CommandSpec] = &[
     spec(
         CommandId::OpenFile,
@@ -907,6 +1026,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
     ),
 ];
 
+/// Builds a [`CommandSpec`] with no icon for the static [`COMMAND_SPECS`] table.
 const fn spec(
     id: CommandId,
     label: &'static str,
@@ -1101,6 +1221,7 @@ pub fn command_visible(app: &PDFolioApp, id: CommandId, surface: CommandSurface)
     }
 }
 
+/// Commands that stay available regardless of library/viewer mode.
 fn is_shared_command(id: CommandId) -> bool {
     matches!(
         id,
@@ -1108,6 +1229,7 @@ fn is_shared_command(id: CommandId) -> bool {
     )
 }
 
+/// Commands that require viewer mode with an open document to be enabled.
 fn is_viewer_command(id: CommandId) -> bool {
     matches!(
         id,
@@ -1253,6 +1375,7 @@ pub fn command_matches(spec: CommandSpec, query: &str) -> bool {
         .any(|value| fuzzy_contains(&value, &query))
 }
 
+/// Substring match, or subsequence match so sparse palette queries still hit.
 fn fuzzy_contains(value: &str, query: &str) -> bool {
     if value.contains(query) {
         return true;

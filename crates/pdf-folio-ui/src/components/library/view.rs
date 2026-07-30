@@ -1,8 +1,17 @@
 //! # Reusable library toolbar widgets
 //!
-//! Message-generic controls: layout toggle, grid zoom, sort/density pickers,
-//! scrollable shell, and new-folder button styling. Domain views bind them to
-//! concrete `Message` constructors.
+//! Message-generic presentation helpers under `components::library::view`.
+//! Provides the vertical scrollable shell for the entry grid/list, the grid vs
+//! list layout toggle, grid-zoom slider, metadata-density and sort pick lists,
+//! and a small color utility used by drag previews and sync chrome.
+//!
+//! ## Ownership
+//!
+//! Widgets take a type parameter `Message` so domain views under
+//! `crate::library::view` bind concrete constructors without this module
+//! depending on app update logic. SVG icon bytes for the layout toggle come
+//! from [`crate::components::shared::icons`]. Related: [`super::state`] for
+//! density options, [`super::cards`] for entry chrome inside the scrollable.
 
 use iced::widget::scrollable::{Direction, Scrollbar, Viewport};
 use iced::widget::{button, container, pick_list, row, scrollable, slider, text, tooltip, Svg};
@@ -16,13 +25,20 @@ use std::time::Duration;
 
 use crate::library::state::LibraryMetadataDensity;
 
-/// Returns a copy with alpha applied.
+/// Multiply a color's alpha channel by `alpha` (clamped to `0.0..=1.0`).
+///
+/// Used for translucent drag previews, selection highlights, and muted
+/// toolbar glyphs without allocating a separate theme token.
 pub fn with_alpha(mut color: iced::Color, alpha: f32) -> iced::Color {
     color.a *= alpha.clamp(0.0, 1.0);
     color
 }
 
-/// Library scrollable.
+/// Vertical scrollable shell for the library entry column.
+///
+/// Assigns the shared `LIBRARY_SCROLLABLE_ID`, sizes the scrollbar from theme
+/// primitives plus `scrollbar_gutter`, and forwards viewport changes via
+/// `on_scroll` (used for virtualization and drag autoscroll).
 pub fn library_scrollable<'a, Message: 'a>(
     content: iced::widget::Column<'a, Message>,
     tokens: ThemeTokens,
@@ -48,7 +64,10 @@ pub fn library_scrollable<'a, Message: 'a>(
         .into()
 }
 
-/// Library layout toggle button.
+/// Toolbar button that switches between compact list and grid layouts.
+///
+/// Shows the opposite-mode icon (grid when already compact, list when in
+/// grid) and a delayed tooltip; `message` is emitted on press.
 pub fn library_layout_toggle_button<'a, Message: Clone + 'a>(
     compact_view_mode: bool,
     tokens: ThemeTokens,
@@ -107,7 +126,10 @@ pub fn library_layout_toggle_button<'a, Message: Clone + 'a>(
     .into()
 }
 
-/// Library grid zoom control.
+/// Slider row that scales grid card size between `min` and `max`.
+///
+/// `label` is the readout next to the slider (typically a percentage);
+/// `on_change` emits a domain message on each step.
 pub fn library_grid_zoom_control<'a, Message: Clone + 'a>(
     min: f32,
     max: f32,
@@ -155,7 +177,10 @@ pub fn library_grid_zoom_control<'a, Message: Clone + 'a>(
     .into()
 }
 
-/// Library metadata density picker.
+/// Pick list for how much secondary metadata appears on cards and rows.
+///
+/// Options are usually the three [`LibraryMetadataDensity`] variants; selection
+/// is persisted by the domain layer via `on_select`.
 pub fn library_metadata_density_picker<'a, Message: Clone + 'a>(
     selected: LibraryMetadataDensity,
     options: &'static [LibraryMetadataDensity],
@@ -180,7 +205,10 @@ pub fn library_metadata_density_picker<'a, Message: Clone + 'a>(
         .into()
 }
 
-/// Library sort picker.
+/// Pick list for library sort mode (manual, title, date opened, …).
+///
+/// Manual mode enables drag-reorder; other modes disable it via
+/// [`super::drag::can_drag_reorder_library`].
 pub fn library_sort_picker<'a, Message: Clone + 'a>(
     selected: LibrarySortMode,
     options: &'static [LibrarySortMode],

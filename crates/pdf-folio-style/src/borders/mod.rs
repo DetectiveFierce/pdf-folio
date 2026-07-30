@@ -12,6 +12,7 @@
 //! 2. [`crate::classes::side_border_for_class`] extracts the [`VisualBorder`](crate::tokens::VisualBorder).
 //! 3. Component helpers call [`side_border`] around the iced container/button.
 
+/// Widget implementation of [`side_border`].
 pub mod side;
 
 pub use side::side_border;

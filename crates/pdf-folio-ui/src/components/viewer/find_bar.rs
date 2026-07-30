@@ -1,11 +1,26 @@
 //! # Find-in-document bar
 //!
-//! Search field and next/previous controls for in-document text find.
+//! Floating find chrome under `components::viewer::find_bar`. Provides the
+//! search field, match counter, previous/next buttons, highlight-all and
+//! case/diacritic toggles, and dismiss control while a document is open.
+//!
+//! ## Ownership
+//!
+//! Reads `app.viewer.viewer_find` query and match state; emits
+//! `ViewerFind*` / `CloseViewerFind` messages handled by viewer update.
+//! Positioning is a bottom-right anchor over the viewer surface; the host
+//! domain view decides when the bar is shown.
+//!
+//! Related: text selection and canvas hit-testing in [`super::canvas`];
+//! find is also reachable from [`super::toolbar`] and context menus.
 
 use crate::*;
 use iced::widget::{row, Svg};
 
-/// Anchor/layout helper for positioning the find bar relative to the viewer.
+/// Bottom-right anchor that hosts the find bar over the viewer content area.
+///
+/// `width` is the bar’s fixed layout width from the host; the bar itself is
+/// only built when the domain view includes this element.
 pub(crate) fn viewer_find_anchor(
     app: &PDFolioApp,
     tokens: ThemeTokens,
@@ -19,6 +34,7 @@ pub(crate) fn viewer_find_anchor(
         .into()
 }
 
+/// Find bar body: query field, match fraction, prev/next, and option toggles.
 fn view_viewer_find_bar(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> Element<'_, Message> {
     let current = app.viewer.viewer_find.selected.map_or(0, |index| index + 1);
     let total = app.viewer.viewer_find.matches.len();
@@ -93,6 +109,7 @@ fn view_viewer_find_bar(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> El
         .into()
 }
 
+/// Icon button with tooltip used for find-bar prev/next and option controls.
 fn viewer_find_icon_button<'a>(
     layout: &crate::style::AppLayoutTokens,
     icon: &'static [u8],

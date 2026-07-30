@@ -36,10 +36,15 @@ use crate::shell::commands::{command_message, command_visible, CommandId, Comman
 use crate::*;
 use iced::widget::{column, row, stack};
 
+/// Inline SVG for the search-field clear (X) control.
 const SEARCH_CLEAR_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"##;
+/// PDF cards/rows and selection chrome for the main library pane.
 mod entries;
+/// Folder cards, drag previews, and masonry helpers shared with entry layout.
 mod folders;
+/// Top-level library pane (header, sidebars, scroll content).
 mod root;
+/// Navigation tree, tags, and selection details panels.
 mod sidebar;
 
 pub(crate) use crate::components::library::dialogs::*;
@@ -51,6 +56,7 @@ pub(crate) use folders::*;
 pub(crate) use root::*;
 pub(crate) use sidebar::*;
 
+/// Default library toolbar: title, import/actions, search, sort, and layout controls.
 fn view_library_header(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let toolbar_width = library_toolbar_available_width(app);
     let compact_toolbar = toolbar_width
@@ -197,6 +203,7 @@ fn view_library_header(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Mes
         .into()
 }
 
+/// Header title reflecting trash, active tag, folder breadcrumbs, or the vault name.
 fn library_header_title(app: &PDFolioApp) -> String {
     if app.library.trash_view_active {
         return String::from("Trash Can");
@@ -215,6 +222,7 @@ fn library_header_title(app: &PDFolioApp) -> String {
     app.active_library_name().to_owned()
 }
 
+/// Selection-mode toolbar: count, bulk move/export/trash actions, and clear selection.
 fn view_library_selection_toolbar(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let selected_count = app.library.selected_library_entries.len();
     let label = format!("{} selected", format_count(selected_count, "PDF"));
@@ -300,6 +308,7 @@ fn view_library_selection_toolbar(app: &PDFolioApp, tokens: ThemeTokens) -> Elem
         .into()
 }
 
+/// Styled secondary header/toolbar button with `label` text (import-button class).
 fn library_header_button<'a>(
     label: &'a str,
     tokens: ThemeTokens,

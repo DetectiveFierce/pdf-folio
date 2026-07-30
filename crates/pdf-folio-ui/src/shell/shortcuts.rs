@@ -150,6 +150,7 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
     }
 }
 
+/// True when Control is held and the key/text is the given character (case-insensitive).
 fn is_ctrl_character(
     key: &keyboard::Key,
     text: Option<&str>,
@@ -161,6 +162,7 @@ fn is_ctrl_character(
             || text.is_some_and(|text| text.eq_ignore_ascii_case(target)))
 }
 
+/// True when `key` is a character key matching `target` (case-insensitive).
 fn key_is_character(key: &keyboard::Key, target: &str) -> bool {
     match key {
         keyboard::Key::Character(value) => value.eq_ignore_ascii_case(target),
@@ -168,6 +170,7 @@ fn key_is_character(key: &keyboard::Key, target: &str) -> bool {
     }
 }
 
+/// True when `key` is the Escape named key.
 fn is_escape(key: &keyboard::Key) -> bool {
     matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape))
 }
@@ -415,6 +418,7 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
     }
 }
 
+/// Unit tests for global shortcut capture and single-key library chords.
 #[cfg(test)]
 mod tests {
     use super::*;
