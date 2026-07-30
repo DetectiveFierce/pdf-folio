@@ -7,6 +7,7 @@ pub mod auth;
 pub mod blobs;
 pub mod cli;
 pub mod client;
+pub mod crdt;
 pub mod remote;
 pub mod run;
 pub mod session;

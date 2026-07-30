@@ -4,7 +4,8 @@ use anyhow::Result;
 use pdf_folio_core::Db;
 
 use super::blobs::BlobCache;
-use super::client::{prepare_local_crdt_operations, SyncClient};
+use super::client::SyncClient;
+use super::crdt::prepare_local_crdt_operations;
 use super::status::{SyncCrdtPreflight, SyncHydrationReport, SyncRunReport};
 
 impl SyncClient {
@@ -29,7 +30,7 @@ impl SyncClient {
         let prepared = prepare_local_crdt_operations(db, library_id, device_id)?;
         let remote = self.turso.remote().await?;
         let local_cursor = db.sync_crdt_remote_cursor(library_id, device_id)?;
-        let remote_sequence = super::client::remote_sync_head_sequence(&remote, library_id).await?;
+        let remote_sequence = super::crdt::remote_sync_head_sequence(&remote, library_id).await?;
         Ok(SyncCrdtPreflight {
             generated_operations: prepared.summary.generated,
             pending_operations: prepared.pending_operations.len(),
