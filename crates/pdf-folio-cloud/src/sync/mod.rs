@@ -5,8 +5,10 @@
 
 pub mod auth;
 pub mod blobs;
+pub mod cli;
 pub mod client;
 pub mod remote;
+pub mod run;
 pub mod session;
 pub mod status;
 

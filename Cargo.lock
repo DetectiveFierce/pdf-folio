@@ -4176,6 +4176,7 @@ dependencies = [
  "base64",
  "blake3",
  "chrono",
+ "clap",
  "directories",
  "hex",
  "hmac",
@@ -4221,17 +4222,10 @@ name = "pdf-folio-main"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "clap",
- "directories",
  "pdf-folio-cloud",
- "pdf-folio-core",
  "pdf-folio-ui",
- "reqwest",
- "serde",
- "serde_json",
  "tokio",
- "tracing",
  "tracing-subscriber",
 ]
 
