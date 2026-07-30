@@ -1416,9 +1416,6 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         Message::ClearLibrarySelection => {
             app.clear_library_selection();
         }
-        Message::ClearLibrarySidebarDetails => {
-            app.clear_library_sidebar_details();
-        }
         Message::SelectAllVisibleLibraryEntries => {
             app.select_all_visible_library_entries();
         }
@@ -1608,40 +1605,6 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 scroll_library_to_offset_task(app.library.library_scroll_offset),
                 start_auto_sync_now(app),
             ]);
-        }
-        Message::ToggleLibraryInspector => {
-            if app.mode == AppMode::Library {
-                let columns = app.library_entries_per_row();
-                app.library.library_inspector_open = !app.library.library_inspector_open;
-                app.library.resizing_library_inspector = false;
-                app.recalculate_library_viewport_width();
-                app.fit_library_grid_zoom_to_columns(columns);
-                return with_session_save(app.request_visible_thumbnails(), app);
-            }
-        }
-        Message::BeginLibraryInspectorResize => {
-            app.library.resizing_library_inspector = true;
-            app.library.library_inspector_open = true;
-        }
-        Message::LibraryInspectorResizeDragged(cursor_x) => {
-            if app.library.resizing_library_inspector {
-                let width = (app.viewer.viewport_width - cursor_x).max(1.0);
-                app.library.library_inspector_width = width.clamp(
-                    app.layout().metric("LibraryInspector", "min_width", 260.0),
-                    app.layout().metric("LibraryInspector", "max_width", 520.0),
-                );
-                app.recalculate_library_viewport_width();
-            }
-        }
-        Message::EndLibraryInspectorResize => {
-            app.library.resizing_library_inspector = false;
-            return save_app_session_task(app);
-        }
-        Message::LibrarySidebarTabChanged(tab) => {
-            app.library.renaming_tag = None;
-            app.library.tag_rename_input.clear();
-            app.library.library_sidebar_tab = tab;
-            return save_app_session_task(app);
         }
         Message::ToggleLibraryTreeRoot => {
             app.library.library_tree_root_expanded = !app.library.library_tree_root_expanded;
