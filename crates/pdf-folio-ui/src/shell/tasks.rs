@@ -6,7 +6,6 @@ use crate::*;
 use anyhow::Context;
 use directories::ProjectDirs;
 use iced::futures::SinkExt;
-use pdf_folio_db::ImportSummary;
 
 pub(crate) fn mark_entry_opened_task(app: &PDFolioApp) -> Task<Message> {
     let Some(entry_id) = app.viewer.current_entry_id.clone() else {
@@ -601,58 +600,4 @@ pub(crate) fn start_next_queued_sync(app: &mut PDFolioApp) -> Task<Message> {
         return Task::none();
     };
     auto_sync_library_task(app, library_id)
-}
-
-pub(crate) fn import_review_from_summary(
-    title: String,
-    summary: &ImportSummary,
-    destination_label: String,
-    suggested_tags: Vec<String>,
-) -> ImportReviewState {
-    let imported_entry_ids = summary
-        .entries
-        .iter()
-        .map(|entry| entry.id.clone())
-        .collect::<Vec<_>>();
-    let duplicate_count = summary
-        .entries
-        .iter()
-        .filter(|entry| !entry.inserted)
-        .count();
-    ImportReviewState {
-        title,
-        imported_entry_ids,
-        imported_count: summary.entries.len().saturating_sub(duplicate_count),
-        duplicate_count,
-        failed_count: summary.errors.len(),
-        destination_label,
-        suggested_tags,
-        errors: summary.errors.clone(),
-    }
-}
-
-pub(crate) fn export_entries_for_source(
-    app: &PDFolioApp,
-    source: &ExportSource,
-) -> Vec<LibraryEntry> {
-    let all_entries = app
-        .library
-        .library_entries
-        .iter()
-        .chain(app.library.library_trash_entries.iter());
-    match source {
-        ExportSource::SelectedEntries => app.selected_entries(),
-        ExportSource::SingleEntry(entry_id) => all_entries
-            .filter(|entry| &entry.id == entry_id)
-            .cloned()
-            .collect(),
-        ExportSource::Folder(folder_id) => all_entries
-            .filter(|entry| entry.folders.iter().any(|folder| &folder.id == folder_id))
-            .cloned()
-            .collect(),
-        ExportSource::Tag(tag) => all_entries
-            .filter(|entry| entry.tags.iter().any(|entry_tag| entry_tag == tag))
-            .cloned()
-            .collect(),
-    }
 }
