@@ -210,9 +210,22 @@ pub use viewer::document::ViewerRuntime;
 ///
 /// Returns an error when startup state cannot be created or iced fails to run.
 pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
-    let launch_started_at = Instant::now();
+    run_with_process_start(initial_file, Instant::now())
+}
+
+/// Launches PDF-Folio while measuring startup from the binary process entry.
+///
+/// The main binary passes an [`Instant`] captured as its first operation so
+/// `PDF_FOLIO_STARTUP_PROBE=1` reports process-start-to-interactive time,
+/// including tracing setup and CLI parsing.
+pub fn run_with_process_start(
+    initial_file: Option<PathBuf>,
+    process_started_at: Instant,
+) -> Result<()> {
+    let launch_started_at = process_started_at;
     let startup_probe_enabled = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").is_some();
     let startup_file = initial_file.clone();
+    let session_load_started_at = Instant::now();
     let startup_session = if startup_file.is_none() {
         match load_app_session() {
             Ok(session) => session,
@@ -224,13 +237,18 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
     } else {
         None
     };
+    let session_load_ms = session_load_started_at.elapsed().as_millis();
     let initial_size = startup_session
         .as_ref()
         .map(AppSession::window_size)
         .unwrap_or_else(initial_window_size);
+    let state_build_started_at = Instant::now();
     let app = PDFolioApp::with_initial_file_and_session(initial_file, startup_session.clone())?;
+    let state_build_ms = state_build_started_at.elapsed().as_millis();
     tracing::info!(
-        elapsed_ms = launch_started_at.elapsed().as_millis(),
+        process_elapsed_ms = launch_started_at.elapsed().as_millis(),
+        session_load_ms,
+        state_build_ms,
         startup_probe_enabled,
         "PDF-Folio local startup state constructed"
     );
@@ -247,7 +265,7 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
             let open_task = if app.sync_auth.is_signed_in() {
                 startup_file
                     .clone()
-                    .or_else(|| startup_session.as_ref()?.viewer.document_path.clone())
+                    .or_else(|| startup_session.as_ref()?.viewer_document_to_restore())
                     .map(open_document_task)
                     .unwrap_or_else(Task::none)
             } else {
@@ -285,12 +303,19 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
                 },
                 |_| Message::StartupBackgroundReady,
             );
+            let startup_local_snapshot_task = Task::perform(
+                async {
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                },
+                |_| Message::StartupLocalSnapshotReady,
+            );
             (
                 app,
                 Task::batch([
                     open_task,
                     rollback_task,
                     startup_probe_task,
+                    startup_local_snapshot_task,
                     startup_background_ready_task,
                 ]),
             )

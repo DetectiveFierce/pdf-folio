@@ -12,7 +12,6 @@
 //! Default library id uses `library.db` at the data root; additional
 //! libraries live under `libraries/<id>/library.db`.
 
-use crate::library::registry::preview::load_library_previews;
 use crate::library::registry::state::{
     StoredLibraryRegistry, DEFAULT_LIBRARY_ID, DEFAULT_LIBRARY_NAME,
 };
@@ -20,9 +19,14 @@ use crate::*;
 use anyhow::Context;
 use directories::ProjectDirs;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Load or initialize `libraries.json`, ensure a default profile, and attach previews.
+/// Load or initialize `libraries.json` and ensure a default profile.
+///
+/// Switcher previews are intentionally not loaded here: opening every library
+/// database and decoding cover images delays the first window. They are
+/// refreshed asynchronously when the switcher is opened.
 pub(crate) fn load_library_registry(
     preferred_active_id: Option<&str>,
 ) -> anyhow::Result<LibraryRegistryRuntime> {
@@ -33,8 +37,27 @@ pub(crate) fn load_library_registry(
     let stored = if path.exists() {
         let json = std::fs::read_to_string(&path)
             .with_context(|| format!("Could not read {}.", path.display()))?;
-        serde_json::from_str::<StoredLibraryRegistry>(&json)
-            .with_context(|| format!("Could not parse {}.", path.display()))?
+        match serde_json::from_str::<StoredLibraryRegistry>(&json) {
+            Ok(stored) => stored,
+            Err(error) => {
+                let backup =
+                    path.with_extension(format!("json.invalid.{}", current_unix_timestamp()));
+                if let Err(backup_error) = std::fs::copy(&path, &backup) {
+                    tracing::warn!(
+                        %backup_error,
+                        path = %path.display(),
+                        "Could not preserve invalid library registry"
+                    );
+                }
+                tracing::warn!(
+                    %error,
+                    path = %path.display(),
+                    backup = %backup.display(),
+                    "Recovering from invalid library registry"
+                );
+                default_registry(&data_dir)
+            }
+        }
     } else {
         default_registry(&data_dir)
     };
@@ -53,7 +76,6 @@ pub(crate) fn load_library_registry(
         .iter()
         .map(|profile| (profile.id.clone(), profile.name.clone()))
         .collect();
-    registry.previews = load_library_previews(&registry.profiles);
     save_library_registry(&registry)?;
     Ok(registry)
 }
@@ -79,10 +101,10 @@ pub(crate) fn create_library_profile(
     });
     registry.active_library_id = id.clone();
     registry.new_library_name.clear();
-    registry.rename_inputs.insert(id, name);
+    registry.rename_inputs.insert(id.clone(), name);
     registry.open_menu_library_id = None;
     registry.name_dialog = None;
-    registry.previews = load_library_previews(&registry.profiles);
+    registry.previews.entry(id).or_default();
     save_library_registry(&registry)?;
     Ok(registry)
 }
@@ -106,7 +128,6 @@ pub(crate) fn rename_library_profile(
     registry.rename_inputs.insert(library_id, name);
     registry.open_menu_library_id = None;
     registry.name_dialog = None;
-    registry.previews = load_library_previews(&registry.profiles);
     save_library_registry(&registry)?;
     Ok(registry)
 }
@@ -139,7 +160,7 @@ pub(crate) fn delete_library_profile(
     }
     registry.open_menu_library_id = None;
     registry.name_dialog = None;
-    registry.previews = load_library_previews(&registry.profiles);
+    registry.previews.remove(&library_id);
     save_library_registry(&registry)?;
     remove_library_storage(&removed.db_path)?;
     Ok(registry)
@@ -157,8 +178,29 @@ pub(super) fn save_library_registry(registry: &LibraryRegistryRuntime) -> anyhow
         libraries: registry.profiles.clone(),
         deleted_library_ids: registry.deleted_library_ids.iter().cloned().collect(),
     };
-    std::fs::write(&path, serde_json::to_vec_pretty(&stored)?)
-        .with_context(|| format!("Could not write {}.", path.display()))?;
+    static REGISTRY_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let sequence = REGISTRY_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = path.with_extension(format!("json.{}.{}.tmp", std::process::id(), sequence));
+    std::fs::write(&temporary, serde_json::to_vec_pretty(&stored)?)
+        .with_context(|| format!("Could not write {}.", temporary.display()))?;
+    if let Err(first_error) = std::fs::rename(&temporary, &path) {
+        // Windows does not replace an existing destination with `rename`.
+        // Retain the atomic fast path elsewhere, with a compatible fallback.
+        let retry = path
+            .exists()
+            .then(|| std::fs::remove_file(&path))
+            .transpose()
+            .and_then(|_| std::fs::rename(&temporary, &path));
+        if let Err(error) = retry {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error).with_context(|| {
+                format!(
+                    "Could not replace {} (initial rename: {first_error}).",
+                    path.display()
+                )
+            });
+        }
+    }
     Ok(())
 }
 

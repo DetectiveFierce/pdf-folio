@@ -33,6 +33,53 @@ use super::naming::sort_key;
 use super::*;
 
 impl Db {
+    /// Returns the persistent revision of user-visible library state.
+    ///
+    /// SQLite triggers increment this value whenever entries, tags, folders,
+    /// or memberships change, allowing startup sync to reuse the last local
+    /// snapshot without rescanning every document.
+    pub fn local_change_revision(&self) -> Result<i64> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT revision FROM library_change_state WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .context("Could not load local library revision.")
+    }
+
+    /// Returns the local revision captured by the last complete CRDT snapshot.
+    pub fn sync_local_snapshot_revision(&self, library_id: &str) -> Result<Option<i64>> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT local_revision FROM sync_local_snapshots WHERE library_id = ?1",
+                params![library_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Could not load local sync snapshot revision.")
+    }
+
+    /// Marks `local_revision` as fully captured by the CRDT snapshot.
+    pub fn remember_sync_local_snapshot(
+        &self,
+        library_id: &str,
+        local_revision: i64,
+    ) -> Result<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO sync_local_snapshots (library_id, local_revision, captured_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(library_id) DO UPDATE SET
+                local_revision = excluded.local_revision,
+                captured_at = excluded.captured_at",
+            params![library_id, local_revision, Utc::now().timestamp()],
+        )?;
+        Ok(())
+    }
+
     /// Records sync metadata for a local entry.
     ///
     /// # Errors

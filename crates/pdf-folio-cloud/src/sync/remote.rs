@@ -237,8 +237,8 @@ impl TursoRemote {
 
 /// Client for asking the sync control plane for Turso credentials.
 ///
-/// Does not cache tokens beyond a single call; each [`TursoClient::token`] /
-/// [`TursoClient::remote`] hits `GET /token/turso` with the session bearer JWT.
+/// Clients in the process share a short-lived credential cache so concurrent
+/// startup sync phases do not each call the control plane for the same token.
 #[derive(Debug, Clone)]
 pub struct TursoClient {
     /// Shared HTTP client for control-plane credential requests.
@@ -262,11 +262,31 @@ impl TursoClient {
     ///
     /// Returns an error when the session is expired or the sync server rejects the request.
     pub async fn token(&self) -> Result<TursoToken> {
+        static TOKEN_CACHE: std::sync::OnceLock<
+            tokio::sync::Mutex<std::collections::HashMap<String, TursoToken>>,
+        > = std::sync::OnceLock::new();
+        let key = format!(
+            "{}\n{}\n{}",
+            self.session.server_base_url.trim_end_matches('/'),
+            self.session.google_sub,
+            self.session.expires_at.timestamp()
+        );
+        let mut cached_tokens = TOKEN_CACHE
+            .get_or_init(|| tokio::sync::Mutex::new(std::collections::HashMap::new()))
+            .lock()
+            .await;
+        if let Some(token) = cached_tokens
+            .get(&key)
+            .filter(|token| token.expires_at > Utc::now() + chrono::Duration::seconds(30))
+        {
+            return Ok(token.clone());
+        }
         let url = format!(
             "{}/token/turso",
             self.session.server_base_url.trim_end_matches('/')
         );
-        self.http
+        let token = self
+            .http
             .get(url)
             .header(
                 AUTHORIZATION,
@@ -279,7 +299,9 @@ impl TursoClient {
             .context("Sync server rejected Turso token request.")?
             .json::<TursoToken>()
             .await
-            .context("Sync server returned an invalid Turso token response.")
+            .context("Sync server returned an invalid Turso token response.")?;
+        cached_tokens.insert(key, token.clone());
+        Ok(token)
     }
 
     /// Creates a SQL-over-HTTP remote using credentials minted by the sync server.

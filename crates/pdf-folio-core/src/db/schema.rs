@@ -244,6 +244,71 @@ impl Db {
                 uploaded_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS library_change_state (
+                id          INTEGER PRIMARY KEY CHECK (id = 1),
+                revision    INTEGER NOT NULL
+            );
+
+            INSERT OR IGNORE INTO library_change_state (id, revision) VALUES (1, 0);
+
+            CREATE TABLE IF NOT EXISTS sync_local_snapshots (
+                library_id      TEXT PRIMARY KEY,
+                local_revision  INTEGER NOT NULL,
+                captured_at     INTEGER NOT NULL
+            );
+
+            CREATE TRIGGER IF NOT EXISTS entries_change_revision_insert
+            AFTER INSERT ON entries BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS entries_change_revision_update
+            AFTER UPDATE ON entries BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS entries_change_revision_delete
+            AFTER DELETE ON entries BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS tags_change_revision_insert
+            AFTER INSERT ON tags BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS tags_change_revision_update
+            AFTER UPDATE ON tags BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS tags_change_revision_delete
+            AFTER DELETE ON tags BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS folders_change_revision_insert
+            AFTER INSERT ON folders BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS folders_change_revision_update
+            AFTER UPDATE ON folders BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS folders_change_revision_delete
+            AFTER DELETE ON folders BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS entry_folders_change_revision_insert
+            AFTER INSERT ON entry_folders BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS entry_folders_change_revision_update
+            AFTER UPDATE ON entry_folders BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS entry_folders_change_revision_delete
+            AFTER DELETE ON entry_folders BEGIN
+                UPDATE library_change_state SET revision = revision + 1 WHERE id = 1;
+            END;
+
             CREATE INDEX IF NOT EXISTS idx_sync_crdt_operations_library_entity
                 ON sync_crdt_operations(library_id, entity_kind, entity_id);
 

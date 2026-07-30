@@ -70,6 +70,7 @@ enum Command {
 
 /// Process entry: install tracing, parse CLI, run UI or sync subcommand.
 fn main() -> Result<()> {
+    let process_started_at = std::time::Instant::now();
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
@@ -78,6 +79,6 @@ fn main() -> Result<()> {
         Some(Command::Sync(sync)) => {
             tokio::runtime::Runtime::new()?.block_on(run_sync_command(sync))
         }
-        None => pdf_folio_ui::run(args.file),
+        None => pdf_folio_ui::run_with_process_start(args.file, process_started_at),
     }
 }

@@ -3,8 +3,9 @@
 //! Loads a small set of cover thumbnails and entry counts for each vault so
 //! the library switcher can show visual cards without opening full UI state.
 //!
-//! Opens each profile's SQLite read-only for listing, prefers cached small
-//! thumbnails, and falls back to rendering page 0 when needed.
+//! Opens each profile's SQLite database for listing and loads cached small
+//! thumbnails. Missing covers are left for the normal, asynchronous thumbnail
+//! pipeline; preview refreshes must never render PDFs on a startup/sync worker.
 
 use crate::library::registry::state::{
     LibraryPreview, LibraryPreviewThumbnail, LIBRARY_SWITCHER_PREVIEW_LIMIT,
@@ -15,9 +16,9 @@ use pdf_folio_core::thumbnail_path;
 /// Build entry count + up to `LIBRARY_SWITCHER_PREVIEW_LIMIT` covers for one profile.
 pub(crate) fn load_library_preview(profile: &LibraryProfile) -> LibraryPreview {
     Db::open(profile.db_path.clone())
-        .and_then(|db| db.get_entries_sorted(LibrarySortMode::RecentlyAdded))
-        .map(|entries| LibraryPreview {
-            total_entries: entries.len(),
+        .and_then(|db| db.library_preview_entries(LIBRARY_SWITCHER_PREVIEW_LIMIT))
+        .map(|(total_entries, entries)| LibraryPreview {
+            total_entries,
             thumbnails: entries
                 .iter()
                 .take(LIBRARY_SWITCHER_PREVIEW_LIMIT)
@@ -25,16 +26,6 @@ pub(crate) fn load_library_preview(profile: &LibraryProfile) -> LibraryPreview {
                 .collect(),
         })
         .unwrap_or_default()
-}
-
-/// Load previews for every profile into a map keyed by library id.
-pub(super) fn load_library_previews(
-    profiles: &[LibraryProfile],
-) -> HashMap<String, LibraryPreview> {
-    profiles
-        .iter()
-        .map(|profile| (profile.id.clone(), load_library_preview(profile)))
-        .collect()
 }
 
 /// Display title for a switcher preview tile (display title → title → path stem → `"PDF"`).
@@ -49,23 +40,25 @@ fn library_preview_title(entry: &LibraryEntry) -> String {
         .to_owned()
 }
 
-/// Load or render a small cover handle for one entry in a switcher preview strip.
+/// Load a cached small cover handle for one entry in a switcher preview strip.
 pub(super) fn library_preview_thumbnail(entry: &LibraryEntry) -> Option<LibraryPreviewThumbnail> {
-    let width = ThumbnailSize::Small.width_px();
-    let path = small_thumbnail_path(&entry.id).ok()?;
-    let (rgba, height) = if path.exists() {
-        let rgba = std::fs::read(&path).ok()?;
+    let default_path = thumbnail_path(&entry.id).ok()?;
+    let variants = [
+        (
+            default_path.with_file_name(format!("{}.small.rgba", entry.id.as_str())),
+            ThumbnailSize::Small.width_px(),
+        ),
+        (default_path.clone(), ThumbnailSize::Default.width_px()),
+        (
+            default_path.with_file_name(format!("{}.large.rgba", entry.id.as_str())),
+            ThumbnailSize::Large.width_px(),
+        ),
+    ];
+    let (rgba, width, height) = variants.into_iter().find_map(|(path, width)| {
+        let rgba = std::fs::read(path).ok()?;
         let height = thumbnail_height_from_rgba_len(rgba.len(), width)?;
-        (rgba, height)
-    } else {
-        let doc = PdfDoc::open(&entry.path).ok()?;
-        let page = doc.render_page(0, width).ok()?;
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(&path, &page.rgba);
-        (page.rgba, page.height)
-    };
+        Some((rgba, width, height))
+    })?;
 
     Some(LibraryPreviewThumbnail {
         title: library_preview_title(entry),
@@ -73,11 +66,6 @@ pub(super) fn library_preview_thumbnail(entry: &LibraryEntry) -> Option<LibraryP
         height,
         handle: image::Handle::from_rgba(u32::from(width), u32::from(height), rgba),
     })
-}
-
-/// Disk path for the small switcher-preview RGBA cache file for `entry_id`.
-fn small_thumbnail_path(entry_id: &EntryId) -> anyhow::Result<PathBuf> {
-    Ok(thumbnail_path(entry_id)?.with_file_name(format!("{}.small.rgba", entry_id.as_str())))
 }
 
 /// Infer pixel height from raw RGBA byte length given `width` (4 bytes/pixel).

@@ -657,6 +657,15 @@ a {
   color: var(--link-hover);
   text-decoration-color: var(--link-hover);
 }
+/* See-also links manage their own underline on hover only */
+.content .see-also a {
+  text-decoration: none;
+  text-decoration-color: transparent;
+}
+.content .see-also a:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--link-hover);
+}
 
 .content strong {
   font-weight: 600;
@@ -760,12 +769,19 @@ a {
 .content pre {
   font-size: 13px;
   tab-size: 4;
-  /* Native bar hidden — see .code-scroll custom bar below */
+}
+
+/* Native bar hidden — custom .code-scroll bar is used instead (pre + diagrams) */
+.content pre,
+.diagram,
+.content .diagram {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
-.content pre::-webkit-scrollbar {
+.content pre::-webkit-scrollbar,
+.diagram::-webkit-scrollbar,
+.content .diagram::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
@@ -1205,118 +1221,164 @@ a {
   font-weight: 500;
 }
 
-/* ── See also (injected footer) ────────────────────────────────────────── */
-
+/* ── See also (injected footer) ──────────────────────────────────────────
+ * Two columns: siblings left, related index right with right-aligned areas.
+ */
 .see-also {
   max-width: var(--content-max);
-  margin: 2.75rem 0 0;
-  padding: 1.35rem 1.25rem 1.2rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background:
-    linear-gradient(180deg, rgba(212, 168, 83, 0.06), transparent 48%),
-    var(--bg-raised);
+  margin: 2.85rem 0 0;
+  padding: 1.35rem 0 0;
+  border-top: 1px solid var(--border-strong);
+  box-shadow: inset 0 3px 0 0 var(--accent);
+  background: transparent;
 }
 .see-also-heading {
   font-family: var(--serif);
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   font-weight: 600;
   color: var(--text);
-  margin: 0 0 1rem;
+  margin: 0 0 0.95rem;
   letter-spacing: -0.01em;
   border-bottom: none;
   padding-bottom: 0;
+  line-height: 1.25;
 }
 .see-also-heading .anchor {
   opacity: 0;
-  margin-left: -1.1em;
-  padding-right: 0.25em;
+  margin-left: -1.05em;
+  padding-right: 0.22em;
 }
 .see-also-heading:hover .anchor {
   opacity: 0.55;
 }
-.see-also-grid {
+.see-also-columns {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.15rem 1.5rem;
+  gap: 1.25rem 1.75rem;
+  align-items: start;
 }
-@media (min-width: 640px) {
-  .see-also-grid {
-    grid-template-columns: 1fr 1.35fr;
-    align-items: start;
+@media (min-width: 560px) {
+  .see-also-columns {
+    grid-template-columns: minmax(11.5rem, 0.34fr) minmax(0, 1fr);
+    column-gap: 2rem;
   }
-  /* Single group: full width */
-  .see-also-grid > .see-also-group:only-child {
+  /* Related alone: full width */
+  .see-also-columns > .see-also-col-related:only-child {
     grid-column: 1 / -1;
   }
 }
-.see-also-label {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.11em;
-  color: var(--text-mute);
-  font-weight: 600;
-  margin-bottom: 0.55rem;
+.see-also-col {
+  min-width: 0;
 }
-.see-also-list {
+.see-also-kicker {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  margin: 0 0 0.5rem;
+}
+
+/* Left: section siblings as a vertical list */
+.see-also-siblings,
+.content .see-also-siblings {
   list-style: none;
   margin: 0;
   padding: 0;
+  padding-left: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.3rem;
 }
-.see-also-list li {
+.see-also-siblings li,
+.content .see-also-siblings li {
   margin: 0;
   padding: 0;
-  line-height: 1.4;
+  padding-left: 0;
+  line-height: 1.35;
 }
-.see-also-list a {
+.content .see-also-siblings li::marker,
+.content .see-also-index li::marker {
+  content: none;
+}
+.see-also-siblings a {
+  color: var(--link);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.92rem;
+}
+.see-also-siblings a:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* Right: related topics — title left, area label right on same line */
+.see-also-index,
+.content .see-also-index {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  padding-left: 0;
+}
+.see-also-row,
+.content .see-also-row {
+  margin: 0;
+  padding: 0.5rem 0;
+  padding-left: 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.content .see-also li {
+  margin: 0;
+  padding-left: 0;
+}
+.see-also-row:first-child {
+  padding-top: 0;
+}
+.see-also-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.see-also-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  min-width: 0;
+}
+.see-also-line a {
   color: var(--link);
   text-decoration: none;
   font-weight: 500;
   font-size: 0.95rem;
+  line-height: 1.35;
+  min-width: 0;
 }
-.see-also-list a:hover {
+.see-also-line a:hover {
   color: var(--link-hover);
   text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.see-also-list.related li {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 0.45rem;
-  row-gap: 0.1rem;
-  padding: 0.35rem 0;
-  border-bottom: 1px solid var(--border-soft);
-}
-.see-also-list.related li:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-.see-also-list.related a {
-  grid-column: 2;
-  grid-row: 1;
+  text-underline-offset: 0.15em;
 }
 .see-also-area {
-  grid-column: 1;
-  grid-row: 1;
+  flex: 0 0 auto;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--accent-dim);
-  align-self: center;
+  line-height: 1.35;
+  text-align: right;
   white-space: nowrap;
 }
 .see-also-desc {
-  grid-column: 2;
-  grid-row: 2;
   display: block;
+  margin-top: 0.15rem;
   font-size: 0.82rem;
   color: var(--text-faint);
   line-height: 1.4;
+  padding-right: 0.25rem;
 }
 
 /* Compact in-content guide trails (optional callout style) */

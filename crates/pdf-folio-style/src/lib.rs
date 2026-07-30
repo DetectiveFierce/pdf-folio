@@ -125,10 +125,6 @@ pub const BUNDLED_FONT_BYTES: &[&[u8]] = &[
     VOLLKORN_MEDIUM,
     VOLLKORN_SEMIBOLD,
     VOLLKORN_BOLD,
-    VOLLKORN_ITALIC,
-    VOLLKORN_MEDIUM_ITALIC,
-    VOLLKORN_SEMIBOLD_ITALIC,
-    VOLLKORN_BOLD_ITALIC,
 ];
 
 pub use book::{fallback_dark_tokens, fallback_light_tokens, StyleBook};

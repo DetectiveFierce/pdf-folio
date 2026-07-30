@@ -70,13 +70,22 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             ));
             return Task::none();
         }
+        Message::StartupLocalSnapshotReady => {
+            return match app.mode {
+                AppMode::Library => app.request_visible_thumbnail_snapshot(),
+                AppMode::LibrarySwitcher => refresh_all_library_previews_task(app),
+                _ => Task::none(),
+            };
+        }
         Message::StartupBackgroundReady => {
             app.startup_background_ready = true;
-            app.load_cached_visible_thumbnails();
             let thumbnail_task = app.request_visible_thumbnails();
             if app.sync_auth.is_signed_in() {
+                let active_library_id = app.libraries.active_library_id.clone();
+                let active_sync = auto_sync_library_task(app, active_library_id);
                 return Task::batch([
                     thumbnail_task,
+                    active_sync,
                     sync_library_registry_for_app_task(app, false, true),
                 ]);
             }
@@ -483,7 +492,10 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         },
         Message::OpenLibrarySwitcher => {
             app.open_library_switcher();
-            return save_app_session_task(app);
+            return Task::batch([
+                save_app_session_task(app),
+                refresh_all_library_previews_task(app),
+            ]);
         }
         Message::CloseLibrarySwitcher => {
             app.libraries.open_menu_library_id = None;

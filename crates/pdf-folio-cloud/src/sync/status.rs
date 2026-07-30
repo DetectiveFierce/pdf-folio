@@ -64,6 +64,8 @@ pub struct SyncCrdtReport {
 /// Cheap preflight for deciding whether a full CRDT sync pass is needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SyncCrdtPreflight {
+    /// Whether the persisted local snapshot made a full library scan unnecessary.
+    pub used_local_snapshot: bool,
     /// Local snapshot operations created while checking for local changes.
     pub generated_operations: usize,
     /// Locally-originated operations waiting to be uploaded.

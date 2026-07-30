@@ -22,11 +22,24 @@
           ]
         },
         {
+          "title": "Startup Performance",
+          "path": "architecture/startup-performance.md",
+          "children": [
+            { "title": "Launch timeline", "anchor": "launch-timeline" },
+            { "title": "Time to first paint", "anchor": "time-to-first-paint" },
+            { "title": "Time to first interaction", "anchor": "time-to-first-interaction" },
+            { "title": "Why they differ", "anchor": "why-first-paint-and-interaction-differ-here" }
+          ]
+        },
+        {
           "title": "Workspace & Crates",
           "path": "architecture/workspace.md",
           "children": [
             { "title": "Members", "anchor": "members" },
             { "title": "Dependency rules", "anchor": "dependency-rules" },
+            { "title": "How the app is assembled", "anchor": "how-the-app-is-assembled" },
+            { "title": "Crate module maps", "anchor": "crate-module-maps" },
+            { "title": "Feature walks", "anchor": "cross-crate-feature-walks" },
             { "title": "Where to put new code", "anchor": "where-to-put-new-code" }
           ]
         },

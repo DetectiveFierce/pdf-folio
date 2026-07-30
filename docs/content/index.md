@@ -17,7 +17,7 @@ This site is a **source-code guide for maintainers**. It describes crate boundar
   </a>
   <a class="card-link" href="architecture/workspace.md">
     <div class="card-title">Workspace &amp; Crates</div>
-    <p class="card-desc">Six workspace members after consolidation — dependency rules and where each concern lives.</p>
+    <p class="card-desc">Source map of the six crates — module trees, dependency rules, and how they compose at runtime.</p>
     <div class="card-meta">Map</div>
   </a>
   <a class="card-link" href="architecture/messages.md">

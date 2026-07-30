@@ -10,6 +10,7 @@
     "api/index.md"
   ],
   "architecture/overview.md": [
+    "architecture/startup-performance.md",
     "architecture/workspace.md",
     "architecture/shell.md",
     "architecture/messages.md",
@@ -18,19 +19,36 @@
     "reference/glossary.md",
     "operations/development.md"
   ],
+  "architecture/startup-performance.md": [
+    "architecture/overview.md",
+    "architecture/shell.md",
+    "architecture/messages.md",
+    "architecture/state.md",
+    "subsystems/rendering.md",
+    "subsystems/sync.md",
+    "operations/data-dirs.md",
+    "operations/development.md",
+    "operations/testing.md"
+  ],
   "architecture/workspace.md": [
     "architecture/overview.md",
+    "architecture/shell.md",
+    "architecture/messages.md",
+    "architecture/state.md",
     "crates/main.md",
     "crates/core.md",
     "crates/ui.md",
     "crates/style.md",
     "crates/cloud.md",
     "crates/iced-patch.md",
+    "subsystems/rendering.md",
+    "subsystems/sync.md",
     "operations/development.md",
     "api/index.md"
   ],
   "architecture/shell.md": [
     "architecture/overview.md",
+    "architecture/startup-performance.md",
     "architecture/messages.md",
     "architecture/state.md",
     "crates/ui.md",

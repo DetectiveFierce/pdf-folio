@@ -39,7 +39,6 @@ pub(crate) fn sync_library_registry_task(
             let session = pdf_folio_cloud::sync::cached_session()
                 .context("No cached sync session is available.")?;
             let client = pdf_folio_cloud::sync::SyncClient::new(session);
-            client.ensure_remote_schema().await?;
             let db = Db::open(&db_path)?;
             let rows = if push_local { sync_library_rows_for_registry(&registry) } else { Default::default() };
             let remote_libraries = client
@@ -87,7 +86,6 @@ pub(crate) fn auto_sync_task(library: LibraryProfile) -> Task<Message> {
             let session = pdf_folio_cloud::sync::cached_session()
                 .context("No cached sync session is available.")?;
             let client = pdf_folio_cloud::sync::SyncClient::new(session);
-            client.ensure_remote_schema().await?;
             let cache = pdf_folio_cloud::sync::BlobCache::open_default()?;
             let device_id = default_sync_device_id();
             let db = Db::open(&library.db_path)
@@ -137,6 +135,20 @@ pub(crate) fn refresh_library_preview_by_id_task(
         .cloned()
         .map(refresh_library_preview_task)
         .unwrap_or_else(Task::none)
+}
+
+/// Refreshes every switcher preview off the UI thread.
+///
+/// Each profile is an independent task so a slow or unavailable vault does
+/// not delay the rest of the switcher.
+pub(crate) fn refresh_all_library_previews_task(app: &PDFolioApp) -> Task<Message> {
+    Task::batch(
+        app.libraries
+            .profiles
+            .iter()
+            .cloned()
+            .map(refresh_library_preview_task),
+    )
 }
 
 /// Stable-ish device id for CRDT sync (hostname, or `"local-device"` fallback).

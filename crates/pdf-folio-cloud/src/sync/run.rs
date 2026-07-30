@@ -12,11 +12,11 @@
 //! - Report types: [`super::status`]
 
 use anyhow::Result;
-use pdf_folio_core::Db;
+use pdf_folio_core::{Db, SyncCrdtPrepareSummary};
 
 use super::blobs::BlobCache;
 use super::client::SyncClient;
-use super::crdt::prepare_local_crdt_operations;
+use super::crdt::{prepare_local_crdt_operations, PreparedCrdtOperations};
 use super::status::{SyncCrdtPreflight, SyncHydrationReport, SyncRunReport};
 
 impl SyncClient {
@@ -37,12 +37,19 @@ impl SyncClient {
         library_id: &str,
         device_id: &str,
     ) -> Result<SyncCrdtPreflight> {
-        db.seed_sync_metadata(library_id)?;
-        let prepared = prepare_local_crdt_operations(db, library_id, device_id)?;
+        let db_path = db.path().to_path_buf();
+        let library_id_owned = library_id.to_owned();
+        let device_id_owned = device_id.to_owned();
+        let (prepared, used_local_snapshot) = tokio::task::spawn_blocking(move || {
+            let db = Db::open(db_path)?;
+            prepare_incremental_local_snapshot(&db, &library_id_owned, &device_id_owned)
+        })
+        .await??;
         let remote = self.turso.remote().await?;
         let local_cursor = db.sync_crdt_remote_cursor(library_id, device_id)?;
         let remote_sequence = super::crdt::remote_sync_head_sequence(&remote, library_id).await?;
         Ok(SyncCrdtPreflight {
+            used_local_snapshot,
             generated_operations: prepared.summary.generated,
             pending_operations: prepared.pending_operations.len(),
             remote_sequence,
@@ -94,5 +101,84 @@ impl SyncClient {
             crdt,
             hydration,
         })
+    }
+}
+
+/// Reuses the persisted local snapshot when source tables have not changed.
+///
+/// The revision is checked again after a scan. If an edit lands concurrently,
+/// the older snapshot marker is retained so the next pass safely rescans.
+fn prepare_incremental_local_snapshot(
+    db: &Db,
+    library_id: &str,
+    device_id: &str,
+) -> Result<(PreparedCrdtOperations, bool)> {
+    let revision_before = db.local_change_revision()?;
+    if db.sync_local_snapshot_revision(library_id)? == Some(revision_before) {
+        let pending_operations = db.pending_sync_crdt_operations(library_id, device_id)?;
+        return Ok((
+            PreparedCrdtOperations {
+                summary: SyncCrdtPrepareSummary {
+                    generated: 0,
+                    pending_push: pending_operations.len(),
+                },
+                pending_operations,
+            },
+            true,
+        ));
+    }
+
+    db.seed_sync_metadata(library_id)?;
+    let prepared = prepare_local_crdt_operations(db, library_id, device_id)?;
+    let revision_after = db.local_change_revision()?;
+    if revision_after == revision_before {
+        db.remember_sync_local_snapshot(library_id, revision_after)?;
+    }
+    Ok((prepared, false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepare_incremental_local_snapshot;
+    use chrono::Utc;
+    use pdf_folio_core::{Db, EntryId, NewLibraryEntry};
+    use std::path::PathBuf;
+
+    #[test]
+    fn unchanged_library_reuses_persisted_local_snapshot() {
+        let path = std::env::temp_dir().join(format!(
+            "pdf-folio-sync-snapshot-{}-{}.db",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let db = Db::open(path).unwrap();
+        db.insert_entry(&NewLibraryEntry {
+            id: EntryId::new("entry"),
+            path: PathBuf::from("/missing/entry.pdf"),
+            title: Some(String::from("Entry")),
+            author: None,
+            author_attributed: false,
+            page_count_attributed: false,
+            page_count: None,
+            file_size: None,
+            cover_hash: None,
+        })
+        .unwrap();
+
+        let (first, first_used_snapshot) =
+            prepare_incremental_local_snapshot(&db, "library", "device").unwrap();
+        assert!(!first_used_snapshot);
+        assert!(first.summary.generated > 0);
+
+        let (second, second_used_snapshot) =
+            prepare_incremental_local_snapshot(&db, "library", "device").unwrap();
+        assert!(second_used_snapshot);
+        assert_eq!(second.summary.generated, 0);
+
+        db.add_tag(&EntryId::new("entry"), "changed").unwrap();
+        let (third, third_used_snapshot) =
+            prepare_incremental_local_snapshot(&db, "library", "device").unwrap();
+        assert!(!third_used_snapshot);
+        assert!(third.summary.generated > 0);
     }
 }

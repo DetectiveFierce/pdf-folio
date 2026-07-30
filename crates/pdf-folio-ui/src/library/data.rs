@@ -29,86 +29,6 @@ impl PDFolioApp {
         tags
     }
 
-    /// Enqueue render/load tasks for covers currently in the virtualized viewport.
-    pub(crate) fn request_visible_thumbnails(&mut self) -> Task<Message> {
-        let mut tasks = Vec::new();
-        let entries = self.visible_library_entries();
-        let folder_section_height = folder_cards_section_height(self, self.child_folders().len());
-        let entry_scroll_offset =
-            (self.library.library_scroll_offset - folder_section_height).max(0.0);
-        let visible_entries = if self.library.compact_view_mode {
-            let window = self.visible_library_entry_window_at(entries.len(), entry_scroll_offset);
-            entries[window].to_vec()
-        } else {
-            let layout = self.library_masonry_layout(&entries);
-            self.visible_library_masonry_layout_items_at(&layout, entry_scroll_offset)
-                .into_iter()
-                .filter_map(|item| entries.get(item.index).cloned())
-                .collect()
-        };
-        let thumbnail_size = if self.library.compact_view_mode {
-            ThumbnailSize::Default
-        } else {
-            self.thumbnail_size_for_grid_zoom()
-        };
-        for entry in visible_entries {
-            let key = ThumbnailCacheKey {
-                entry_id: entry.id.clone(),
-                size: thumbnail_size,
-            };
-            if self.library.thumbnails.contains_key(&key)
-                || self.library.pending_thumbnails.contains(&key)
-            {
-                continue;
-            }
-            self.library.pending_thumbnails.insert(key);
-            tasks.push(Task::perform(
-                load_or_render_thumbnail(entry, thumbnail_size),
-                |result| match result {
-                    Ok((entry_id, size, page)) => Message::ThumbnailReady {
-                        entry_id,
-                        size,
-                        data: page.rgba,
-                        width: page.width,
-                        height: page.height,
-                    },
-                    Err(error) => Message::LibraryError(error.to_string()),
-                },
-            ));
-        }
-
-        Task::batch(tasks)
-    }
-
-    /// Synchronously hydrate in-memory thumbnail handles from on-disk RGBA caches.
-    pub(crate) fn load_cached_visible_thumbnails(&mut self) {
-        let entries = self.visible_thumbnail_entries();
-        let preferred_size = if self.library.compact_view_mode {
-            ThumbnailSize::Default
-        } else {
-            self.thumbnail_size_for_grid_zoom()
-        };
-        for entry in entries {
-            for size in [
-                preferred_size,
-                ThumbnailSize::Default,
-                ThumbnailSize::Large,
-                ThumbnailSize::Small,
-            ] {
-                let key = ThumbnailCacheKey {
-                    entry_id: entry.id.clone(),
-                    size,
-                };
-                if self.library.thumbnails.contains_key(&key) {
-                    continue;
-                }
-                if let Ok(Some(thumbnail)) = load_cached_thumbnail(&entry.id, size) {
-                    self.library.thumbnails.insert(key, thumbnail);
-                }
-            }
-        }
-    }
-
     fn visible_thumbnail_entries(&self) -> Vec<LibraryEntry> {
         let entries = self.visible_library_entries();
         let folder_section_height = folder_cards_section_height(self, self.child_folders().len());
@@ -124,6 +44,88 @@ impl PDFolioApp {
                 .filter_map(|item| entries.get(item.index).cloned())
                 .collect()
         }
+    }
+
+    /// Restores visible covers from the persistent cache without rendering PDFs.
+    pub(crate) fn request_visible_thumbnail_snapshot(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        let visible_entries = self.visible_thumbnail_entries();
+        let thumbnail_size = if self.library.compact_view_mode {
+            ThumbnailSize::Default
+        } else {
+            self.thumbnail_size_for_grid_zoom()
+        };
+        for entry in visible_entries {
+            let key = ThumbnailCacheKey {
+                entry_id: entry.id,
+                size: thumbnail_size,
+            };
+            if self.library.thumbnails.contains_key(&key)
+                || self.library.pending_thumbnails.contains(&key)
+            {
+                continue;
+            }
+            self.library.pending_thumbnails.insert(key.clone());
+            tasks.push(Task::perform(
+                load_cached_thumbnail(key.entry_id.clone(), thumbnail_size),
+                move |result| match result {
+                    Ok(Some((entry_id, size, page))) => Message::ThumbnailReady {
+                        entry_id,
+                        size,
+                        data: page.rgba,
+                        width: page.width,
+                        height: page.height,
+                    },
+                    Ok(None) => Message::ThumbnailSnapshotMiss { key: key.clone() },
+                    Err(error) => Message::ThumbnailFailed {
+                        key: key.clone(),
+                        error: error.to_string(),
+                    },
+                },
+            ));
+        }
+        Task::batch(tasks)
+    }
+
+    /// Enqueue render/load tasks for covers currently in the virtualized viewport.
+    pub(crate) fn request_visible_thumbnails(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        let visible_entries = self.visible_thumbnail_entries();
+        let thumbnail_size = if self.library.compact_view_mode {
+            ThumbnailSize::Default
+        } else {
+            self.thumbnail_size_for_grid_zoom()
+        };
+        for entry in visible_entries {
+            let key = ThumbnailCacheKey {
+                entry_id: entry.id.clone(),
+                size: thumbnail_size,
+            };
+            if self.library.thumbnails.contains_key(&key)
+                || self.library.pending_thumbnails.contains(&key)
+            {
+                continue;
+            }
+            self.library.pending_thumbnails.insert(key.clone());
+            tasks.push(Task::perform(
+                load_or_render_thumbnail(entry, thumbnail_size),
+                move |result| match result {
+                    Ok((entry_id, size, page)) => Message::ThumbnailReady {
+                        entry_id,
+                        size,
+                        data: page.rgba,
+                        width: page.width,
+                        height: page.height,
+                    },
+                    Err(error) => Message::ThumbnailFailed {
+                        key: key.clone(),
+                        error: error.to_string(),
+                    },
+                },
+            ));
+        }
+
+        Task::batch(tasks)
     }
 
     /// Reload sorted live + trash entries from SQLite (purges expired trash first).

@@ -36,8 +36,8 @@ API pages: [shell](../api/pdf-folio-ui/shell.md) · [app](../api/pdf-folio-ui/sh
 2. Load multi-library registry (`libraries.json`) and open the active `Db`.
 3. Build `PDFolioApp` via `with_initial_file_and_session` (or equivalent constructor path).
 4. Start iced with initial window size from session or style layout defaults.
-5. On boot, if signed in: open startup file or restore last document; schedule startup probe when `PDF_FOLIO_STARTUP_PROBE` is set.
-6. After first frame, `StartupBackgroundReady` enables heavier subscriptions (thumbnails, registry sync).
+5. On boot, if signed in: open the CLI startup file, or restore the saved document only for a Viewer-mode session; schedule the startup probe when `PDF_FOLIO_STARTUP_PROBE` is set.
+6. After the initial frame, `StartupLocalSnapshotReady` restores visible cached thumbnails; `StartupBackgroundReady` enables missing-thumbnail work, sync, and registry refresh.
 
 Startup is deliberately staged so the first paint is not blocked by network or full library thumbnail fan-out.
 
@@ -48,9 +48,12 @@ main
   → pdf_folio_ui::run(file?)
        → load session / registry / db
        → iced::application(update, view, subscription)
-       → first frames (light)
-       → StartupBackgroundReady → heavy work enabled
+       → first frames from local snapshot (light)
+       → StartupLocalSnapshotReady → cached visible covers
+       → StartupBackgroundReady → remote and missing-cover work enabled
 ```
+
+For the first-paint/first-interaction distinction, timing probe, and snapshot-first restore rule, see [Startup performance](startup-performance.md).
 
 ## Message surface
 

@@ -14,6 +14,8 @@
 //! import paths call [`cache_thumbnail_variants`] after opening a PDF.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use iced::widget::image;
 use iced::Task;
@@ -73,11 +75,51 @@ impl ThumbnailSize {
     }
 }
 
+fn thumbnail_worker_limiter() -> Arc<tokio::sync::Semaphore> {
+    static THUMBNAIL_WORKERS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    Arc::clone(THUMBNAIL_WORKERS.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(4))))
+}
+
+/// Loads one persisted thumbnail variant without opening or rendering the PDF.
+pub(crate) async fn load_cached_thumbnail(
+    entry_id: EntryId,
+    size: ThumbnailSize,
+) -> anyhow::Result<Option<(EntryId, ThumbnailSize, RenderedPage)>> {
+    let _permit = thumbnail_worker_limiter()
+        .acquire_owned()
+        .await
+        .map_err(|_| anyhow::anyhow!("Thumbnail worker pool was closed."))?;
+    tokio::task::spawn_blocking(move || {
+        let path = thumbnail_variant_path(&entry_id, size)?;
+        let Ok(data) = std::fs::read(path) else {
+            return Ok(None);
+        };
+        let width = size.width_px();
+        let Some(height) = thumbnail_height_from_rgba_len(data.len(), width) else {
+            return Ok(None);
+        };
+        Ok(Some((
+            entry_id,
+            size,
+            RenderedPage {
+                width,
+                height,
+                rgba: data,
+            },
+        )))
+    })
+    .await?
+}
+
 /// Load a cached RGBA thumbnail or render page 0 and write the cache file.
 pub(crate) async fn load_or_render_thumbnail(
     entry: LibraryEntry,
     size: ThumbnailSize,
 ) -> anyhow::Result<(EntryId, ThumbnailSize, RenderedPage)> {
+    let _permit = thumbnail_worker_limiter()
+        .acquire_owned()
+        .await
+        .map_err(|_| anyhow::anyhow!("Thumbnail worker pool was closed."))?;
     tokio::task::spawn_blocking(move || {
         let path = thumbnail_variant_path(&entry.id, size)?;
         if path.exists() {
@@ -98,30 +140,10 @@ pub(crate) async fn load_or_render_thumbnail(
 
         let doc = PdfDoc::open(&entry.path)?;
         let page = doc.render_page(0, size.width_px())?;
-        std::fs::write(path, &page.rgba)?;
+        write_thumbnail_atomically(&path, &page.rgba)?;
         Ok((entry.id, size, page))
     })
     .await?
-}
-
-/// Synchronously load a cached thumbnail into an iced image handle, if present.
-pub(crate) fn load_cached_thumbnail(
-    entry_id: &EntryId,
-    size: ThumbnailSize,
-) -> anyhow::Result<Option<ThumbnailView>> {
-    let path = thumbnail_variant_path(entry_id, size)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    let data = std::fs::read(&path)?;
-    let width = size.width_px();
-    let height = thumbnail_height_from_rgba_len(data.len(), width).unwrap_or(1);
-    let handle = image::Handle::from_rgba(u32::from(width), u32::from(height), data);
-    Ok(Some(ThumbnailView {
-        width,
-        height,
-        handle,
-    }))
 }
 
 /// Rebuild Small/Default/Large cover variants for many entries (bulk operation UI).
@@ -167,7 +189,31 @@ pub(crate) fn cache_thumbnail_variants(entry_id: &EntryId, doc: &PdfDoc) -> anyh
     ] {
         let path = thumbnail_variant_path(entry_id, size)?;
         let page = doc.render_page(0, size.width_px())?;
-        std::fs::write(path, &page.rgba)?;
+        write_thumbnail_atomically(&path, &page.rgba)?;
+    }
+    Ok(())
+}
+
+/// Publish a complete cache file in one rename so readers never observe a
+/// partially-written RGBA buffer.
+fn write_thumbnail_atomically(path: &std::path::Path, rgba: &[u8]) -> anyhow::Result<()> {
+    static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let sequence = TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = path.with_extension(format!("rgba.{}.{}.tmp", std::process::id(), sequence));
+    std::fs::write(&temporary, rgba)?;
+    if let Err(first_error) = std::fs::rename(&temporary, path) {
+        // Windows cannot rename over an existing cache entry during rebuild.
+        let retry = path
+            .exists()
+            .then(|| std::fs::remove_file(path))
+            .transpose()
+            .and_then(|_| std::fs::rename(&temporary, path));
+        if let Err(error) = retry {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(anyhow::anyhow!(
+                "Could not publish thumbnail cache ({error}; initial rename: {first_error})."
+            ));
+        }
     }
     Ok(())
 }

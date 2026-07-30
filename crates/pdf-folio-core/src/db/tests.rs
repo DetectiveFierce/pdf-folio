@@ -57,6 +57,47 @@ fn inserts_entries_with_gapped_manual_order_and_reorders_them() {
 }
 
 #[test]
+fn library_preview_entries_counts_all_live_rows_but_materializes_only_limit() {
+    let db = test_db();
+    db.insert_entry(&entry("a", "Alpha")).unwrap();
+    db.insert_entry(&entry("b", "Beta")).unwrap();
+    db.insert_entry(&entry("c", "Gamma")).unwrap();
+    db.add_tag(&EntryId::new("a"), "previewed").unwrap();
+    db.add_tag(&EntryId::new("b"), "previewed").unwrap();
+    db.delete_entry(&EntryId::new("c")).unwrap();
+
+    let (total_entries, entries) = db.library_preview_entries(1).unwrap();
+
+    assert_eq!(total_entries, 2);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].tags, vec!["previewed"]);
+}
+
+#[test]
+fn local_change_revision_invalidates_persisted_sync_snapshot() {
+    let db = test_db();
+    assert_eq!(db.local_change_revision().unwrap(), 0);
+
+    db.insert_entry(&entry("a", "Alpha")).unwrap();
+    let entry_revision = db.local_change_revision().unwrap();
+    assert!(entry_revision > 0);
+
+    db.remember_sync_local_snapshot("library", entry_revision)
+        .unwrap();
+    assert_eq!(
+        db.sync_local_snapshot_revision("library").unwrap(),
+        Some(entry_revision)
+    );
+
+    db.add_tag(&EntryId::new("a"), "changed").unwrap();
+    assert!(db.local_change_revision().unwrap() > entry_revision);
+    assert_eq!(
+        db.sync_local_snapshot_revision("library").unwrap(),
+        Some(entry_revision)
+    );
+}
+
+#[test]
 fn reorders_entries_inside_folder_without_changing_root_order() {
     let db = test_db();
     db.insert_entry(&entry("a", "Alpha")).unwrap();

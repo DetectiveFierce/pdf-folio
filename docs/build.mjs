@@ -548,15 +548,28 @@ function stripTrailingSeeAlso(body) {
   return body.replace(re, "\n").replace(/\s+$/, "\n");
 }
 
+/** Truncate prose at a word boundary; append ellipsis when cut. */
+function softTruncate(text, max = 88) {
+  const s = String(text).replace(/\s+/g, " ").trim();
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  const base = lastSpace > max * 0.55 ? cut.slice(0, lastSpace) : cut;
+  return base.replace(/[\s.,;:–—\-]+$/u, "") + "…";
+}
+
 /**
  * Build the HTML "See also" block: section siblings + curated related topics.
+ * Two columns: siblings on the left; related index on the right with
+ * area labels right-aligned on the title line.
  */
 function buildSeeAlsoHtml(page, pageMap, nav, relatedMap) {
   // API pages already include a generated See also; skip injection there.
   if (page.mdRel.startsWith("api/")) return "";
 
-  const groups = [];
   const used = new Set([page.mdRel]);
+  let siblingsHtml = "";
+  let relatedHtml = "";
 
   const sib = navSiblingsFor(nav, pageMap, page.mdRel);
   if (sib?.siblings?.length) {
@@ -564,18 +577,17 @@ function buildSeeAlsoHtml(page, pageMap, nav, relatedMap) {
     for (const s of sib.siblings) {
       used.add(s.mdRel);
       const href = hrefBetween(page.outRel, s.page.outRel);
-      links.push(
-        `<li><a href="${href}">${escapeHtml(s.title)}</a></li>`
-      );
+      links.push(`<li><a href="${href}">${escapeHtml(s.title)}</a></li>`);
     }
-    groups.push({
-      label: `Also in ${sib.label}`,
-      html: `<ul class="see-also-list">${links.join("")}</ul>`,
-    });
+    siblingsHtml =
+      `<div class="see-also-col see-also-col-siblings">` +
+      `<div class="see-also-kicker">Also in ${escapeHtml(sib.label)}</div>` +
+      `<ul class="see-also-siblings">${links.join("")}</ul>` +
+      `</div>`;
   }
 
   const curated = relatedMap.get(page.mdRel) || [];
-  const relatedLinks = [];
+  const rows = [];
   for (const md of curated) {
     if (used.has(md)) continue;
     const target = pageMap.get(md);
@@ -586,44 +598,40 @@ function buildSeeAlsoHtml(page, pageMap, nav, relatedMap) {
     used.add(md);
     const href = hrefBetween(page.outRel, target.outRel);
     const area = target.eyebrow || target.mdRel.split("/")[0] || "";
-    relatedLinks.push(
-      `<li>` +
-        (area
-          ? `<span class="see-also-area">${escapeHtml(area)}</span> `
-          : "") +
+    const rawDesc = target.lede || target.description || "";
+    const desc = rawDesc ? softTruncate(String(rawDesc), 88) : "";
+    rows.push(
+      `<li class="see-also-row">` +
+        `<div class="see-also-line">` +
         `<a href="${href}">${escapeHtml(target.title)}</a>` +
-        (target.lede
-          ? `<span class="see-also-desc">${escapeHtml(
-              String(target.lede).slice(0, 110)
-            )}</span>`
+        (area
+          ? `<span class="see-also-area">${escapeHtml(area)}</span>`
+          : "") +
+        `</div>` +
+        (desc
+          ? `<span class="see-also-desc">${escapeHtml(desc)}</span>`
           : "") +
         `</li>`
     );
   }
-  if (relatedLinks.length) {
-    groups.push({
-      label: "Related topics",
-      html: `<ul class="see-also-list related">${relatedLinks.join("")}</ul>`,
-    });
+  if (rows.length) {
+    relatedHtml =
+      `<div class="see-also-col see-also-col-related">` +
+      `<div class="see-also-kicker">Related</div>` +
+      `<ul class="see-also-index" aria-label="Related topics">${rows.join("")}</ul>` +
+      `</div>`;
   }
 
-  if (!groups.length) return "";
-
-  const body = groups
-    .map(
-      (g) =>
-        `<div class="see-also-group">` +
-        `<div class="see-also-label">${escapeHtml(g.label)}</div>` +
-        g.html +
-        `</div>`
-    )
-    .join("");
+  if (!siblingsHtml && !relatedHtml) return "";
 
   return (
     `<section class="see-also" aria-label="See also">` +
     `<h2 class="see-also-heading" id="see-also">` +
     `<a class="anchor" href="#see-also" aria-hidden="true">#</a>See also</h2>` +
-    `<div class="see-also-grid">${body}</div>` +
+    `<div class="see-also-columns">` +
+    siblingsHtml +
+    relatedHtml +
+    `</div>` +
     `</section>`
   );
 }

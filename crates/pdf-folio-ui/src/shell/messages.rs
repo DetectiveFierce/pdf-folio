@@ -246,6 +246,8 @@ pub enum Message {
         /// When the probe message was emitted to the update loop.
         emitted_at: Instant,
     },
+    /// The first frame has had time to paint; restore persisted local visuals.
+    StartupLocalSnapshotReady,
     /// Startup background subscriptions may begin.
     StartupBackgroundReady,
     /// Open the native file picker.
@@ -324,6 +326,18 @@ pub enum Message {
         data: Vec<u8>,
         width: u16,
         height: u16,
+    },
+    /// A thumbnail load/render failed; clears its in-flight cache marker.
+    ThumbnailFailed {
+        /// Cache key that is no longer being processed.
+        key: crate::library::thumbnails::ThumbnailCacheKey,
+        /// Filesystem or PDF rendering error.
+        error: String,
+    },
+    /// A persisted thumbnail variant was not present; rendering may wait for background startup.
+    ThumbnailSnapshotMiss {
+        /// Requested cache key whose lookup completed without bytes.
+        key: crate::library::thumbnails::ThumbnailCacheKey,
     },
     /// Scroll offset and viewport size changed.
     ViewportChanged {

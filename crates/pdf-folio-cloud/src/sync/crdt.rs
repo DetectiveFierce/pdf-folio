@@ -212,11 +212,26 @@ impl SyncClient {
     ///
     /// Returns an error when the remote database cannot execute the schema batch.
     pub async fn ensure_remote_schema(&self) -> Result<()> {
+        static READY_REMOTES: std::sync::OnceLock<
+            tokio::sync::Mutex<std::collections::HashSet<String>>,
+        > = std::sync::OnceLock::new();
+        let key = format!(
+            "{}\n{}",
+            self.session.server_base_url.trim_end_matches('/'),
+            self.session.google_sub
+        );
+        let ready_remotes =
+            READY_REMOTES.get_or_init(|| tokio::sync::Mutex::new(std::collections::HashSet::new()));
+        let mut ready = ready_remotes.lock().await;
+        if ready.contains(&key) {
+            return Ok(());
+        }
         let remote = self.turso.remote().await?;
         remote
             .execute_batch(include_str!("../../turso_schema.sql"))
             .await
             .context("Could not create PDF-Folio sync schema in Turso.")?;
+        ready.insert(key);
         Ok(())
     }
 
@@ -288,8 +303,13 @@ impl SyncClient {
         library_id: &str,
         device_id: &str,
     ) -> Result<SyncCrdtReport> {
+        let revision_before = db.local_change_revision()?;
         db.seed_sync_metadata(library_id)?;
         let prepared = prepare_local_crdt_operations(db, library_id, device_id)?;
+        let revision_after = db.local_change_revision()?;
+        if revision_after == revision_before {
+            db.remember_sync_local_snapshot(library_id, revision_after)?;
+        }
         self.sync_prepared_crdt_metadata(db, library_id, device_id, prepared)
             .await
     }

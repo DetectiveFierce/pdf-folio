@@ -5,9 +5,8 @@
 //! pipeline rather than the library view directly.
 //!
 //! Creates missing local SQLite files for remote libraries, removes storage
-//! for remotely deleted ids, and refreshes switcher previews after mutation.
+//! for remotely deleted ids, and preserves valid switcher preview caches.
 
-use crate::library::registry::preview::load_library_previews;
 use crate::library::registry::session::{
     app_data_dir, current_unix_timestamp, file_modified_unix_timestamp, library_db_path,
     registry_path, remove_library_storage, save_library_registry,
@@ -86,7 +85,15 @@ pub(crate) fn sync_library_registry_profiles(
             .cmp(&(right.id != DEFAULT_LIBRARY_ID))
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
     });
-    registry.previews = load_library_previews(&registry.profiles);
+    registry.previews.retain(|library_id, _| {
+        registry
+            .profiles
+            .iter()
+            .any(|profile| &profile.id == library_id)
+    });
+    for profile in &registry.profiles {
+        registry.previews.entry(profile.id.clone()).or_default();
+    }
     save_library_registry(&registry)?;
     Ok((registry, added_library_ids))
 }

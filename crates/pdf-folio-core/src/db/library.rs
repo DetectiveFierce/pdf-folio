@@ -94,6 +94,33 @@ impl Db {
         self.get_entries_sorted(LibrarySortMode::RecentlyAdded)
     }
 
+    /// Returns the live entry count and a small recently-added sample.
+    ///
+    /// This is optimized for library switcher previews: callers do not need
+    /// to materialize every entry (and all tag/folder associations) merely to
+    /// display a count and a handful of covers.
+    pub fn library_preview_entries(&self, limit: usize) -> Result<(usize, Vec<LibraryEntry>)> {
+        let connection = self.connection()?;
+        let total_entries = connection.query_row(
+            "SELECT COUNT(*) FROM entries WHERE trashed_at IS NULL",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
+        let mut statement = connection.prepare(
+            "SELECT id, path, title, author, display_title, display_author, sort_title, sort_author, metadata_locked, manual_order, author_attributed, page_count_attributed, added_at, opened_at, page_count, file_size, last_page, rating, cover_hash, missing
+             FROM entries
+             WHERE trashed_at IS NULL
+             ORDER BY added_at DESC, manual_order ASC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], row_to_entry)?;
+        let mut entries = rows
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load library preview entries.")?;
+        self.attach_entry_collections_with_connection(&connection, &mut entries, false)?;
+        Ok((total_entries, entries))
+    }
+
     /// Returns the entry with the given id, if it exists.
     ///
     /// # Errors

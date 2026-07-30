@@ -166,6 +166,17 @@ impl AppSession {
     pub(crate) fn window_size(&self) -> [f32; 2] {
         [self.window.width.max(1.0), self.window.height.max(1.0)]
     }
+
+    /// Saved document path only when the session should reopen in viewer mode.
+    ///
+    /// Library-mode sessions retain the last viewer path for "Back to Viewer",
+    /// but opening that PDF during process startup would delay an otherwise
+    /// immediately interactive library surface.
+    pub(crate) fn viewer_document_to_restore(&self) -> Option<PathBuf> {
+        matches!(self.mode, SessionMode::Viewer)
+            .then(|| self.viewer.document_path.clone())
+            .flatten()
+    }
 }
 
 impl PDFolioApp {

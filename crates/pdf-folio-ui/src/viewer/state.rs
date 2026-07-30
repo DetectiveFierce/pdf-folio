@@ -471,13 +471,21 @@ impl PDFolioApp {
     }
 
     fn with_active_library_id(active_library_id: Option<&str>) -> Result<Self> {
+        let startup_probe_enabled = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").is_some();
+        let phase_started_at = Instant::now();
         let settings = Settings::default();
         let libraries = load_library_registry(active_library_id)?;
+        let registry_ms = phase_started_at.elapsed().as_millis();
         let Some(active_profile) = libraries.active_profile() else {
             anyhow::bail!("No active library is available.");
         };
+        let phase_started_at = Instant::now();
         let db = Arc::new(Db::open(active_profile.db_path.clone())?);
+        let db_open_ms = phase_started_at.elapsed().as_millis();
+        let phase_started_at = Instant::now();
         let preferences = db.library_preferences().unwrap_or_default();
+        let preferences_ms = phase_started_at.elapsed().as_millis();
+        let phase_started_at = Instant::now();
         let (style_book, style_load_error) = match StyleBook::load() {
             Ok(style_book) => (style_book, None),
             Err(error) => {
@@ -485,13 +493,38 @@ impl PDFolioApp {
                 (StyleBook::bundled(), Some(error))
             }
         };
+        let style_ms = phase_started_at.elapsed().as_millis();
         let layout = style_book.layout();
+        let phase_started_at = Instant::now();
         let sync_auth = SyncAuthRuntime::load();
+        let auth_ms = phase_started_at.elapsed().as_millis();
         let auth_ready = sync_auth.is_signed_in();
+        let phase_started_at = Instant::now();
         let library_entries = db.get_entries_sorted(preferences.sort_mode)?;
+        let entries_ms = phase_started_at.elapsed().as_millis();
+        let phase_started_at = Instant::now();
         let library_trash_entries = db.get_trashed_entries()?;
+        let trash_entries_ms = phase_started_at.elapsed().as_millis();
+        let phase_started_at = Instant::now();
         let library_folders = db.get_folders()?;
+        let folders_ms = phase_started_at.elapsed().as_millis();
+        let phase_started_at = Instant::now();
         let library_trash_folders = db.get_trashed_folders()?;
+        let trash_folders_ms = phase_started_at.elapsed().as_millis();
+        if startup_probe_enabled {
+            tracing::warn!(
+                registry_ms,
+                db_open_ms,
+                preferences_ms,
+                style_ms,
+                auth_ms,
+                entries_ms,
+                trash_entries_ms,
+                folders_ms,
+                trash_folders_ms,
+                "PDF-Folio synchronous startup phase timings"
+            );
+        }
         let library_status = Some(format!("{} PDFs in library", library_entries.len()));
         let mut app = Self {
             mode: if auth_ready {
@@ -717,11 +750,13 @@ impl PDFolioApp {
             app.viewer.viewer_viewport_height = app.estimated_viewer_viewport_height();
         }
         if let Some(session) = app.pending_session_restore.clone() {
+            let loaded_sort_mode = app.library.library_sort_mode;
             app.apply_library_session(&session);
-            app.library.library_entries =
-                app.db.get_entries_sorted(app.library.library_sort_mode)?;
-            app.library.library_trash_entries = app.db.get_trashed_entries()?;
-            app.rebuild_folder_smart_count_cache();
+            if loaded_sort_mode != app.library.library_sort_mode {
+                app.library.library_entries =
+                    app.db.get_entries_sorted(app.library.library_sort_mode)?;
+                app.rebuild_folder_smart_count_cache();
+            }
             app.library.thumbnails.clear();
             app.library.pending_thumbnails.clear();
             app.set_active_library_preview_from_entries();

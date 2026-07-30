@@ -153,20 +153,16 @@ impl PDFolioApp {
         self.library.library_status = Some(format!("Loading {}...", self.active_library_name()));
     }
 
-    /// Refresh the switcher preview card for the active library from in-memory entries.
+    /// Refresh the active switcher card count from the in-memory entry list.
+    ///
+    /// Cover decoding is deliberately excluded because this method runs on
+    /// library-load update paths. Covers are refreshed asynchronously when the
+    /// switcher opens.
     pub(crate) fn set_active_library_preview_from_entries(&mut self) {
-        let preview = LibraryPreview {
-            total_entries: self.library.library_entries.len(),
-            thumbnails: self
-                .library
-                .library_entries
-                .iter()
-                .take(LIBRARY_SWITCHER_PREVIEW_LIMIT)
-                .filter_map(library_preview_thumbnail)
-                .collect(),
-        };
         self.libraries
             .previews
-            .insert(self.libraries.active_library_id.clone(), preview);
+            .entry(self.libraries.active_library_id.clone())
+            .or_default()
+            .total_entries = self.library.library_entries.len();
     }
 }

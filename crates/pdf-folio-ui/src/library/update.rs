@@ -2347,6 +2347,19 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             );
             Some(Task::none())
         }
+        Message::ThumbnailFailed { key, error } => {
+            app.library.pending_thumbnails.remove(key);
+            tracing::debug!(%error, entry_id = %key.entry_id.as_str(), "Thumbnail load failed");
+            Some(Task::none())
+        }
+        Message::ThumbnailSnapshotMiss { key } => {
+            app.library.pending_thumbnails.remove(key);
+            Some(if app.startup_background_ready {
+                app.request_visible_thumbnails()
+            } else {
+                Task::none()
+            })
+        }
         Message::ProgressUpdated { entry_id, page } => {
             let db = Arc::clone(&app.db);
             let entry_id = entry_id.clone();
