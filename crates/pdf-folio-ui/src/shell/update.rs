@@ -1606,32 +1606,6 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 start_auto_sync_now(app),
             ]);
         }
-        Message::ToggleLibraryTreeRoot => {
-            app.library.library_tree_root_expanded = !app.library.library_tree_root_expanded;
-            return Task::batch([
-                save_library_preferences_task(app),
-                save_app_session_task(app),
-            ]);
-        }
-        Message::ToggleLibraryTags => {
-            app.library.library_tags_expanded = !app.library.library_tags_expanded;
-            return save_app_session_task(app);
-        }
-        Message::ToggleLibraryTreeFolder(folder_id) => {
-            if !app
-                .library
-                .collapsed_library_tree_folders
-                .insert(folder_id.clone())
-            {
-                app.library
-                    .collapsed_library_tree_folders
-                    .remove(&folder_id);
-            }
-            return Task::batch([
-                save_library_preferences_task(app),
-                save_app_session_task(app),
-            ]);
-        }
         Message::LibraryWatchEvent(event) => {
             let db = Arc::clone(&app.db);
             app.library.library_status = Some(match &event {

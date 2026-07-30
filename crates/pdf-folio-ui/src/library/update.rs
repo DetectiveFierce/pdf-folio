@@ -178,6 +178,30 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             app.library.library_sidebar_tab = *tab;
             Some(save_app_session_task(app))
         }
+        Message::ToggleLibraryTreeRoot => {
+            app.library.library_tree_root_expanded = !app.library.library_tree_root_expanded;
+            Some(Task::batch([
+                save_library_preferences_task(app),
+                save_app_session_task(app),
+            ]))
+        }
+        Message::ToggleLibraryTags => {
+            app.library.library_tags_expanded = !app.library.library_tags_expanded;
+            Some(save_app_session_task(app))
+        }
+        Message::ToggleLibraryTreeFolder(folder_id) => {
+            if !app
+                .library
+                .collapsed_library_tree_folders
+                .insert(folder_id.clone())
+            {
+                app.library.collapsed_library_tree_folders.remove(folder_id);
+            }
+            Some(Task::batch([
+                save_library_preferences_task(app),
+                save_app_session_task(app),
+            ]))
+        }
         _ => None,
     }
 }
