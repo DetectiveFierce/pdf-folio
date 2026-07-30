@@ -161,12 +161,12 @@ pub async fn run_sync_command(args: SyncArgs) -> Result<()> {
             }
         }
         SyncCommand::Plan => {
-            let client = sync_client()?;
+            // Local-only: no authenticated session required.
             let profiles = sync_profiles(args.db, args.library_id.as_deref(), false).await?;
             let device_id = args.device_id.unwrap_or_else(default_device_id);
             for profile in profiles {
                 let db = Db::open(&profile.db_path)?;
-                let plan = client.plan_push(&db, &profile.id, &device_id)?;
+                let plan = SyncClient::plan_push(&db, &profile.id, &device_id)?;
                 println!(
                     "Push plan for `{}` ({}) on `{}`: {} entries, {} folders, {} memberships.",
                     profile.name,
