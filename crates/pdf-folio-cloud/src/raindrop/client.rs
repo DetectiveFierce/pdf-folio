@@ -1,7 +1,7 @@
 //! Raindrop.io HTTP client and remote response model.
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -55,7 +55,6 @@ pub(crate) fn zip_download_progress_basis_points(downloaded: u64, total: u64) ->
 
 pub(crate) struct RaindropClient {
     http: reqwest::Client,
-    download_http: reqwest::Client,
     token: String,
 }
 
@@ -64,10 +63,6 @@ impl RaindropClient {
         Ok(Self {
             http: reqwest::Client::builder()
                 .user_agent("PDF-Folio Raindrop Import")
-                .build()?,
-            download_http: reqwest::Client::builder()
-                .user_agent("PDF-Folio Raindrop Import")
-                .redirect(reqwest::redirect::Policy::none())
                 .build()?,
             token,
         })
@@ -132,14 +127,14 @@ impl RaindropClient {
     }
 
     async fn download_pdf_with_guards(&self, link: &str) -> Result<Vec<u8>> {
-        let mut url = validated_pdf_download_url(link).await?;
+        let mut target = validated_pdf_download_target(link).await?;
 
         for redirects in 0..=MAX_PDF_REDIRECTS {
-            let mut request = self
-                .download_http
-                .get(url.clone())
+            let download_http = guarded_pdf_download_client(&target)?;
+            let mut request = download_http
+                .get(target.url.clone())
                 .header("Accept", "application/pdf,*/*");
-            if download_requires_raindrop_auth(url.as_str()) {
+            if download_requires_raindrop_auth(target.url.as_str()) {
                 request = request.header(AUTHORIZATION, format!("Bearer {}", self.token));
             }
             let response = request.send().await?;
@@ -155,16 +150,15 @@ impl RaindropClient {
                     .ok_or_else(|| {
                         anyhow!("Redirect while downloading PDF from {link} did not include a location.")
                     })?;
-                let next_url = url.join(location).with_context(|| {
+                let next_url = target.url.join(location).with_context(|| {
                     format!("Redirect while downloading PDF from {link} had an invalid location.")
                 })?;
-                validate_pdf_download_url(&next_url).await?;
-                url = next_url;
+                target = validate_pdf_download_url(next_url).await?;
                 continue;
             }
 
             let response = response.error_for_status()?;
-            return read_limited_pdf_response(url.as_str(), response).await;
+            return read_limited_pdf_response(target.url.as_str(), response).await;
         }
 
         unreachable!("redirect loop exits by returning or bailing")
@@ -254,13 +248,19 @@ fn download_requires_raindrop_auth(link: &str) -> bool {
         .is_some_and(|host| host == "raindrop.io" || host.ends_with(".raindrop.io"))
 }
 
-pub(super) async fn validated_pdf_download_url(link: &str) -> Result<Url> {
-    let url = Url::parse(link).with_context(|| format!("Invalid PDF download URL: {link}"))?;
-    validate_pdf_download_url(&url).await?;
-    Ok(url)
+#[derive(Debug)]
+pub(super) struct PdfDownloadTarget {
+    url: Url,
+    host: String,
+    addresses: Vec<SocketAddr>,
 }
 
-async fn validate_pdf_download_url(url: &Url) -> Result<()> {
+pub(super) async fn validated_pdf_download_target(link: &str) -> Result<PdfDownloadTarget> {
+    let url = Url::parse(link).with_context(|| format!("Invalid PDF download URL: {link}"))?;
+    validate_pdf_download_url(url).await
+}
+
+async fn validate_pdf_download_url(url: Url) -> Result<PdfDownloadTarget> {
     match url.scheme() {
         "http" | "https" => {}
         scheme => bail!("Refusing to download PDF from unsupported URL scheme: {scheme}."),
@@ -272,30 +272,54 @@ async fn validate_pdf_download_url(url: &Url) -> Result<()> {
     if host.eq_ignore_ascii_case("localhost") || host.to_ascii_lowercase().ends_with(".localhost") {
         bail!("Refusing to download PDF from local host: {host}.");
     }
+    let host = host.to_owned();
 
     let port = url
         .port_or_known_default()
         .ok_or_else(|| anyhow!("Could not determine port for PDF download URL: {url}"))?;
-    let addresses = tokio::net::lookup_host((host, port))
+    let addresses = tokio::net::lookup_host((host.as_str(), port))
         .await
         .with_context(|| format!("Could not resolve PDF download host: {host}"))?;
-    let mut resolved_any = false;
+    let mut allowed_addresses = Vec::new();
     for address in addresses {
-        resolved_any = true;
-        let ip = address.ip();
+        let ip = normalize_download_address(address.ip());
         if is_blocked_download_address(ip) {
             bail!("Refusing to download PDF from local or private address: {ip}.");
         }
+        allowed_addresses.push(address);
     }
-    if !resolved_any {
+    if allowed_addresses.is_empty() {
         bail!("PDF download host did not resolve: {host}.");
     }
 
-    Ok(())
+    Ok(PdfDownloadTarget {
+        url,
+        host,
+        addresses: allowed_addresses,
+    })
+}
+
+fn guarded_pdf_download_client(target: &PdfDownloadTarget) -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent("PDF-Folio Raindrop Import")
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&target.host, &target.addresses)
+        .build()
+        .context("Could not build guarded PDF download client.")
+}
+
+fn normalize_download_address(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(ip) => ip
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(ip)),
+        ip => ip,
+    }
 }
 
 pub(super) fn is_blocked_download_address(ip: IpAddr) -> bool {
-    match ip {
+    match normalize_download_address(ip) {
         IpAddr::V4(ip) => is_blocked_ipv4_address(ip),
         IpAddr::V6(ip) => is_blocked_ipv6_address(ip),
     }

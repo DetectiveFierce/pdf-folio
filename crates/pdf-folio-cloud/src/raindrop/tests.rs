@@ -1,5 +1,5 @@
 use super::client::{
-    is_blocked_download_address, validated_pdf_download_url, zip_download_progress_basis_points,
+    is_blocked_download_address, validated_pdf_download_target, zip_download_progress_basis_points,
     Raindrop, RaindropCollection, RaindropFile, RaindropRef,
 };
 use super::import::{
@@ -95,6 +95,9 @@ fn raindrop_pdf_download_blocks_local_network_addresses() {
     ))));
     assert!(is_blocked_download_address(IpAddr::V6(Ipv6Addr::LOCALHOST)));
     assert!(is_blocked_download_address(IpAddr::V6(
+        "::ffff:127.0.0.1".parse().unwrap()
+    )));
+    assert!(is_blocked_download_address(IpAddr::V6(
         "fc00::1".parse().unwrap()
     )));
     assert!(is_blocked_download_address(IpAddr::V6(
@@ -110,13 +113,13 @@ fn raindrop_pdf_download_blocks_local_network_addresses() {
 
 #[tokio::test]
 async fn raindrop_pdf_download_rejects_localhost_and_unsupported_schemes() {
-    let localhost_error = validated_pdf_download_url("http://localhost/file.pdf")
+    let localhost_error = validated_pdf_download_target("http://localhost/file.pdf")
         .await
         .unwrap_err()
         .to_string();
     assert!(localhost_error.contains("local host"));
 
-    let scheme_error = validated_pdf_download_url("file:///tmp/file.pdf")
+    let scheme_error = validated_pdf_download_target("file:///tmp/file.pdf")
         .await
         .unwrap_err()
         .to_string();
