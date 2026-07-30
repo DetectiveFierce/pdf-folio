@@ -293,7 +293,7 @@ fn initial_window_size() -> [f32; 2] {
         .window_size()
 }
 
-fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
+pub(crate) fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
     let session = app.snapshot_session();
     Task::perform(
         async move {
