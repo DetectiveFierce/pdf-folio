@@ -3,7 +3,7 @@ use crate::library::view::*;
 use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
 use crate::*;
 use iced::widget::{column, row, scrollable};
-use pdf_folio_cloud::raindrop::{RaindropImportDestination, RaindropImportPhase};
+use pdf_folio_cloud::raindrop::RaindropImportDestination;
 
 const RAINDROP_INTEGRATIONS_URL: &str = "https://app.raindrop.io/settings/integrations";
 const FOLDER_PLUS_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"##;
@@ -187,48 +187,6 @@ fn delete_folder_count_card<'a>(
     .padding(Spacing::MD)
     .style(move |_| container_style(tokens, Class::SidebarDetailRow))
     .into()
-}
-
-pub(crate) fn bulk_operation_progress_banner<'a>(
-    app: &'a PDFolioApp,
-    progress: &'a BulkOperationProgress,
-    tokens: ThemeTokens,
-) -> Element<'a, Message> {
-    let elapsed = app
-        .library
-        .animation_now
-        .saturating_duration_since(progress.started_at)
-        .as_secs_f32();
-    let value = indeterminate_progress_value(elapsed);
-    let label = format!("{} {} PDFs...", progress.label, progress.total);
-
-    container(
-        column![
-            row![
-                text(label)
-                    .size(FontSize::SM)
-                    .font(ui_font(FontWeight::SEMIBOLD))
-                    .color(tokens.text_primary),
-                text("Working in background")
-                    .size(FontSize::SM)
-                    .font(ui_font(FontWeight::REGULAR))
-                    .color(tokens.text_secondary),
-            ]
-            .spacing(Spacing::MD)
-            .align_y(iced::Alignment::Center),
-            progress_bar(value, tokens),
-        ]
-        .spacing(Spacing::XS),
-    )
-    .width(Length::Fill)
-    .padding([Spacing::SM, Spacing::MD])
-    .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
-    .into()
-}
-
-pub(crate) fn indeterminate_progress_value(elapsed_secs: f32) -> f32 {
-    let sweep = (elapsed_secs * 0.72).fract();
-    (0.18 + 0.64 * (0.5 - (sweep - 0.5).abs()) * 2.0).clamp(0.0, 1.0)
 }
 
 pub(crate) fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message> {
@@ -1035,85 +993,6 @@ pub(crate) fn view_raindrop_import_dialog(app: &PDFolioApp) -> Element<'_, Messa
         container(dialog)
             .width(app.layout().metric("RaindropImportDialog", "width", 820.0))
             .height(app.layout().metric("RaindropImportDialog", "height", 660.0))
-            .style(move |_| container_style(tokens, Class::JumpOverlay)),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .center(Length::Fill)
-    .style(move |_| container_style(tokens, Class::PresentationOverlay))
-    .into()
-}
-
-pub(crate) fn view_raindrop_import_progress_dialog(app: &PDFolioApp) -> Element<'_, Message> {
-    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
-    let Some(progress) = app.library.raindrop_import_progress.as_ref() else {
-        return container("").into();
-    };
-    let total = progress.total.max(1);
-    let value = progress.progress_basis_points.map_or_else(
-        || progress.completed as f32 / total as f32,
-        |basis_points| f32::from(basis_points) / 10_000.0,
-    );
-    let status = match progress.phase {
-        RaindropImportPhase::PreparingImports => String::from("Preparing Imports"),
-        RaindropImportPhase::DownloadingImportFiles => String::from("Downloading Import Files"),
-        RaindropImportPhase::ImportingDownloadedFiles if progress.failed => {
-            format!(
-                "Importing downloaded Files: skipped {} of {}",
-                progress.completed,
-                format_count(progress.total, "PDF")
-            )
-        }
-        RaindropImportPhase::ImportingDownloadedFiles => {
-            format!(
-                "Importing downloaded Files: imported {} of {}",
-                progress.completed,
-                format_count(progress.total, "PDF")
-            )
-        }
-    };
-
-    let content = column![
-        text("Importing from Raindrop.io")
-            .size(FontSize::HEADING)
-            .font(display_font(FontWeight::MEDIUM))
-            .color(tokens.text_primary),
-        text(status).size(FontSize::MD).color(tokens.text_secondary),
-        container(progress_bar(value, tokens)).width(Length::Fill),
-        text(truncate_for_width_with_font(
-            &progress.current_title,
-            app.layout()
-                .metric("RaindropImportProgressDialog", "title_width", 400.0),
-            0.0,
-            FontSize::SM
-        ))
-        .size(FontSize::SM)
-        .font(ui_font(FontWeight::MEDIUM))
-        .color(if progress.failed {
-            tokens.error
-        } else {
-            tokens.text_secondary
-        })
-        .wrapping(Wrapping::None),
-        row![
-            text("Cancel rolls back PDFs imported so far.")
-                .size(FontSize::SM)
-                .color(tokens.text_secondary)
-                .width(Length::Fill),
-            toolbar_button("Cancel import", tokens).on_press(Message::CancelRaindropImport),
-        ]
-        .spacing(Spacing::MD)
-        .align_y(iced::Alignment::Center),
-    ]
-    .spacing(Spacing::MD)
-    .padding(Spacing::LG);
-
-    container(
-        container(content)
-            .width(
-                app.layout()
-                    .metric("RaindropImportProgressDialog", "width", 460.0),
-            )
             .style(move |_| container_style(tokens, Class::JumpOverlay)),
     )
     .width(Length::Fill)
