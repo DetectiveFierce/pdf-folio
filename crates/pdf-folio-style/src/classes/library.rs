@@ -1,3 +1,9 @@
+//! Library-surface class styles: sidebar scrollbars and related chrome.
+//!
+//! Library cards/rows mostly go through [`super::core::button_style`]. This
+//! module holds library-specific scrollable styling so sidebar rails can use a
+//! denser thumb treatment than document scroll areas.
+
 use iced::widget::{container, scrollable};
 use iced::{Background, Border, Color, Shadow as IcedShadow};
 
@@ -5,7 +11,7 @@ use crate::tokens::{BorderWidth, ThemeTokens};
 
 use super::mix_color;
 
-/// Returns an iced scrollable style for sidebar scrollbars.
+/// iced scrollable stylesheet tuned for library/viewer sidebars (denser thumbs).
 pub fn sidebar_scrollable_style(
     tokens: ThemeTokens,
     status: scrollable::Status,

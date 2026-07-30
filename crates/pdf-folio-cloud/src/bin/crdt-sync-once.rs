@@ -1,3 +1,29 @@
+//! Maintenance binary that runs a one-shot CRDT sync + hydration pass.
+//!
+//! Intended for ops and debugging when you want a full metadata exchange without
+//! the interactive `pdf-folio sync` CLI. Requires a cached sync session
+//! (`pdf-folio sync auth` or equivalent) under the XDG data directory.
+//!
+//! # Usage
+//!
+//! ```text
+//! crdt-sync-once --db PATH --library-id ID --device-id DEVICE
+//! ```
+//!
+//! # Data flow
+//!
+//! 1. Open the local library SQLite DB.
+//! 2. Load [`pdf_folio_cloud::sync::cached_session`].
+//! 3. `ensure_remote_schema`, then `sync_crdt_metadata`, then `hydrate_remote_library`
+//!    with the default [`pdf_folio_cloud::sync::BlobCache`].
+//! 4. Print CRDT and hydration counters.
+//!
+//! # Related
+//!
+//! - Library APIs: `pdf_folio_cloud::sync::{SyncClient, BlobCache}`
+//! - Higher-level orchestration: `SyncClient::sync_library_if_needed`
+//! - Schema bootstrap: `ensure-turso-schema` binary
+
 use std::env;
 use std::path::PathBuf;
 

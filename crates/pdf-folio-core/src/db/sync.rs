@@ -1,4 +1,26 @@
-//! Sync metadata, CRDT log, and blob upload persistence.
+//! Sync metadata, CRDT operation log, and blob upload persistence.
+//!
+//! Local tables that mirror what the cloud sync stack needs without requiring
+//! a network connection: denormalized entry/folder/membership metadata
+//! (`sync_*` tables), an append-only CRDT operation log with per-entity
+//! versions and device checkpoints, and a set of content-hash blob upload
+//! markers so PDF bytes are not re-uploaded blindly.
+//!
+//! The cloud crate (`pdf-folio-cloud`) seeds these tables from the main library
+//! rows, prepares CRDT ops, pushes/pulls against Turso/R2, and hydrates
+//! missing local entries. This module is the SQLite half of that pipeline.
+//!
+//! # Key types
+//!
+//! - [`crate::SyncEntryRow`], [`crate::SyncFolderRow`],
+//!   [`crate::SyncEntryFolderRow`] — LWW-friendly metadata rows.
+//! - [`crate::SyncCrdtOperation`] — immutable ops with hybrid logical time.
+//! - [`crate::SyncSeedSummary`], [`crate::SyncCrdtPrepareSummary`] — batch counters.
+//!
+//! # See also
+//!
+//! - [`super::schema`] for table creation.
+//! - [`super::library`] / [`super::organization`] for source-of-truth library data.
 
 use std::path::Path;
 

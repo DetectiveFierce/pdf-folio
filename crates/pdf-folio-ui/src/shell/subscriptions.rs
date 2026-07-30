@@ -1,4 +1,19 @@
 //! Application subscriptions and filesystem watcher streams.
+//!
+//! Builds the iced `Subscription` tree for [`PDFolioApp`]: keyboard and cursor
+//! input, library and style directory watchers, auto-sync and live remote
+//! sync ticks (after startup is ready and the user is signed in), library
+//! card hover animation ticks while animating, drag auto-scroll ticks during
+//! library drag, and viewer animation ticks when page fades are active.
+//!
+//! Heavy background work is gated by `startup_background_ready` so first paint
+//! is not blocked by network or full thumbnail fan-out. Style file changes are
+//! filtered by [`style_watch_event_should_reload`] before emitting
+//! [`Message::ReloadStyles`].
+//!
+//! Related: [`super::shortcuts`] for keyboard event mapping,
+//! [`super::update`] for handling subscription-produced messages,
+//! [`crate::library::tasks`] for applying watch events to the database.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
@@ -17,6 +32,11 @@ use crate::messages::Message;
 const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(10);
 const LIVE_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Composes the full iced subscription set for the current app state.
+///
+/// Branching depends on mode (library cursor tracking), configured watch
+/// directories, style dirs, sign-in, and whether drag/hover/fade animations
+/// are active.
 pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
     let keyboard = event::listen_with(|event, status, _window| {
         shortcuts::keyboard_event_message(event, status)
@@ -357,6 +377,10 @@ fn watch_style_directories_stream(
     })
 }
 
+/// Returns true when a notify style-dir event should trigger a style reload.
+///
+/// Ignores non-content events and non-KDL paths so editor temp files do not
+/// thrash the style book.
 pub(crate) fn style_watch_event_should_reload(event: &notify::Event) -> bool {
     if !matches!(
         event.kind,

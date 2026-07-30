@@ -1,6 +1,22 @@
+//! # Derived library data and refresh tasks
+//!
+//! Helpers that **project** raw `library_entries` / folders into UI-ready
+//! lists and that kick off refresh work (thumbnails, folder/entry reloads).
+//!
+//! ## Ownership
+//!
+//! Domain layer: reads and mutates `PDFolioApp`, spawns iced tasks that hit
+//! `Db`. Pure filter predicates live in `components::library::filters` and
+//! are applied by layout/visible-entry helpers; this module focuses on
+//! aggregates and I/O orchestration.
+//!
+//! Typical flow: `refresh_library` / `refresh_folders` → update applies
+//! loaded messages → `request_visible_thumbnails` after scroll or filter.
+
 use crate::*;
 
 impl PDFolioApp {
+    /// Sorted unique tags across all live library entries.
     pub(crate) fn all_tags(&self) -> Vec<String> {
         let mut tags: Vec<String> = self
             .library
@@ -13,6 +29,7 @@ impl PDFolioApp {
         tags
     }
 
+    /// Enqueue render/load tasks for covers currently in the virtualized viewport.
     pub(crate) fn request_visible_thumbnails(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         let entries = self.visible_library_entries();
@@ -63,6 +80,7 @@ impl PDFolioApp {
         Task::batch(tasks)
     }
 
+    /// Synchronously hydrate in-memory thumbnail handles from on-disk RGBA caches.
     pub(crate) fn load_cached_visible_thumbnails(&mut self) {
         let entries = self.visible_thumbnail_entries();
         let preferred_size = if self.library.compact_view_mode {
@@ -108,6 +126,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Reload sorted live + trash entries from SQLite (purges expired trash first).
     pub(crate) fn refresh_library(&mut self) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let sort_mode = self.library.library_sort_mode;
@@ -132,6 +151,7 @@ impl PDFolioApp {
         )
     }
 
+    /// Reload live and trash folder trees from SQLite.
     pub(crate) fn refresh_folders(&self) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let trash_db = Arc::clone(&self.db);

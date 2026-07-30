@@ -1,5 +1,32 @@
+//! Viewer-domain `update` handler: zoom, scroll, find, outline, render results.
+//!
+//! Called from shell update **before** the shell match. Returns `Some(task)`
+//! when the message belongs to the viewer; `None` leaves the message for shell
+//! (or library) handling.
+//!
+//! # Message clusters handled
+//!
+//! - Sidebar / TOC: `ToggleSidebar`, `ToggleTocPanel`, `ViewerSidebarTabSelected`
+//! - Jump / page: `OpenJumpDialog`, `Jump*`, `PreviousPage`, `NextPage`, page input
+//! - Find: `OpenViewerFind`, `CloseViewerFind`, `ViewerFind*`
+//! - Outline: `ToggleOutlineNode`
+//! - Text selection / copy: `ViewerText*`, `CopyViewerTextSelection`
+//! - Scroll / viewport / wheel: `ScrollChanged`, `Viewport*`, modifiers
+//! - Zoom: `Zoom*`, presets, scroll/spread mode, `ZoomRenderSettled`
+//! - Render completion: `PageRendered` (and related text-layer loads)
+//!
+//! Many arms persist session state via [`crate::with_session_save`] or
+//! [`crate::save_app_session_task`]. Prefer adding new viewer messages here
+//! rather than in shell update.
+//!
+//! Related: [`super::navigation`], [`super::tasks`], [`super::document`].
+
 use crate::*;
 
+/// Handles viewer-domain messages; returns `None` if another reducer should try.
+///
+//! Tasks may include tile renders, scrollable sync, session saves, or find
+//! scroll-to-match work.
 pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Message>> {
     match message {
         Message::ToggleSidebar | Message::ToggleTocPanel => {

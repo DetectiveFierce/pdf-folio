@@ -1,3 +1,17 @@
+//! # Registry session persistence
+//!
+//! Reads and writes `libraries.json` under the app data directory, creates
+//! per-library SQLite files, and removes storage when a vault is deleted.
+//!
+//! ## Ownership
+//!
+//! Pure filesystem + serde relative to a `LibraryRegistryRuntime` value.
+//! Does not touch iced widgets. Callers (UI update path, startup, sync
+//! tasks) pass ownership of the runtime in and receive an updated value.
+//!
+//! Default library id uses `library.db` at the data root; additional
+//! libraries live under `libraries/<id>/library.db`.
+
 use crate::library::registry::preview::load_library_previews;
 use crate::library::registry::state::{
     StoredLibraryRegistry, DEFAULT_LIBRARY_ID, DEFAULT_LIBRARY_NAME,
@@ -8,6 +22,7 @@ use directories::ProjectDirs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Load or initialize `libraries.json`, ensure a default profile, and attach previews.
 pub(crate) fn load_library_registry(
     preferred_active_id: Option<&str>,
 ) -> anyhow::Result<LibraryRegistryRuntime> {
@@ -43,6 +58,7 @@ pub(crate) fn load_library_registry(
     Ok(registry)
 }
 
+/// Create a new vault SQLite file and profile, make it active, and save the registry.
 pub(crate) fn create_library_profile(
     registry: LibraryRegistryRuntime,
     name: String,
@@ -71,6 +87,7 @@ pub(crate) fn create_library_profile(
     Ok(registry)
 }
 
+/// Rename a profile in the registry (does not move the database file).
 pub(crate) fn rename_library_profile(
     registry: LibraryRegistryRuntime,
     library_id: String,
@@ -94,6 +111,7 @@ pub(crate) fn rename_library_profile(
     Ok(registry)
 }
 
+/// Remove a profile (keeping at least one), delete its SQLite storage, and save.
 pub(crate) fn delete_library_profile(
     registry: LibraryRegistryRuntime,
     library_id: String,
@@ -127,6 +145,7 @@ pub(crate) fn delete_library_profile(
     Ok(registry)
 }
 
+/// Serialize the registry runtime to `libraries.json`.
 pub(super) fn save_library_registry(registry: &LibraryRegistryRuntime) -> anyhow::Result<()> {
     let path = registry_path()?;
     if let Some(parent) = path.parent() {
@@ -159,6 +178,7 @@ fn default_profile(data_dir: &Path) -> LibraryProfile {
     }
 }
 
+/// Whole seconds since UNIX epoch for sync metadata.
 pub(super) fn current_unix_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -166,6 +186,7 @@ pub(super) fn current_unix_timestamp() -> i64 {
         .unwrap_or_default()
 }
 
+/// mtime of `path` as UNIX seconds, if available.
 pub(super) fn file_modified_unix_timestamp(path: &Path) -> Option<i64> {
     std::fs::metadata(path)
         .ok()
@@ -174,6 +195,7 @@ pub(super) fn file_modified_unix_timestamp(path: &Path) -> Option<i64> {
         .map(|duration| duration.as_secs() as i64)
 }
 
+/// Resolve the SQLite path for a library id under `data_dir`.
 pub(super) fn library_db_path(data_dir: &Path, library_id: &str) -> PathBuf {
     if library_id == DEFAULT_LIBRARY_ID {
         data_dir.join("library.db")
@@ -185,12 +207,14 @@ pub(super) fn library_db_path(data_dir: &Path, library_id: &str) -> PathBuf {
     }
 }
 
+/// Platform app data directory for PDF-Folio (`directories` crate).
 pub(super) fn app_data_dir() -> anyhow::Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "pdf-folio", "PDF-Folio")
         .context("Could not find a data directory for PDF-Folio.")?;
     Ok(project_dirs.data_dir().to_path_buf())
 }
 
+/// Full path to `libraries.json`.
 pub(super) fn registry_path() -> anyhow::Result<PathBuf> {
     Ok(app_data_dir()?.join("libraries.json"))
 }
@@ -222,6 +246,7 @@ fn unique_library_id(registry: &LibraryRegistryRuntime) -> String {
     id
 }
 
+/// Delete a library database file and its empty parent under `libraries/`.
 pub(super) fn remove_library_storage(db_path: &Path) -> anyhow::Result<()> {
     match std::fs::remove_file(db_path) {
         Ok(()) => {}

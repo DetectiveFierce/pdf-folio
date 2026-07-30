@@ -1,4 +1,19 @@
 //! Library entry CRUD, tagging, trash, and file-presence state.
+//!
+//! Implements the core [`Db`] methods for PDF rows in the `entries` table:
+//! insert/upsert, sorted listing, soft-delete (trash) and hard delete, tags,
+//! and marking files missing when the filesystem path disappears.
+//!
+//! Entry IDs are content-derived (see [`crate::hash_file`]); `insert_entry`
+//! merges on conflict so re-importing the same PDF updates path and metadata
+//! without duplicating the row. Sorted queries exclude trashed entries; use
+//! [`Db::get_trashed_entries`] for the trash can view.
+//!
+//! # See also
+//!
+//! - [`super::organization`] for folder membership and manual order.
+//! - [`super::metadata`] for display overrides, ratings, and reading progress.
+//! - [`crate::LibraryEntry`] / [`crate::NewLibraryEntry`] for row shapes.
 
 use std::path::{Path, PathBuf};
 
@@ -14,7 +29,12 @@ use super::{
 };
 
 impl Db {
-    /// Inserts or replaces a library entry.
+    /// Inserts or upserts a library entry by content id.
+    ///
+    /// On conflict, path and several metadata fields are updated, the entry is
+    /// marked present (`missing = 0`), and trash state is cleared. Existing
+    /// sort keys and attribution flags are preserved unless the incoming row
+    /// supplies stronger attribution.
     ///
     /// # Errors
     ///
@@ -393,6 +413,7 @@ impl Db {
             .context("Could not load library tags.")
     }
 
+    /// Loads tags for one entry using an existing connection (sorted alphabetically).
     pub(super) fn tags_for_entry_with_connection(
         &self,
         connection: &Connection,
@@ -406,6 +427,7 @@ impl Db {
             .context("Could not load entry tags.")
     }
 
+    /// Loads folders containing `entry_id`, optionally including trashed folders.
     pub(super) fn folders_for_entry_with_connection(
         &self,
         connection: &Connection,
@@ -522,6 +544,7 @@ impl Db {
         Ok(())
     }
 
+    /// Next root-library manual order rank (max existing + naming gap constant).
     pub(super) fn next_entry_manual_order_with_connection(
         &self,
         connection: &Connection,
@@ -570,6 +593,8 @@ impl Db {
     }
 }
 
+/// Maps a SELECT of the standard entry columns into a [`crate::LibraryEntry`]
+/// (tags and folders left empty for the caller to fill).
 pub(super) fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryEntry> {
     let added_at: i64 = row.get(12)?;
     let opened_at: Option<i64> = row.get(13)?;

@@ -1,25 +1,45 @@
 //! Top-level application state and launch entrypoint for PDF-Folio.
 //!
-//! This crate is the main application shell built on the [`iced`] framework.
-//! It wires together the library, viewer, and style subsystems into a single
-//! [`PDFolioApp`] state machine with an `update`/`view`/`subscription` loop.
+//! This crate is the iced application shell. It owns the root [`PDFolioApp`]
+//! state machine and the `update` / `view` / `subscription` loop that drives
+//! both the library manager and the PDF viewer. Domain logic lives in child
+//! modules; this file re-exports the public surface, wires launch-time
+//! session restore, and holds a few cross-cutting task helpers used by shell,
+//! library, and viewer reducers.
 //!
-//! Key exports:
+//! # Role in the workspace
 //!
-//! - [`PDFolioApp`] — the root application state holding viewer runtime,
-//!   library runtime, chrome state, appearance settings, and the database
-//!   handle.
-//! - [`run`] — launches the iced application with optional initial file.
-//! - [`AppMode`] — switches between the library manager and the PDF viewer.
-//! - [`Settings`] — user-configurable application settings.
-//! - [`messages`] — the [`Message`] enum and related menu/shortcut types
-//!   that drive the update loop.
+//! - [`pdf_folio_core`] supplies the SQLite library database, PDF document
+//!   runtime, tile cache, and search index.
+//! - [`pdf_folio_cloud`] supplies Google sign-in, CRDT sync, Raindrop import,
+//!   and the optional sync server client.
+//! - [`pdf_folio_style`] supplies the KDL style book, theme tokens, and
+//!   reusable widget styling helpers re-exported here as [`style`] / [`theme`].
 //!
-//! Internal modules are organized into `shell/` (state, update, subscriptions,
-//! and platform integration), `components/` (shared, library, and viewer UI
-//! widgets), `library/` (state, actions, tasks, filtering, layout, registry,
-//! and view composition), and `viewer/` (document runtime, navigation,
-//! rendering, text search, tasks, and view composition).
+//! # Key public types
+//!
+//! - [`PDFolioApp`] — root state: mode, viewer/library/chrome/appearance
+//!   runtimes, settings, sync auth, and the active database handle.
+//! - [`run`] — boots iced with optional CLI file path and previous session.
+//! - [`AppMode`] — signed-out gate, library, viewer, or library switcher.
+//! - [`Settings`] — default zoom, tile cache size, and watch directories.
+//! - [`messages`] — the crate-wide [`Message`] vocabulary and related
+//!   context-menu / confirmation / shortcut enums.
+//! - [`ViewerRuntime`] — open-document state re-exported from the viewer.
+//!
+//! # Module ownership
+//!
+//! | Module | Owns |
+//! | --- | --- |
+//! | [`shell`] | `PDFolioApp`, messages, top-level update, subscriptions, session, shortcuts, command registry, platform helpers |
+//! | [`library`] | Library filtering, drag/selection, bulk tasks, multi-library registry, library views |
+//! | [`viewer`] | Document open/render, zoom/scroll/find/outline, viewer update and canvas composition |
+//! | [`components`] | Presentational widgets shared by library and viewer chrome |
+//!
+//! Message ownership is intentional: library and viewer updaters get first
+//! crack at each [`Message`]; shell `update` handles the remainder (sync,
+//! chrome, theme, file dialogs, session). Prefer extending an existing
+//! message cluster over inventing a parallel channel.
 //!
 //! [`iced`]: https://docs.rs/iced
 
@@ -174,11 +194,17 @@ use shell::update::update;
 pub use shell::app::*;
 pub use viewer::document::ViewerRuntime;
 
-/// Launches the PDF-Folio UI.
+/// Launches the PDF-Folio iced application.
+///
+/// Loads the previous [`AppSession`] when `initial_file` is `None`, builds
+/// [`PDFolioApp`] via session/file restore, then runs the iced event loop with
+/// the shared subscription tree and window settings. When a CLI file path is
+/// provided, session restore for mode/document is skipped so that path opens
+/// immediately.
 ///
 /// # Errors
 ///
-/// Returns an error when startup state cannot be created.
+/// Returns an error when startup state cannot be created or iced fails to run.
 pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
     let launch_started_at = Instant::now();
     let startup_probe_enabled = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").is_some();
@@ -301,6 +327,11 @@ fn initial_window_size() -> [f32; 2] {
         .window_size()
 }
 
+/// Persists a snapshot of the current app session on a background thread.
+///
+/// Emits [`Message::SessionSaved`] on success or [`Message::LibraryError`] if
+/// serialization or disk write fails. Call after navigation, zoom, or library
+/// layout changes that should survive relaunch.
 pub(crate) fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
     let session = app.snapshot_session();
     Task::perform(
@@ -315,6 +346,10 @@ pub(crate) fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
     )
 }
 
+/// Batches an arbitrary task with a session snapshot save.
+///
+/// Convenience for update handlers that both produce work and mutate
+/// restorable UI state (mode, document position, filters, etc.).
 pub(crate) fn with_session_save(task: Task<Message>, app: &PDFolioApp) -> Task<Message> {
     Task::batch([task, save_app_session_task(app)])
 }
@@ -434,6 +469,11 @@ fn relink_file_dialog_task(entry_id: EntryId) -> Task<Message> {
     )
 }
 
+/// Writes the active library's view preferences to the open database.
+///
+/// Captures sort mode, grid/list layout, selected folder, sidebar width,
+/// metadata density, and tree expand/collapse state, then emits
+/// [`Message::LibraryPreferencesSaved`] or [`Message::LibraryError`].
 pub(crate) fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
     let db = Arc::clone(&app.db);
     let preferences = LibraryPreferences {
@@ -566,6 +606,11 @@ fn truncate_for_width_with_font(
     truncated
 }
 
+/// Debounces library search input by 200 ms before re-querying the index.
+///
+/// Emits [`Message::SearchDebounced`] with the original query string so the
+/// library updater can ignore stale generations that finished after a newer
+/// keystroke.
 pub(crate) fn schedule_search(query: String) -> Task<Message> {
     Task::perform(
         async move {

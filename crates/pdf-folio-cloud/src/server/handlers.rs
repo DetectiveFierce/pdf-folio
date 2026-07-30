@@ -1,3 +1,27 @@
+//! Axum routes for the sync control plane: health, OAuth, Turso, R2 presign.
+//!
+//! The router never streams library data. After auth it only returns short-lived
+//! credentials so the desktop client can talk to Turso and R2 directly.
+//!
+//! # Routes
+//!
+//! | Method | Path | Auth | Purpose |
+//! | --- | --- | --- | --- |
+//! | GET | `/health` | none | Liveness |
+//! | POST | `/auth/google/callback` | none (code+verifier) | Exchange Google code → session JWT |
+//! | GET | `/token/turso` | Bearer session | Turso database URL + auth token |
+//! | POST | `/token/r2/upload` | Bearer session | Presigned PUT for `blobs/<hash>.pdf` |
+//! | GET | `/token/r2/download` | Bearer session | Presigned GET for `blobs/<hash>.pdf` |
+//!
+//! Errors are returned as HTTP 400 with `{ "error": "..." }` (including auth
+//! failures) so the client can surface a single message shape.
+//!
+//! # Related
+//!
+//! - [`super::auth`] — Google exchange, allow-list, JWT verify
+//! - [`super::storage`] — R2 SigV4 + hash validation
+//! - Client callers: [`crate::sync::auth`], [`crate::sync::remote`], [`crate::sync::blobs`]
+
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -15,12 +39,14 @@ use super::auth::{
 use super::config::Config;
 use super::storage::{presigned_r2_url, r2_blob_key, validate_hash, R2_URL_TTL_SECONDS};
 
+/// Shared axum state: outbound HTTP client (Google) + resolved [`Config`].
 #[derive(Debug)]
 pub(crate) struct AppState {
     pub(crate) http: reqwest::Client,
     pub(crate) config: Config,
 }
 
+/// Builds the control-plane router with all credential and health routes.
 pub(crate) fn router(config: Config) -> Router {
     Router::new()
         .route("/health", axum::routing::get(health))

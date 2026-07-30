@@ -1,3 +1,28 @@
+//! Raindrop OAuth helpers and cached access-token storage under the XDG data dir.
+//!
+//! Part of the Raindrop **import** product ([`crate::raindrop`]). Resolves a
+//! bearer token for the REST client without involving the PDF-Folio sync
+//! control plane (Google/Tailscale auth is a different product).
+//!
+//! # Token resolution order ([`resolve_access_token`])
+//!
+//! 1. `PDF_FOLIO_RAINDROP_TOKEN` (test/personal tokens)
+//! 2. Cached access token at `…/raindrop/token.json`
+//! 3. Browser OAuth using the supplied or env/bundled client id+secret
+//!
+//! # Security notes
+//!
+//! - Loopback redirect [`OAUTH_CALLBACK_URL`] must be registered on the Raindrop
+//!   application. State is checked on callback.
+//! - The cached token file is a long-lived bearer secret; treat the data dir as private.
+//! - Client secrets may come from env (`PDF_FOLIO_RAINDROP_CLIENT_*`) or compile-time
+//!   `option_env!` when bundled for distribution.
+//!
+//! # Related
+//!
+//! - Consumers: [`super::import`], [`super::can_import_without_prompt`]
+//! - REST client: [`super::client`]
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -20,6 +45,14 @@ const OAUTH_REDIRECT_PORT: u16 = 53147;
 /// OAuth redirect URI that must be configured in the user's Raindrop app.
 pub const OAUTH_CALLBACK_URL: &str = "http://localhost:53147/raindrop/callback";
 
+/// Resolves a Raindrop API bearer token (env → cache → browser OAuth).
+///
+/// When `oauth_config` is `Some`, browser OAuth uses that app. Otherwise env
+/// token, disk cache, or bundled/env OAuth credentials are tried in order.
+///
+/// # Errors
+///
+/// Returns an error when no token source is available or OAuth/network fails.
 pub(crate) async fn resolve_access_token(
     oauth_config: Option<RaindropOAuthConfig>,
 ) -> Result<String> {
@@ -45,6 +78,10 @@ pub(crate) async fn resolve_access_token(
     oauth_access_token(&config.client_id, &config.client_secret).await
 }
 
+/// Loads Raindrop OAuth app credentials from process env or compile-time env.
+///
+/// Runtime `PDF_FOLIO_RAINDROP_CLIENT_ID` / `_SECRET` override
+/// `option_env!` values baked into the binary when present.
 pub(crate) fn bundled_or_env_oauth_config() -> Option<RaindropOAuthConfig> {
     let client_id = std::env::var("PDF_FOLIO_RAINDROP_CLIENT_ID")
         .ok()
@@ -60,6 +97,11 @@ pub(crate) fn bundled_or_env_oauth_config() -> Option<RaindropOAuthConfig> {
     })
 }
 
+/// Reads the cached Raindrop access token from the PDF-Folio data directory.
+///
+/// # Errors
+///
+/// Returns an error when the cache file is missing or invalid JSON.
 pub(crate) fn cached_access_token() -> Result<String> {
     let path = token_cache_path()?;
     let json =

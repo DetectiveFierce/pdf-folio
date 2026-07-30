@@ -1,4 +1,15 @@
-//! Full sync-pass orchestration.
+//! Full sync-pass orchestration for automatic / idle sync.
+//!
+//! Extends [`SyncClient`] with the preflight gate used by the UI so background
+//! sync can avoid expensive work when the library is already consistent with
+//! Turso. The full path is: preflight → optional blob upload → CRDT push/pull →
+//! hydration.
+//!
+//! # Related
+//!
+//! - Preflight generation uses [`super::crdt::prepare_local_crdt_operations`]
+//! - Full forced pass: [`SyncClient::sync_crdt_metadata`](super::crdt)
+//! - Report types: [`super::status`]
 
 use anyhow::Result;
 use pdf_folio_core::Db;

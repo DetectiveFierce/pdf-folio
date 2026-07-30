@@ -1,3 +1,14 @@
+//! Import-facing DTOs for the Raindrop product (preview, progress, destinations).
+//!
+//! These types are the stable surface used by the UI and public import functions
+//! in [`super::import`]. Wire/API shapes for Raindrop HTTP responses live in
+//! [`super::client`] (`Raindrop`, `RaindropCollection`, …) and stay crate-private.
+//!
+//! # Related
+//!
+//! - Orchestration: [`super::import`]
+//! - Progress phases drive non-linear ZIP progress basis points from [`super`]
+
 use pdf_folio_core::{FolderId, ImportSummary, ImportedEntry};
 
 /// Summary returned after importing PDFs from Raindrop.io.

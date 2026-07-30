@@ -1,7 +1,19 @@
+//! # Registry runtime types
+//!
+//! Data structures for multi-library profiles, switcher previews, and name
+//! dialogs. No I/O — persistence lives in [`super::session`].
+//!
+//! [`LibraryRegistryRuntime`] is stored on `PDFolioApp` and updated after
+//! every create/rename/delete/sync. [`StoredLibraryRegistry`] is the serde
+//! shape written to disk (without UI-only fields like open menus).
+
 use crate::*;
 
+/// Stable id for the built-in default vault (`library.db` at data root).
 pub(crate) const DEFAULT_LIBRARY_ID: &str = "default";
+/// Default display name shown for the built-in vault.
 pub(crate) const DEFAULT_LIBRARY_NAME: &str = "Default Library";
+/// Max cover thumbnails fetched per library for switcher cards.
 pub(crate) const LIBRARY_SWITCHER_PREVIEW_LIMIT: usize = 12;
 
 /// A discrete user library backed by its own SQLite database.
@@ -49,6 +61,7 @@ pub enum LibraryNameDialog {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// On-disk serde shape for `libraries.json` (profiles + deleted tombstones).
 pub(super) struct StoredLibraryRegistry {
     pub(super) active_library_id: String,
     pub(super) libraries: Vec<LibraryProfile>,
@@ -57,12 +70,14 @@ pub(super) struct StoredLibraryRegistry {
 }
 
 impl LibraryRegistryRuntime {
+    /// Returns the currently active library profile, if any.
     pub fn active_profile(&self) -> Option<&LibraryProfile> {
         self.profiles
             .iter()
             .find(|profile| profile.id == self.active_library_id)
     }
 
+    /// Build runtime state from disk JSON, honoring an optional preferred active id.
     pub(super) fn from_stored(
         stored: StoredLibraryRegistry,
         preferred_active_id: Option<&str>,

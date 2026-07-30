@@ -1,12 +1,31 @@
+//! Page navigation, scroll clamping, and zoom helpers for the open document.
+//!
+//! Implements `PDFolioApp` methods used by the viewer updater, shortcuts, and
+//! canvas interaction: jump-to-page, continuous and page-mode scrolling,
+//! horizontal pan, scroll/spread mode changes, and cursor-anchored zoom.
+//!
+//! Tasks returned typically batch `request_visible_pages` (tile fan-out) with
+//! `scroll_viewer_to_offsets_task` (iced scrollable sync). Debounced zoom uses
+//! [`super::tasks::schedule_zoom_render`] so wheel gestures do not thrash the
+//! renderer.
+//!
+//! Related: [`super::layout`] for geometry, [`super::rendering`] for zoom
+//! presets and [`ZoomRenderPolicy`], [`super::update`] for message wiring.
+
 use crate::viewer::layout::selected_render_key;
 use crate::*;
 
 impl PDFolioApp {
+    /// Y origin of `target_page` in document content coordinates.
     pub(crate) fn page_top(&self, target_page: u16) -> f32 {
         self.viewer_page_rect_for_page(target_page)
             .map_or(Spacing::PAGE_GUTTER, |rect| rect.y)
     }
 
+    /// Jumps to a zero-based page, updating scroll offsets for the active mode.
+    ///
+    /// Closes the jump dialog, clamps the page index, requests visible tiles,
+    /// and scrolls the viewer scrollable to the new offsets.
     pub(crate) fn jump_to_page(&mut self, page: u16) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
@@ -41,6 +60,9 @@ impl PDFolioApp {
         ])
     }
 
+    /// Scrolls so a fractional point inside `page` is near the viewport center.
+    ///
+    /// Used by find-in-document and similar “reveal this location” flows.
     pub(crate) fn scroll_to_page_rect(&mut self, page: u16, x_fraction: f32, y_fraction: f32) {
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
             self.viewer.page_scroll_page = page;
@@ -64,14 +86,17 @@ impl PDFolioApp {
         }
     }
 
+    /// Maximum legal horizontal scroll offset for the current content size.
     pub(crate) fn max_horizontal_offset(&self) -> f32 {
         (self.content_width() - self.viewer.viewer_viewport_width.max(1.0)).max(0.0)
     }
 
+    /// Maximum legal vertical scroll offset for the current content size.
     pub(crate) fn max_scroll_offset(&self) -> f32 {
         (self.content_height() - self.viewer.viewer_viewport_height.max(1.0)).max(0.0)
     }
 
+    /// iced task that sets the viewer scrollable absolute offset from runtime state.
     pub(crate) fn scroll_viewer_to_offsets_task(&self) -> Task<Message> {
         operation::scroll_to(
             Id::new(VIEWER_SCROLLABLE_ID),
@@ -82,6 +107,7 @@ impl PDFolioApp {
         )
     }
 
+    /// Clamps `horizontal_offset` into `[0, max_horizontal_offset()]`.
     pub(crate) fn clamp_horizontal_offset(&mut self) {
         self.viewer.horizontal_offset = self
             .viewer
@@ -89,6 +115,7 @@ impl PDFolioApp {
             .clamp(0.0, self.max_horizontal_offset());
     }
 
+    /// Clamps `scroll_offset` into `[0, max_scroll_offset()]`.
     pub(crate) fn clamp_scroll_offset(&mut self) {
         self.viewer.scroll_offset = self
             .viewer
@@ -96,6 +123,7 @@ impl PDFolioApp {
             .clamp(0.0, self.max_scroll_offset());
     }
 
+    /// Nudges vertical scroll by `delta` pixels and refreshes visible pages.
     pub(crate) fn scroll_by(&mut self, delta: f32) -> Task<Message> {
         self.viewer.last_scroll_offset = self.viewer.scroll_offset;
         self.viewer.scroll_offset =
@@ -106,6 +134,7 @@ impl PDFolioApp {
         ])
     }
 
+    /// Advances or rewinds one page in page-scroll mode (`direction` ±1).
     pub(crate) fn scroll_page_mode_by(&mut self, direction: i16) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
@@ -123,11 +152,13 @@ impl PDFolioApp {
         ])
     }
 
+    /// Nudges horizontal scroll by `delta` pixels without scheduling a task.
     pub(crate) fn pan_horizontally_by(&mut self, delta: f32) {
         self.viewer.horizontal_offset =
             (self.viewer.horizontal_offset + delta).clamp(0.0, self.max_horizontal_offset());
     }
 
+    /// Switches scroll mode, re-applying dimension zoom and jumping to the current page.
     pub(crate) fn set_viewer_scroll_mode(&mut self, mode: ViewerScrollMode) -> Task<Message> {
         if self.viewer.viewer_scroll_mode == mode {
             return Task::none();
@@ -144,6 +175,7 @@ impl PDFolioApp {
         Task::batch([zoom_task, page_task])
     }
 
+    /// Switches spread pairing, re-applying dimension zoom and jumping to the current page.
     pub(crate) fn set_viewer_spread_mode(&mut self, mode: ViewerSpreadMode) -> Task<Message> {
         if self.viewer.viewer_spread_mode == mode {
             return Task::none();
@@ -157,6 +189,10 @@ impl PDFolioApp {
         Task::batch([zoom_task, page_task])
     }
 
+    /// Sets zoom page width, optionally anchoring the document under `cursor`.
+    ///
+    /// `Immediate` requests tiles now; `Debounced` schedules
+    /// [`Message::ZoomRenderSettled`] after a short idle so wheel zoom stays smooth.
     pub(crate) fn zoom_to_width(
         &mut self,
         width: u16,
@@ -213,6 +249,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Best tile for drawing `key`, including exact matches and zoom previews.
     pub(crate) fn rendered_page_for_draw(&self, key: TileKey) -> Option<&RenderedPageView> {
         selected_render_key(
             self.viewer.rendered_pages.keys(),
@@ -223,6 +260,7 @@ impl PDFolioApp {
         .and_then(|key| self.viewer.rendered_pages.get(&key))
     }
 
+    /// Closest non-exact tile for `key` used while the preferred width is pending.
     pub(crate) fn fallback_rendered_page_for_draw(
         &self,
         key: TileKey,
@@ -236,6 +274,7 @@ impl PDFolioApp {
         .and_then(|key| self.viewer.rendered_pages.get(&key))
     }
 
+    /// 0.0–1.0 fade-in progress for a newly arrived tile, if still animating.
     pub(crate) fn page_fade_progress(&self, key: TileKey) -> Option<f32> {
         let started = self.viewer.page_fade_started.get(&key)?;
         let elapsed = Instant::now().saturating_duration_since(*started);
@@ -245,6 +284,7 @@ impl PDFolioApp {
         )
     }
 
+    /// Whether every visible page already has a tile at the current render width.
     pub(crate) fn all_visible_pages_rendered_at_current_zoom(&self) -> bool {
         self.visible_page_range().all(|page| {
             self.viewer.rendered_pages.contains_key(&TileKey {
@@ -254,6 +294,7 @@ impl PDFolioApp {
         })
     }
 
+    /// Window title: document filename in viewer mode, otherwise `"PDF-Folio"`.
     pub(crate) fn title(&self) -> String {
         if matches!(self.mode, AppMode::Library | AppMode::LibrarySwitcher) {
             return String::from("PDF-Folio");

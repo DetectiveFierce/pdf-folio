@@ -1,4 +1,54 @@
-//! External KDL-backed style book.
+//! KDL-backed style book: load, merge, and resolve themes for the UI.
+//!
+//! [`StyleBook`] is the single entry point the shell holds at runtime
+//! (`Arc<StyleBook>`). It owns:
+//!
+//! - **Themes** — named palettes (`espresso`, `light`) compiled into
+//!   [`ThemeTokens`](crate::ThemeTokens).
+//! - **Layout** — window size, sidebar widths, card metrics, scroll increments
+//!   from `application.kdl` and component `layout { … }` blocks.
+//! - **Labels** — user-facing strings for menus and chrome that ship in KDL so
+//!   they can be adjusted without a code change.
+//! - **Style directories** — paths the UI watches for hot reload.
+//!
+//! # Loading
+//!
+//! | Constructor | Behavior |
+//! | --- | --- |
+//! | [`StyleBook::load`] | Bundled KDL + on-disk checkout styles + XDG user overrides |
+//! | [`StyleBook::bundled`] | Embedded sources only; panics if invalid |
+//! | [`StyleBook::from_sources`] | Explicit `(name, kdl)` list (tests / tooling) |
+//!
+//! User overrides live at `$XDG_CONFIG_HOME/pdf-folio/styles/**/*.kdl` (or
+//! `~/.config/pdf-folio/styles/`). Later sources overwrite earlier ones when
+//! the same theme/component/state is redefined.
+//!
+//! # Top-level KDL nodes
+//!
+//! Each style file may contain:
+//!
+//! - `theme "espresso" { color "background" "#…" … }`
+//! - `component "LibraryCard" { normal background=…; hovered …; layout width=… }`
+//! - `primitive "page_shadow_offset_x" 4` (or color primitives for find fill)
+//! - `layout { metric "window_width" 960; count "card_grid_columns" 2 }`
+//! - `labels { text "empty_library" "No documents yet" }`
+//!
+//! Component states: `normal`, `hovered`, `pressed`, `focused`, `disabled`,
+//! `selected`, `active`, `error`. Optional `theme="espresso"` on a state scopes
+//! that override to one palette.
+//!
+//! Color values accept `#RRGGBB`, `#RRGGBBAA`, `rgba(r,g,b,a)`, token refs
+//! (`$accent`), and blends (`mix($surface, $accent, 0.16)`).
+//!
+//! # Hot reload
+//!
+//! The shell reloads via [`StyleBook::load`] when the user triggers
+//! **View → Reload Styles**, the reload shortcut, or a filesystem notification
+//! on [`StyleBook::style_dirs`]. On parse failure the previous book stays
+//! active and the error is reported in the UI.
+//!
+//! Internal submodules: `parser` (color/value helpers) and `sources` (bundled
+//! file table, XDG paths, directory walk order).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -25,7 +75,10 @@ use sources::{
     bundled_style_sources, style_source_dirs, user_style_dir, user_style_files, BUNDLED_STYLE_FILES,
 };
 
-/// Parsed and validated style data.
+/// Parsed and validated style data ready for the UI appearance runtime.
+///
+/// Holds resolved theme palettes, layout metrics, chrome labels, and the list
+/// of directories the shell should watch for style file changes.
 #[derive(Debug, Clone)]
 pub struct StyleBook {
     themes: HashMap<String, ThemeTokens>,
@@ -35,7 +88,11 @@ pub struct StyleBook {
 }
 
 impl StyleBook {
-    /// Loads bundled styles plus any user overrides found in the XDG config directory.
+    /// Loads bundled styles, prefers on-disk checkout files when present, then
+    /// layers any user KDL under the XDG config `styles/` directory.
+    ///
+    /// Returns an error string describing the first parse/validation failure.
+    /// Callers that hot-reload should keep the previous book on error.
     pub fn load() -> Result<Arc<Self>, String> {
         let mut sources = bundled_style_sources()?;
         let user_style_dir = user_style_dir();
@@ -51,7 +108,9 @@ impl StyleBook {
         Self::from_sources(sources, style_source_dirs()).map(Arc::new)
     }
 
-    /// Loads only bundled styles.
+    /// Loads only the embedded `include_str!` sources (no disk / XDG).
+    ///
+    /// Panics if the compiled-in styles are invalid — they must always parse.
     pub fn bundled() -> Arc<Self> {
         Self::from_sources(
             BUNDLED_STYLE_FILES
@@ -64,7 +123,11 @@ impl StyleBook {
         .into()
     }
 
-    /// Builds a style book from named KDL sources.
+    /// Builds a style book from named KDL source strings.
+    ///
+    /// `sources` is an ordered list of `(display_name, kdl_text)`. Later entries
+    /// override earlier ones for the same theme, component, or layout key.
+    /// `style_dirs` is stored for hot-reload watchers and is not read here.
     pub fn from_sources(
         sources: Vec<(String, String)>,
         style_dirs: Vec<PathBuf>,
@@ -83,7 +146,10 @@ impl StyleBook {
         })
     }
 
-    /// Returns the tokens for a theme id, falling back to `espresso`.
+    /// Returns resolved tokens for a theme id (`"espresso"`, `"light"`, …).
+    ///
+    /// Falls back to the `espresso` palette, then to
+    /// [`fallback_dark_tokens`] if even that is missing.
     pub fn tokens(&self, theme: &str) -> ThemeTokens {
         self.themes
             .get(theme)
@@ -92,17 +158,20 @@ impl StyleBook {
             .unwrap_or_else(fallback_dark_tokens)
     }
 
-    /// Returns KDL-backed layout tokens for the application shell.
+    /// KDL-backed layout metrics (window size, sidebars, card grid, …).
     pub fn layout(&self) -> &AppLayoutTokens {
         &self.layout
     }
 
-    /// Returns KDL-backed label tokens for the application shell.
+    /// KDL-backed chrome labels (menus, selection toolbar, empty states).
     pub fn labels(&self) -> &AppLabelTokens {
         &self.labels
     }
 
-    /// Directories watched for style changes.
+    /// Directories the shell should watch for `.kdl` changes during hot reload.
+    ///
+    /// Typically the checkout `styles/` tree and the user XDG styles dir when
+    /// they exist on disk.
     pub fn style_dirs(&self) -> &[PathBuf] {
         &self.style_dirs
     }
@@ -1498,7 +1567,8 @@ fn set_layout_count(tokens: &mut AppLayoutTokens, token: &str, value: usize) -> 
     Ok(())
 }
 
-/// Built-in dark fallback used when style loading fails before app startup.
+/// Built-in dark (espresso-like) palette used before styles load or as a last
+/// resort when the style book cannot provide an `espresso` theme.
 pub fn fallback_dark_tokens() -> ThemeTokens {
     let mut tokens = ThemeTokens {
         background: Color::from_rgb8(26, 18, 8),
@@ -1520,7 +1590,8 @@ pub fn fallback_dark_tokens() -> ThemeTokens {
     tokens
 }
 
-/// Built-in light fallback used when style loading fails before app startup.
+/// Built-in light palette used before styles load or as a last resort when the
+/// style book cannot provide a `light` theme.
 pub fn fallback_light_tokens() -> ThemeTokens {
     let mut tokens = ThemeTokens {
         background: Color::from_rgb8(241, 239, 233),

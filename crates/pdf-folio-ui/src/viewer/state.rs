@@ -1,4 +1,23 @@
-//! Viewer state helper types.
+//! Viewer helper types and `PDFolioApp` methods for document open, find, and layout.
+//!
+//! Defines scroll/spread mode enums, rendered page wrappers, text selection and
+//! find-in-document state, plus a large `impl PDFolioApp` block that opens
+//! documents, manages text layers, computes page rectangles, and requests
+//! visible tiles. Navigation-focused methods live in [`super::navigation`];
+//! this module is the broader “viewer state machine” companion.
+//!
+//! # Key types
+//!
+//! - [`ViewerScrollMode`] / [`ViewerSpreadMode`] — paging arrangement.
+//! - [`RenderedPageView`] — iced image handle for a raster tile.
+//! - [`ViewerTextSelection`] / [`ViewerFindState`] — selection and search UI.
+//!
+//! # Related modules
+//!
+//! - [`super::document`] — field bag on `PDFolioApp::viewer`.
+//! - [`super::tasks`] — async open/render constructors.
+//! - [`super::update`] — message handlers that call these helpers.
+//! - [`super::layout`] — pure geometry used by page-rect builders.
 
 use iced::widget::image;
 use pdf_folio_core::{PageTextLayer, RenderedPage};
@@ -101,7 +120,7 @@ pub struct ViewerTextAnchor {
 }
 
 impl ViewerTextAnchor {
-    /// Creates a new character anchor.
+    /// Builds an anchor at zero-based `page` and `char_index`.
     pub fn new(page: u16, char_index: usize) -> Self {
         Self { page, char_index }
     }
@@ -450,10 +469,12 @@ use crate::viewer::layout::*;
 use crate::*;
 
 impl PDFolioApp {
+    /// Layout tokens from the loaded style book (toolbar heights, gutters, etc.).
     pub(crate) fn layout(&self) -> &crate::style::AppLayoutTokens {
         self.appearance.style_book.layout()
     }
 
+    /// Estimates canvas width from window width minus open viewer sidebar.
     pub(crate) fn estimated_viewer_viewport_width(&self) -> f32 {
         let sidebar_width = if self.viewer.toc_open {
             self.layout().viewer_sidebar_width
@@ -463,10 +484,12 @@ impl PDFolioApp {
         (self.viewer.viewport_width - sidebar_width).max(1.0)
     }
 
+    /// Estimates canvas height from window height minus toolbar.
     pub(crate) fn estimated_viewer_viewport_height(&self) -> f32 {
         (self.viewer.viewport_height - self.layout().toolbar_height).max(1.0)
     }
 
+    /// Recomputes zoom width when the active preset depends on viewport size.
     pub(crate) fn apply_active_dimension_zoom(&mut self) -> Task<Message> {
         let Some(preset) = self.viewer.active_zoom_preset else {
             return Task::none();
@@ -720,6 +743,10 @@ impl PDFolioApp {
         Self::with_initial_file_and_session(initial_file, None)
     }
 
+    /// Builds app state, optionally restoring a session and queuing a CLI file open.
+    ///
+    /// When signed in with an `initial_file`, switches to viewer mode and marks
+    /// a pending document open for the launch task chain.
     pub(crate) fn with_initial_file_and_session(
         initial_file: Option<PathBuf>,
         session: Option<AppSession>,
@@ -763,10 +790,16 @@ impl PDFolioApp {
     }
 
     #[cfg(test)]
+    /// Test helper: opens `doc` without an associated filesystem path.
     pub(crate) fn open_document(&mut self, doc: Arc<PdfDoc>) -> Task<Message> {
         self.open_document_with_path(doc, None)
     }
 
+    /// Installs `doc` as the open document, resets viewer runtime, and requests tiles.
+    ///
+    /// Switches to viewer mode, rebuilds aspect ratios and outline, clears text
+    /// layers/find/selection, applies automatic zoom, and returns tasks to
+    /// render the first pages plus any pending session restore.
     pub(crate) fn open_document_with_path(
         &mut self,
         doc: Arc<PdfDoc>,
@@ -818,6 +851,7 @@ impl PDFolioApp {
         ])
     }
 
+    /// Leaves viewer mode for the library, refreshing entries/folders/thumbnails.
     pub(crate) fn return_to_library(&mut self) -> Task<Message> {
         self.mode = AppMode::Library;
         self.viewer.document_error = None;
@@ -831,6 +865,7 @@ impl PDFolioApp {
         ])
     }
 
+    /// Returns to an already-open document without reloading it.
     pub(crate) fn return_to_viewer(&mut self) -> Task<Message> {
         if self.viewer.doc.is_none() {
             return Task::none();
@@ -841,6 +876,10 @@ impl PDFolioApp {
         self.request_visible_pages()
     }
 
+    /// Opens a library entry's PDF and restores its last reading page.
+    ///
+    /// Sets `current_entry_id` for progress tracking, then batches open setup,
+    /// session restore, tile requests, and scroll sync.
     pub(crate) fn open_library_document(
         &mut self,
         entry_id: EntryId,
@@ -878,6 +917,10 @@ impl PDFolioApp {
         ])
     }
 
+    /// Schedules renders (or cache hits) for prefetched visible pages at current zoom.
+    ///
+    /// Emits [`Message::PageRendered`] per new tile and also requests text layers
+    /// for selection/find.
     pub(crate) fn request_visible_pages(&mut self) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
@@ -940,6 +983,7 @@ impl PDFolioApp {
         Task::batch([Task::batch(tasks), self.request_visible_text_layers()])
     }
 
+    /// Renders sidebar thumbnail-width tiles when the thumbnails tab is active.
     pub(crate) fn request_viewer_thumbnail_pages(&mut self) -> Task<Message> {
         if self.viewer.viewer_sidebar_tab != ViewerSidebarTab::Thumbnails {
             return Task::none();
@@ -1007,6 +1051,7 @@ impl PDFolioApp {
         Task::batch(tasks)
     }
 
+    /// Extracts text layers for pages currently in the viewport.
     pub(crate) fn request_visible_text_layers(&mut self) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
@@ -1017,6 +1062,7 @@ impl PDFolioApp {
         self.request_text_layers(pages, doc)
     }
 
+    /// Extracts text layers for every page (used when find-in-document opens).
     pub(crate) fn request_all_text_layers(&mut self) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
@@ -1027,6 +1073,10 @@ impl PDFolioApp {
         self.request_text_layers(0..page_count, doc)
     }
 
+    /// Spawns text-layer extraction tasks for pages not already loaded or pending.
+    ///
+    /// Completions become [`Message::ViewerTextLayerLoaded`] or
+    /// [`Message::ViewerTextLayerError`].
     pub(crate) fn request_text_layers(
         &mut self,
         pages: std::ops::Range<u16>,
@@ -1064,6 +1114,7 @@ impl PDFolioApp {
         Task::batch(tasks)
     }
 
+    /// Recomputes find matches from currently loaded text layers and the query.
     pub(crate) fn refresh_viewer_find_matches(&mut self) {
         self.viewer.viewer_find.refresh_matches(
             self.viewer
@@ -1073,6 +1124,7 @@ impl PDFolioApp {
         );
     }
 
+    /// Shows the find bar, loads all text layers, and focuses the query field.
     pub(crate) fn open_viewer_find(&mut self) -> Task<Message> {
         if self.mode != AppMode::Viewer || self.viewer.doc.is_none() {
             return Task::none();
@@ -1088,6 +1140,7 @@ impl PDFolioApp {
         ])
     }
 
+    /// Sets viewer find query.
     pub(crate) fn set_viewer_find_query(&mut self, query: String) -> Task<Message> {
         self.viewer.viewer_find.query = query;
         self.refresh_viewer_find_matches();
@@ -1097,6 +1150,7 @@ impl PDFolioApp {
         ])
     }
 
+    /// Scrolls to the currently selected find match, if any.
     pub(crate) fn scroll_to_selected_viewer_find_match(&mut self) -> Task<Message> {
         let Some(selected) = self.viewer.viewer_find.selected_match() else {
             return Task::none();
@@ -1105,6 +1159,7 @@ impl PDFolioApp {
         self.scroll_to_viewer_find_match(selected)
     }
 
+    /// Scrolls so `selected` is visible and refreshes tiles at the new offset.
     pub(crate) fn scroll_to_viewer_find_match(
         &mut self,
         selected: ViewerFindMatch,
@@ -1125,6 +1180,7 @@ impl PDFolioApp {
         ])
     }
 
+    /// Begins a drag text selection at the given character anchor.
     pub(crate) fn start_viewer_text_selection(&mut self, page: u16, char_index: usize) {
         self.viewer.viewer_text_selection = Some(ViewerTextSelection::new(ViewerTextAnchor::new(
             page, char_index,
@@ -1132,6 +1188,7 @@ impl PDFolioApp {
         self.viewer.viewer_copy_pending = false;
     }
 
+    /// Extends the active selection focus to another character while dragging.
     pub(crate) fn update_viewer_text_selection(&mut self, page: u16, char_index: usize) {
         let Some(selection) = &mut self.viewer.viewer_text_selection else {
             return;
@@ -1141,17 +1198,20 @@ impl PDFolioApp {
         self.viewer.viewer_copy_pending = false;
     }
 
+    /// Ends the pointer drag without clearing the selection range.
     pub(crate) fn finish_viewer_text_selection(&mut self) {
         if let Some(selection) = &mut self.viewer.viewer_text_selection {
             selection.dragging = false;
         }
     }
 
+    /// Clears selection state and any pending copy wait.
     pub(crate) fn clear_viewer_text_selection(&mut self) {
         self.viewer.viewer_text_selection = None;
         self.viewer.viewer_copy_pending = false;
     }
 
+    /// Whether every page spanned by the selection has a loaded text layer.
     pub(crate) fn selected_text_layers_ready(&self) -> bool {
         let Some(selection) = self.viewer.viewer_text_selection else {
             return false;
@@ -1161,6 +1221,7 @@ impl PDFolioApp {
         (start.page..=end.page).all(|page| self.viewer.viewer_text_layers.contains_key(&page))
     }
 
+    /// Concatenates selected characters across pages, or `None` if empty/unavailable.
     pub(crate) fn selected_viewer_text(&self) -> Option<String> {
         let selection = self.viewer.viewer_text_selection?;
         let (start, end) = selection.ordered();
@@ -1185,6 +1246,7 @@ impl PDFolioApp {
         (!text.is_empty()).then_some(text)
     }
 
+    /// Copies selected PDF text to the OS clipboard, waiting for layers if needed.
     pub(crate) fn copy_selected_viewer_text(&mut self) -> Task<Message> {
         if self.viewer.viewer_text_selection.is_none() {
             return Task::none();
@@ -1200,6 +1262,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Zero-based half-open range of pages intersecting the current viewport.
     pub(crate) fn visible_page_range(&self) -> std::ops::Range<u16> {
         let Some(doc) = &self.viewer.doc else {
             return 0..0;
@@ -1233,6 +1296,7 @@ impl PDFolioApp {
         first.unwrap_or(0)..end.max(first.unwrap_or(0).saturating_add(1).min(page_count))
     }
 
+    /// Priority-ordered pages to render (visible first, then scroll-direction neighbors).
     pub(crate) fn prefetch_page_order(&self) -> Vec<u16> {
         let Some(doc) = &self.viewer.doc else {
             return Vec::new();
@@ -1249,6 +1313,7 @@ impl PDFolioApp {
         )
     }
 
+    /// Layout height of `page` at the current zoom width and aspect ratio.
     pub(crate) fn page_height(&self, page: u16) -> f32 {
         let ratio = self
             .viewer
@@ -1260,28 +1325,33 @@ impl PDFolioApp {
         f32::from(self.viewer.zoom_width) / ratio
     }
 
+    /// Device-pixel render width for tiles at the current zoom and scale factor.
     pub(crate) fn render_width_px(&self) -> u16 {
         (f32::from(self.viewer.zoom_width) * self.viewer.scale_factor.max(1.0))
             .round()
             .clamp(1.0, f32::from(u16::MAX)) as u16
     }
 
+    /// Device-pixel render height for `page` at the current zoom and scale factor.
     pub(crate) fn render_height_px(&self, page: u16) -> u16 {
         (self.page_height(page) * self.viewer.scale_factor.max(1.0))
             .round()
             .clamp(1.0, f32::from(u16::MAX)) as u16
     }
 
+    /// Full document content height in logical pixels (scroll extent).
     pub(crate) fn content_height(&self) -> f32 {
         self.viewer_content_size(self.viewer.viewer_viewport_width)
             .height
     }
 
+    /// Full document content width in logical pixels (scroll extent).
     pub(crate) fn content_width(&self) -> f32 {
         self.viewer_content_size(self.viewer.viewer_viewport_width)
             .width
     }
 
+    /// Page rectangles that currently intersect the viewport.
     pub(crate) fn viewer_page_rects_visible_content(&self) -> Vec<(u16, Rectangle)> {
         let viewport = Rectangle {
             x: self.viewer.horizontal_offset.max(0.0),
@@ -1296,12 +1366,14 @@ impl PDFolioApp {
             .collect()
     }
 
+    /// Content-space rectangle for a single page, if present in the layout.
     pub(crate) fn viewer_page_rect_for_page(&self, target_page: u16) -> Option<Rectangle> {
         self.viewer_page_rects_content(self.viewer.viewer_viewport_width)
             .into_iter()
             .find_map(|(page, rect)| (page == target_page).then_some(rect))
     }
 
+    /// All page rectangles in document content coordinates for the scroll mode.
     pub(crate) fn viewer_page_rects_content(&self, viewport_width: f32) -> Vec<(u16, Rectangle)> {
         let Some(doc) = &self.viewer.doc else {
             return Vec::new();
@@ -1324,6 +1396,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Single-page layout: only the current page-scroll page is positioned.
     pub(crate) fn page_mode_rects(&self, page_count: u16) -> Vec<(u16, Rectangle)> {
         if page_count == 0 {
             return Vec::new();
@@ -1349,6 +1422,7 @@ impl PDFolioApp {
         )]
     }
 
+    /// Stacks spread groups top-to-bottom for vertical continuous scrolling.
     pub(crate) fn vertical_page_rects(&self, groups: &[Vec<u16>]) -> Vec<(u16, Rectangle)> {
         let content_width = viewer_groups_max_width(self, groups)
             .max(self.viewer.viewer_viewport_width)
@@ -1379,6 +1453,7 @@ impl PDFolioApp {
         rects
     }
 
+    /// Places spread groups left-to-right for horizontal continuous scrolling.
     pub(crate) fn horizontal_page_rects(&self, groups: &[Vec<u16>]) -> Vec<(u16, Rectangle)> {
         let content_size =
             self.viewer_content_size_for_groups(groups, self.viewer.viewer_viewport_width);
@@ -1406,6 +1481,7 @@ impl PDFolioApp {
         rects
     }
 
+    /// Wraps spread groups into rows that fit `viewport_width`.
     pub(crate) fn wrapped_page_rects(
         &self,
         groups: &[Vec<u16>],
@@ -1463,6 +1539,7 @@ impl PDFolioApp {
         rects
     }
 
+    /// Total scrollable content size for the open document at `viewport_width`.
     pub(crate) fn viewer_content_size(&self, viewport_width: f32) -> Size {
         let Some(doc) = &self.viewer.doc else {
             return Size::new(
@@ -1489,6 +1566,7 @@ impl PDFolioApp {
         self.viewer_content_size_for_groups(&groups, viewport_width)
     }
 
+    /// Content size for precomputed spread `groups` under the active scroll mode.
     pub(crate) fn viewer_content_size_for_groups(
         &self,
         groups: &[Vec<u16>],
@@ -1534,6 +1612,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Best-effort current page index for toolbar display and progress writes.
     pub(crate) fn current_page(&self) -> u16 {
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
             return self.viewer.doc.as_ref().map_or(0, |doc| {

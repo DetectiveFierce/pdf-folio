@@ -1,0 +1,225 @@
+{
+  "_comment": "Curated cross-links for the docs site. Keys are content/ paths. Values are lists of related content/ paths (same section or cross-section). Nav siblings are also injected automatically at build time.",
+  "index.md": [
+    "architecture/overview.md",
+    "architecture/workspace.md",
+    "crates/ui.md",
+    "subsystems/database.md",
+    "operations/development.md",
+    "reference/glossary.md",
+    "api/index.md"
+  ],
+  "architecture/overview.md": [
+    "architecture/workspace.md",
+    "architecture/shell.md",
+    "architecture/messages.md",
+    "architecture/state.md",
+    "crates/ui.md",
+    "reference/glossary.md",
+    "operations/development.md"
+  ],
+  "architecture/workspace.md": [
+    "architecture/overview.md",
+    "crates/main.md",
+    "crates/core.md",
+    "crates/ui.md",
+    "crates/style.md",
+    "crates/cloud.md",
+    "crates/iced-patch.md",
+    "operations/development.md",
+    "api/index.md"
+  ],
+  "architecture/shell.md": [
+    "architecture/overview.md",
+    "architecture/messages.md",
+    "architecture/state.md",
+    "crates/ui.md",
+    "subsystems/sync.md",
+    "operations/data-dirs.md",
+    "api/pdf-folio-ui/shell.md"
+  ],
+  "architecture/messages.md": [
+    "architecture/overview.md",
+    "architecture/shell.md",
+    "architecture/state.md",
+    "subsystems/bulk-action.md",
+    "crates/ui.md",
+    "api/pdf-folio-ui/shell/messages.md"
+  ],
+  "architecture/state.md": [
+    "architecture/shell.md",
+    "architecture/messages.md",
+    "architecture/overview.md",
+    "subsystems/rendering.md",
+    "subsystems/database.md",
+    "subsystems/multi-library.md",
+    "operations/data-dirs.md",
+    "api/pdf-folio-ui/shell/app.md"
+  ],
+  "crates/main.md": [
+    "architecture/workspace.md",
+    "operations/cli.md",
+    "crates/ui.md",
+    "crates/cloud.md",
+    "operations/development.md",
+    "api/pdf-folio-main/index.md"
+  ],
+  "crates/core.md": [
+    "architecture/workspace.md",
+    "subsystems/database.md",
+    "subsystems/rendering.md",
+    "subsystems/search.md",
+    "crates/ui.md",
+    "crates/cloud.md",
+    "operations/testing.md",
+    "api/pdf-folio-core/index.md"
+  ],
+  "crates/ui.md": [
+    "architecture/overview.md",
+    "architecture/shell.md",
+    "architecture/messages.md",
+    "architecture/state.md",
+    "subsystems/rendering.md",
+    "subsystems/bulk-action.md",
+    "subsystems/style-system.md",
+    "crates/core.md",
+    "crates/style.md",
+    "api/pdf-folio-ui/index.md"
+  ],
+  "crates/style.md": [
+    "subsystems/style-system.md",
+    "architecture/workspace.md",
+    "crates/ui.md",
+    "operations/development.md",
+    "operations/data-dirs.md",
+    "api/pdf-folio-style/index.md"
+  ],
+  "crates/cloud.md": [
+    "subsystems/sync.md",
+    "subsystems/raindrop.md",
+    "subsystems/multi-library.md",
+    "operations/cli.md",
+    "operations/packaging.md",
+    "crates/core.md",
+    "api/pdf-folio-cloud/index.md"
+  ],
+  "crates/iced-patch.md": [
+    "architecture/workspace.md",
+    "crates/ui.md",
+    "operations/development.md",
+    "api/iced-widget-patch/index.md"
+  ],
+  "subsystems/rendering.md": [
+    "crates/core.md",
+    "crates/ui.md",
+    "architecture/state.md",
+    "subsystems/search.md",
+    "api/pdf-folio-core/pdf.md",
+    "api/pdf-folio-ui/viewer.md"
+  ],
+  "subsystems/database.md": [
+    "crates/core.md",
+    "subsystems/search.md",
+    "subsystems/sync.md",
+    "subsystems/raindrop.md",
+    "subsystems/bulk-action.md",
+    "subsystems/multi-library.md",
+    "operations/data-dirs.md",
+    "api/pdf-folio-core/db.md"
+  ],
+  "subsystems/search.md": [
+    "subsystems/database.md",
+    "subsystems/rendering.md",
+    "crates/core.md",
+    "operations/data-dirs.md",
+    "operations/testing.md",
+    "api/pdf-folio-core/db/search.md"
+  ],
+  "subsystems/style-system.md": [
+    "crates/style.md",
+    "architecture/state.md",
+    "crates/ui.md",
+    "operations/development.md",
+    "operations/data-dirs.md",
+    "api/pdf-folio-style/index.md"
+  ],
+  "subsystems/sync.md": [
+    "crates/cloud.md",
+    "subsystems/database.md",
+    "subsystems/multi-library.md",
+    "operations/cli.md",
+    "operations/packaging.md",
+    "operations/data-dirs.md",
+    "architecture/shell.md",
+    "api/pdf-folio-cloud/sync.md"
+  ],
+  "subsystems/raindrop.md": [
+    "crates/cloud.md",
+    "subsystems/database.md",
+    "subsystems/bulk-action.md",
+    "operations/data-dirs.md",
+    "api/pdf-folio-cloud/raindrop.md"
+  ],
+  "subsystems/multi-library.md": [
+    "subsystems/sync.md",
+    "subsystems/database.md",
+    "architecture/state.md",
+    "operations/data-dirs.md",
+    "crates/ui.md",
+    "api/pdf-folio-ui/library/registry.md"
+  ],
+  "subsystems/bulk-action.md": [
+    "architecture/messages.md",
+    "architecture/state.md",
+    "subsystems/database.md",
+    "crates/ui.md",
+    "subsystems/search.md",
+    "api/pdf-folio-ui/library/tasks.md"
+  ],
+  "operations/development.md": [
+    "operations/testing.md",
+    "operations/cli.md",
+    "architecture/workspace.md",
+    "operations/data-dirs.md",
+    "reference/glossary.md",
+    "api/index.md"
+  ],
+  "operations/cli.md": [
+    "crates/main.md",
+    "crates/cloud.md",
+    "subsystems/sync.md",
+    "operations/packaging.md",
+    "operations/data-dirs.md",
+    "api/pdf-folio-cloud/sync/cli.md"
+  ],
+  "operations/data-dirs.md": [
+    "subsystems/multi-library.md",
+    "subsystems/style-system.md",
+    "subsystems/sync.md",
+    "architecture/state.md",
+    "operations/development.md",
+    "reference/glossary.md"
+  ],
+  "operations/packaging.md": [
+    "subsystems/sync.md",
+    "crates/cloud.md",
+    "operations/cli.md",
+    "operations/data-dirs.md",
+    "api/pdf-folio-cloud/server.md"
+  ],
+  "operations/testing.md": [
+    "operations/development.md",
+    "crates/core.md",
+    "crates/ui.md",
+    "subsystems/search.md",
+    "architecture/workspace.md"
+  ],
+  "reference/glossary.md": [
+    "architecture/overview.md",
+    "architecture/state.md",
+    "subsystems/database.md",
+    "subsystems/sync.md",
+    "operations/development.md",
+    "index.md"
+  ]
+}

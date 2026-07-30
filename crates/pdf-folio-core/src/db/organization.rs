@@ -1,4 +1,19 @@
 //! Folder tree, manual ordering, and library organization snapshots.
+//!
+//! Extends [`super::Db`] with user-facing library organization: nested folders,
+//! entry↔folder memberships, gap-spaced manual order values, trash of whole
+//! subtrees, and reversible [`crate::LibraryOrganizationSnapshot`]
+//! capture/restore for bulk undo in the UI.
+//!
+//! Manual order values are spaced by a fixed gap so inserts between siblings
+//! do not require renumbering every row. Snapshots intentionally leave PDF
+//! files on disk alone — only SQLite organization state is restored.
+//!
+//! # See also
+//!
+//! - [`super::library`] for entry lifecycle independent of folders.
+//! - [`crate::Folder`], [`crate::EntryFolderMembership`] for row shapes.
+//! - [`super::raindrop`] for folders created from remote collections.
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -825,6 +840,7 @@ impl Db {
         })
     }
 
+    /// Next sibling-folder manual order under `parent_id` (max + naming gap constant).
     pub(super) fn next_folder_manual_order_with_connection(
         &self,
         connection: &Connection,
@@ -838,6 +854,7 @@ impl Db {
         Ok(max_order.unwrap_or(0) + MANUAL_ORDER_GAP)
     }
 
+    /// Next entry manual order inside `folder_id` (max membership order + gap).
     pub(super) fn next_folder_entry_manual_order_with_connection(
         &self,
         connection: &Connection,
@@ -852,6 +869,7 @@ impl Db {
     }
 }
 
+/// Maps a folders-table SELECT row into a [`crate::Folder`] (no trash timestamp field).
 pub(super) fn row_to_folder(row: &rusqlite::Row<'_>) -> rusqlite::Result<Folder> {
     let created_at: i64 = row.get(4)?;
     let updated_at: i64 = row.get(5)?;

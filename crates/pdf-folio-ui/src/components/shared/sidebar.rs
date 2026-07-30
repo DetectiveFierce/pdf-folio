@@ -1,8 +1,12 @@
-//! Shared sidebar controls and styling helpers.
+//! # Shared sidebar chrome
+//!
+//! Colors, scroll direction, chevrons, and action buttons reused by library
+//! and viewer sidebars.
 
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 
+/// Vertical scrollable direction style for sidebar panes.
 pub(crate) fn sidebar_scroll_direction(tokens: ThemeTokens) -> Direction {
     Direction::Vertical(
         Scrollbar::new()
@@ -12,6 +16,7 @@ pub(crate) fn sidebar_scroll_direction(tokens: ThemeTokens) -> Direction {
     )
 }
 
+/// Primary text color for sidebar detail rows.
 pub(crate) fn sidebar_detail_primary_color(tokens: ThemeTokens) -> Color {
     tokens.class_styles[Class::SidebarDetailRow.index()]
         .resolve(ComponentState::Normal)
@@ -19,6 +24,7 @@ pub(crate) fn sidebar_detail_primary_color(tokens: ThemeTokens) -> Color {
         .unwrap_or(tokens.text_primary)
 }
 
+/// Secondary/muted text color for sidebar detail rows.
 pub(crate) fn sidebar_detail_secondary_color(tokens: ThemeTokens) -> Color {
     tokens.class_styles[Class::SidebarSection.index()]
         .resolve(ComponentState::Normal)
@@ -26,6 +32,7 @@ pub(crate) fn sidebar_detail_secondary_color(tokens: ThemeTokens) -> Color {
         .unwrap_or(tokens.text_secondary)
 }
 
+/// Title color for folder cards shown in sidebars.
 pub(crate) fn sidebar_folder_card_title_color(tokens: ThemeTokens) -> Color {
     tokens.class_styles[Class::SidebarFolderCardTitle.index()]
         .resolve(ComponentState::Normal)
@@ -33,6 +40,7 @@ pub(crate) fn sidebar_folder_card_title_color(tokens: ThemeTokens) -> Color {
         .unwrap_or_else(|| sidebar_detail_secondary_color(tokens))
 }
 
+/// Text input style for inline folder rename fields.
 pub(crate) fn folder_sidebar_text_input_style(
     tokens: ThemeTokens,
     status: iced::widget::text_input::Status,
@@ -40,6 +48,7 @@ pub(crate) fn folder_sidebar_text_input_style(
     text_input_style(tokens, Class::SidebarFolderTextInput, status)
 }
 
+/// Icon button used to expand/collapse sidebar sections.
 pub(crate) fn sidebar_chevron_button<'a>(
     icon: &'static [u8],
     tooltip_label: &'a str,
@@ -49,6 +58,7 @@ pub(crate) fn sidebar_chevron_button<'a>(
     chevron_button(icon, tooltip_label, message, tokens, false)
 }
 
+/// Generic chevron icon button with tooltip and press message.
 pub(crate) fn chevron_button<'a>(
     icon: &'static [u8],
     tooltip_label: &'a str,
@@ -91,6 +101,7 @@ pub(crate) fn chevron_button<'a>(
     .into()
 }
 
+/// Compact text action button for sidebar toolbars.
 pub(crate) fn sidebar_action_button<'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
@@ -105,6 +116,7 @@ pub(crate) fn sidebar_action_button<'a>(
     .style(move |_, status| crate::style::button_style(tokens, Class::SidebarActionButton, status))
 }
 
+/// Folder-specific action button with enabled styling.
 pub(crate) fn sidebar_folder_action_button<'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
@@ -121,6 +133,7 @@ pub(crate) fn sidebar_folder_action_button<'a>(
     })
 }
 
+/// Folder action button that may be omitted or disabled based on flags.
 pub(crate) fn maybe_sidebar_folder_action_button<'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
@@ -145,6 +158,7 @@ pub(crate) fn maybe_sidebar_folder_action_button<'a>(
     }
 }
 
+/// Text color for folder actions reflecting enabled/disabled state.
 pub(crate) fn sidebar_folder_action_text_color(tokens: ThemeTokens, enabled: bool) -> Color {
     if enabled {
         tokens.class_styles[Class::SidebarFolderActionButton.index()]

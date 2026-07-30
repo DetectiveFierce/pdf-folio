@@ -1,5 +1,17 @@
+//! Viewer page geometry: ranges, offsets, spread layout helpers.
+//!
+//! Pure functions used by navigation, canvas drawing, and prefetch. Spread
+//! grouping pairs pages for odd/even two-page modes; prefetch order expands a
+//! visible page range into a priority list for tile renders; group width/height
+//! helpers feed content-size and scroll clamping.
+//!
+//! Related: [`super::navigation`] consumes rects and offsets,
+//! [`super::rendering`] supplies zoom widths,
+//! [`super::state`] hosts the higher-level page-rect builders on `PDFolioApp`.
+
 use crate::*;
 
+/// Groups page indices into single-page or two-page spreads for `spread_mode`.
 pub(crate) fn viewer_spread_groups(
     page_count: u16,
     spread_mode: ViewerSpreadMode,
@@ -38,6 +50,7 @@ pub(crate) fn viewer_spread_groups(
     }
 }
 
+/// Ordered page indices to render: visible range first, then neighbors ahead/behind.
 pub(crate) fn prefetch_page_order_for_range(
     visible: std::ops::Range<u16>,
     page_count: u16,
@@ -78,12 +91,18 @@ pub(crate) fn prefetch_page_order_for_range(
     pages
 }
 
+/// Appends `page` to `pages` if in range and not already present.
 pub(crate) fn push_unique_page(pages: &mut Vec<u16>, page: u16, page_count: u16) {
     if page < page_count && !pages.contains(&page) {
         pages.push(page);
     }
 }
 
+/// Picks the best available tile key for `target` page, preferring exact width.
+///
+/// During debounced zoom, `preview_width_px` keeps showing the previous
+/// resolution until the new render arrives. When no exact match exists,
+/// returns the closest width for that page.
 pub(crate) fn selected_render_key<'a>(
     keys: impl Iterator<Item = &'a TileKey>,
     target: TileKey,
@@ -111,6 +130,7 @@ pub(crate) fn selected_render_key<'a>(
         .min_by_key(|candidate| candidate.width_px.abs_diff(target.width_px))
 }
 
+/// Layout width of one spread group at the current zoom width.
 pub(crate) fn viewer_group_width(app: &PDFolioApp, group: &[u16]) -> f32 {
     if group.is_empty() {
         return 0.0;
@@ -120,6 +140,7 @@ pub(crate) fn viewer_group_width(app: &PDFolioApp, group: &[u16]) -> f32 {
         + Spacing::PAGE_GAP * group.len().saturating_sub(1) as f32
 }
 
+/// Layout height of one spread group (tallest page in the group).
 pub(crate) fn viewer_group_height(app: &PDFolioApp, group: &[u16]) -> f32 {
     group
         .iter()
@@ -127,6 +148,7 @@ pub(crate) fn viewer_group_height(app: &PDFolioApp, group: &[u16]) -> f32 {
         .fold(0.0, f32::max)
 }
 
+/// Max group width plus horizontal gutters (content width for vertical layout).
 pub(crate) fn viewer_groups_max_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
     groups
         .iter()
@@ -135,6 +157,7 @@ pub(crate) fn viewer_groups_max_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> 
         + Spacing::PAGE_GUTTER * 2.0
 }
 
+/// Max group height across spreads (content height for horizontal layout).
 pub(crate) fn viewer_groups_max_height(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
     groups
         .iter()
@@ -142,6 +165,7 @@ pub(crate) fn viewer_groups_max_height(app: &PDFolioApp, groups: &[Vec<u16>]) ->
         .fold(0.0, f32::max)
 }
 
+/// Total inline width of all groups laid out left-to-right with gaps.
 pub(crate) fn viewer_groups_inline_width(app: &PDFolioApp, groups: &[Vec<u16>]) -> f32 {
     if groups.is_empty() {
         return app.viewer.viewer_viewport_width.max(1.0);
@@ -156,6 +180,7 @@ pub(crate) fn viewer_groups_inline_width(app: &PDFolioApp, groups: &[Vec<u16>]) 
         + Spacing::PAGE_GUTTER * 2.0
 }
 
+/// Axis-aligned rectangle intersection test for visibility culling.
 pub(crate) fn rects_intersect(a: Rectangle, b: Rectangle) -> bool {
     a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y
 }

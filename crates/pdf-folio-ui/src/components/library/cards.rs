@@ -1,4 +1,7 @@
-//! Reusable library card and row preview components.
+//! # Reusable library card chrome
+//!
+//! Generic (message-parameterized) widgets for document previews, drop zones,
+//! and tag rows. Domain entry cards wrap these with app-specific messages.
 
 use iced::widget::{column, container, row, text};
 use iced::{Element, Length};
@@ -9,6 +12,7 @@ use pdf_folio_style::{
 
 use crate::components::library::view::with_alpha;
 
+/// Placeholder “document page” lines used when a cover thumbnail is unavailable.
 pub fn document_preview_lines<'a, Message: 'a>(
     width: f32,
     height: f32,
@@ -50,6 +54,7 @@ pub fn document_preview_lines<'a, Message: 'a>(
         .into()
 }
 
+/// Container style for edge-to-edge thumbnail media with optional alpha.
 pub fn flush_media_style(tokens: ThemeTokens, alpha: f32) -> iced::widget::container::Style {
     let mut style = container_style(tokens, Class::PagePlaceholder);
     let mut background = style
@@ -76,6 +81,7 @@ pub fn flush_media_style(tokens: ThemeTokens, alpha: f32) -> iced::widget::conta
     style
 }
 
+/// Empty card-sized insertion marker shown during drag reorder.
 pub fn library_drop_zone_card<'a, Message: 'a>(
     card_width: f32,
     estimated_height: f32,
@@ -89,6 +95,7 @@ pub fn library_drop_zone_card<'a, Message: 'a>(
         .into()
 }
 
+/// Empty list-row insertion marker shown during drag reorder.
 pub fn library_drop_zone_row<'a, Message: 'a>(
     row_height: f32,
     tokens: ThemeTokens,
@@ -110,6 +117,7 @@ fn translucent_drop_zone_style(tokens: ThemeTokens) -> iced::widget::container::
     style
 }
 
+/// Horizontal row of interactive tag pills.
 pub fn tags_row<'a, Message, OnTag>(
     tags: Vec<String>,
     tokens: ThemeTokens,
@@ -128,6 +136,7 @@ where
         .into()
 }
 
+/// Non-interactive tag pills for previews and dialogs.
 pub fn ghost_tags_row<'a, Message: 'a>(
     tags: Vec<String>,
     tokens: ThemeTokens,

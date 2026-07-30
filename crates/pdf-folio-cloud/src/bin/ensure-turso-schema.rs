@@ -1,3 +1,20 @@
+//! Maintenance binary that applies the remote Turso sync schema.
+//!
+//! Reads Turso credentials from the environment (not via the control plane) and
+//! executes `turso_schema.sql` over SQL-over-HTTP. Use this for first-time
+//! remote setup or when schema drifts from the client’s embedded copy.
+//!
+//! # Required environment
+//!
+//! - `PDF_FOLIO_TURSO_DATABASE_URL`
+//! - `PDF_FOLIO_TURSO_AUTH_TOKEN`
+//!
+//! # Related
+//!
+//! - Schema source: `crates/pdf-folio-cloud/turso_schema.sql`
+//! - Runtime path for authenticated clients: `SyncClient::ensure_remote_schema`
+//! - Control plane does not apply schema; it only hands out credentials
+
 use anyhow::{Context, Result};
 use pdf_folio_cloud::sync::remote::{TursoRemote, TursoToken};
 

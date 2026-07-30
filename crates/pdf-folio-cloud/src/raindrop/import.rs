@@ -1,4 +1,33 @@
 //! Raindrop import orchestration and local PDF metadata import.
+//!
+//! Public entry points used by the UI and CLI to preview and import PDFs from a
+//! Raindrop.io account into a [`pdf_folio_core::Db`]. This module sequences
+//! auth → REST listing → optional collection mirroring → download (individual
+//! or ZIP) → local import + provenance mapping.
+//!
+//! # Public API surface
+//!
+//! - [`import_preview`] / [`import_preview_with_auth`] — list remote PDFs only
+//! - [`import_all_pdfs`] / [`import_all_pdfs_with_auth`] — import every PDF
+//! - [`import_selected_pdfs`] (+ `_with_progress` / `_with_auth`) — subset by id
+//! - [`import_preview_pdfs_with_progress`] — import already-fetched candidates
+//!
+//! Destination folders are controlled by [`RaindropImportDestination`]: preserve
+//! Raindrop structure (optionally under a local root), library root, or one folder.
+//!
+//! # Progress model
+//!
+//! Callbacks receive [`RaindropImportProgress`] with optional
+//! `progress_basis_points` (0–[`PROGRESS_BASIS_POINTS_MAX`]) so ZIP download,
+//! extract, and per-PDF import can share one non-linear progress bar.
+//!
+//! # Related
+//!
+//! - Auth: [`super::auth`]
+//! - HTTP/download: [`super::client`]
+//! - ZIP strategy: [`super::matching`]
+//! - DTOs: [`super::types`]
+//! - Provenance tables: `pdf-folio-core` raindrop mapping APIs
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -22,16 +51,14 @@ use super::matching::{
 use super::*;
 
 const ZIP_IMPORTING_PROGRESS_BASIS_POINTS: u16 = 5_000;
+/// Full progress scale (100.00%) expressed in basis points (1/100 of a percent).
 pub(crate) const PROGRESS_BASIS_POINTS_MAX: u16 = 10_000;
 const IMPORT_PROGRESS_UNITS_PER_PDF: u32 = 1_000;
 
 /// Imports all PDFs from the authenticated Raindrop.io account.
 ///
-/// Authentication is resolved in this order:
-///
-/// 1. `PDF_FOLIO_RAINDROP_TOKEN` bearer token, useful with Raindrop test tokens.
-/// 2. OAuth browser sign-in using `PDF_FOLIO_RAINDROP_CLIENT_ID` and
-///    `PDF_FOLIO_RAINDROP_CLIENT_SECRET`.
+/// Authentication is resolved by [`super::auth::resolve_access_token`]:
+/// env token → cached OAuth token → browser OAuth (env/bundled app credentials).
 ///
 /// # Errors
 ///
@@ -406,6 +433,7 @@ fn destination_preserves_raindrop_folders(destination: &RaindropImportDestinatio
 }
 
 #[cfg(test)]
+/// Basis points for the post-extract import phase of a ZIP-backed import.
 pub(crate) fn zip_import_progress_basis_points(completed: usize, total: usize) -> u16 {
     if total == 0 {
         return PROGRESS_BASIS_POINTS_MAX;
@@ -428,6 +456,7 @@ fn zip_import_progress_basis_points_for_units(completed_units: u32, total_units:
         .min(u32::from(PROGRESS_BASIS_POINTS_MAX)) as u16
 }
 
+/// Basis points while walking ZIP members during extract.
 pub(crate) fn zip_extract_progress_basis_points(
     processed_entries: usize,
     total_entries: usize,
@@ -445,6 +474,7 @@ pub(crate) fn zip_extract_progress_basis_points(
         .min(u32::from(ZIP_EXTRACTED_PROGRESS_BASIS_POINTS)) as u16
 }
 
+/// Invokes an optional progress callback (no-op when `None`).
 pub(crate) fn report_raindrop_progress(
     progress: &mut Option<&mut (dyn FnMut(RaindropImportProgress) + Send)>,
     event: RaindropImportProgress,
@@ -772,6 +802,13 @@ fn account_label(user: &RaindropUser) -> String {
         .unwrap_or_else(|| format!("Raindrop user {}", user.id))
 }
 
+/// Creates local folders that mirror Raindrop collections and returns id maps.
+///
+/// Writes raindrop↔folder provenance via `pdf-folio-core` mapping tables.
+///
+/// # Errors
+///
+/// Returns an error when folder creation or mapping persistence fails.
 pub(crate) fn mirror_collections(
     db: &Db,
     source_id: &str,
@@ -1035,6 +1072,7 @@ fn raindrop_storage_dir(source_id: &str) -> Result<PathBuf> {
         .join("files"))
 }
 
+/// Sanitizes a remote file name for local storage (path-safe, ends with `.pdf`).
 pub(crate) fn safe_pdf_file_name(name: &str) -> String {
     let mut name = safe_path_component(name);
     if !name.to_lowercase().ends_with(".pdf") {

@@ -1,4 +1,22 @@
-//! PDF document wrapper and render output types.
+//! PDF document wrapper, text/outline extraction, and render output types.
+//!
+//! [`PdfDoc`] is a lightweight handle: it stores only the on-disk path and
+//! page count. Each method that needs page data re-opens the file under the
+//! process-wide Pdfium lock, so documents are cheap to clone and safe to
+//! share across threads that serialize on that lock.
+//!
+//! # Key types
+//!
+//! - [`PdfDoc`] — open, inspect aspect ratio, render pages, extract text.
+//! - [`RenderedPage`] — RGBA8 bitmap plus pixel dimensions.
+//! - [`PageTextLayer`] / [`PageTextChar`] — per-character text with
+//!   normalized [`super::geometry::TextRect`] bounds for selection UI.
+//! - [`OutlineNode`] — hierarchical bookmark tree with optional page targets.
+//!
+//! # See also
+//!
+//! - [`super::renderer::TileCache`] for caching render output in the viewer.
+//! - [`crate::db::import`] for turning file paths into library entries.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -10,53 +28,64 @@ use pdfium_render::prelude::{
 
 use super::geometry::TextRect;
 
-/// A rendered PDF page in RGBA8 format.
+/// A rendered PDF page bitmap in tightly packed RGBA8 (4 bytes per pixel).
+///
+/// `rgba.len()` is expected to equal `width * height * 4`. Produced by
+/// [`PdfDoc::render_page`] and commonly stored in [`super::renderer::TileCache`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedPage {
     /// Rendered image width in pixels.
     pub width: u16,
-    /// Rendered image height in pixels.
+    /// Rendered image height in pixels (depends on page aspect ratio and width).
     pub height: u16,
-    /// Pixel data in RGBA8 order.
+    /// Pixel data in row-major RGBA8 order.
     pub rgba: Vec<u8>,
 }
 
-/// A single extracted text character and its page-relative bounds.
+/// A single extracted text character and its normalized page-relative bounds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PageTextChar {
-    /// Zero-based Pdfium character index.
+    /// Zero-based Pdfium character index within the page text run.
     pub index: usize,
-    /// Character text.
+    /// Unicode string for the character (may be empty for some control glyphs).
     pub text: String,
     /// Loose glyph bounds suitable for hit-testing and selection highlighting.
     pub bounds: TextRect,
 }
 
-/// Per-character text layer for one PDF page.
+/// Per-character text layer for one PDF page, used by text selection UI.
+///
+/// Character bounds are normalized to the unit square via [`TextRect`].
+/// Characters whose bounds Pdfium cannot resolve are omitted.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PageTextLayer {
     /// Zero-based page index.
     pub page: u16,
-    /// Page width in PDF points.
+    /// Page width in PDF points (minimum 1.0 after clamping).
     pub width_points: f32,
-    /// Page height in PDF points.
+    /// Page height in PDF points (minimum 1.0 after clamping).
     pub height_points: f32,
-    /// Characters in Pdfium text order.
+    /// Characters in Pdfium text order (not necessarily visual reading order).
     pub chars: Vec<PageTextChar>,
 }
 
-/// A node in a PDF outline tree.
+/// A node in a PDF outline (bookmark) tree.
+///
+/// `page` is `None` when the bookmark has no resolvable destination page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutlineNode {
     /// Display title for the outline entry.
     pub title: String,
     /// Target zero-based page index, if known.
     pub page: Option<u16>,
-    /// Child outline entries.
+    /// Nested child outline entries (may be empty).
     pub children: Vec<OutlineNode>,
 }
 
-/// A loaded PDF document.
+/// A loaded PDF document handle (path + page count; reopens file per operation).
+///
+/// Thread-safe to clone. Concurrent Pdfium calls are serialized by an internal
+/// process-wide mutex. Requires a system (or adjacent) Pdfium shared library.
 #[derive(Debug, Clone)]
 pub struct PdfDoc {
     path: PathBuf,
@@ -89,21 +118,22 @@ impl PdfDoc {
         })
     }
 
-    /// Returns the path used to open the document.
+    /// Filesystem path passed to [`PdfDoc::open`] (not canonicalized).
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Returns the number of pages in the document.
+    /// Page count captured at open time (not re-read on each call).
     pub fn page_count(&self) -> u16 {
         self.page_count
     }
 
-    /// Renders a page to RGBA8 at the requested pixel width.
+    /// Renders page `index` to RGBA8 scaled to `width_px` (height follows aspect ratio).
     ///
     /// # Errors
     ///
-    /// Returns an error when Pdfium cannot load the document or page, or when rendering fails.
+    /// Returns an error when `width_px` is zero, the page is out of range, Pdfium
+    /// cannot load the document, or rendering fails.
     pub fn render_page(&self, index: u16, width_px: u16) -> Result<RenderedPage> {
         if width_px == 0 {
             return Err(anyhow!(

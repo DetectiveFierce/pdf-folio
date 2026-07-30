@@ -1,4 +1,23 @@
-//! Raindrop.io HTTP client and remote response model.
+//! Raindrop.io HTTP client, remote response models, and SSRF-safe PDF downloads.
+//!
+//! [`RaindropClient`] is the private transport for list/user/collection calls
+//! and for downloading individual PDFs or the bulk ZIP export. Download paths
+//! enforce host validation, private/reserved IP blocking, redirect limits, size
+//! caps, and a PDF magic-byte check so import cannot be used as an open proxy
+//! into the local network.
+//!
+//! # Security notes (PDF download)
+//!
+//! - Only `http`/`https`; blocks localhost and private/link-local/reserved ranges
+//! - Manual redirect following with re-validation of each hop
+//! - Caps at 256 MiB and 120s timeout; requires `%PDF-` in the first 1 KiB
+//! - Raindrop-hosted cache URLs send the bearer token; third-party links do not
+//!
+//! # Related
+//!
+//! - Auth token: [`super::auth`]
+//! - Orchestration: [`super::import`]
+//! - ZIP matching: [`super::matching`]
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -19,6 +38,7 @@ const MAX_PDF_REDIRECTS: usize = 10;
 const PDF_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 impl RaindropPdfCandidate {
+    /// Rebuilds a private [`Raindrop`] view from a public candidate (for download helpers).
     pub(crate) fn to_raindrop(&self) -> Raindrop {
         Raindrop {
             id: self.id,
@@ -41,6 +61,7 @@ impl RaindropPdfCandidate {
     }
 }
 
+/// Maps ZIP byte progress into the download phase of the basis-point scale.
 pub(crate) fn zip_download_progress_basis_points(downloaded: u64, total: u64) -> u16 {
     if total == 0 {
         return ZIP_PREPARING_PROGRESS_BASIS_POINTS;
@@ -53,12 +74,18 @@ pub(crate) fn zip_download_progress_basis_points(downloaded: u64, total: u64) ->
         .min(u64::from(ZIP_DOWNLOADED_PROGRESS_BASIS_POINTS)) as u16
 }
 
+/// Authenticated Raindrop REST client (`Authorization: Bearer`).
 pub(crate) struct RaindropClient {
     http: reqwest::Client,
     token: String,
 }
 
 impl RaindropClient {
+    /// Builds a client with the PDF-Folio Raindrop user agent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the underlying `reqwest` client cannot be built.
     pub(crate) fn new(token: String) -> Result<Self> {
         Ok(Self {
             http: reqwest::Client::builder()
@@ -68,6 +95,7 @@ impl RaindropClient {
         })
     }
 
+    /// Fetches the authenticated Raindrop user profile.
     pub(crate) async fn user(&self) -> Result<RaindropUser> {
         let response = self
             .get_json::<UserResponse>(&format!("{API_BASE}/user"))
@@ -75,6 +103,7 @@ impl RaindropClient {
         Ok(response.user)
     }
 
+    /// Lists root and child collections (deduped, sorted by parent then sort key).
     pub(crate) async fn collections(&self) -> Result<Vec<RaindropCollection>> {
         let mut collections = self
             .get_json::<CollectionsResponse>(&format!("{API_BASE}/collections"))
@@ -91,6 +120,7 @@ impl RaindropClient {
         Ok(collections)
     }
 
+    /// Fetches a single raindrop by id.
     pub(crate) async fn raindrop(&self, id: i64) -> Result<Raindrop> {
         let response = self
             .get_json::<RaindropResponse>(&format!("{API_BASE}/raindrop/{id}"))
@@ -98,6 +128,7 @@ impl RaindropClient {
         Ok(response.item)
     }
 
+    /// Pages all raindrops and keeps those that look like PDFs ([`Raindrop::is_pdf`]).
     pub(crate) async fn pdf_raindrops(&self) -> Result<Vec<Raindrop>> {
         let mut page = 0_u32;
         let mut raindrops = Vec::new();
@@ -120,6 +151,12 @@ impl RaindropClient {
         Ok(raindrops)
     }
 
+    /// Downloads a PDF from `link` with SSRF guards, size limit, and timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on network failure, blocked addresses, oversize body,
+    /// timeout, or non-PDF content.
     pub(crate) async fn download_pdf(&self, link: &str) -> Result<Vec<u8>> {
         tokio::time::timeout(PDF_DOWNLOAD_TIMEOUT, self.download_pdf_with_guards(link))
             .await
@@ -164,6 +201,7 @@ impl RaindropClient {
         unreachable!("redirect loop exits by returning or bailing")
     }
 
+    /// Downloads a raindrop’s PDF (Raindrop cache API for uploads, else download link).
     pub(crate) async fn download_pdf_for_raindrop(&self, raindrop: &Raindrop) -> Result<Vec<u8>> {
         if raindrop.has_uploaded_file() {
             return self
@@ -174,6 +212,10 @@ impl RaindropClient {
         self.download_pdf(raindrop.download_link()).await
     }
 
+    /// Downloads Raindrop’s bulk ZIP export of uploaded files (`file:true` search).
+    ///
+    /// Invokes `progress` with basis points during download. Response must start
+    /// with ZIP magic (`PK`).
     pub(crate) async fn download_pdf_export_zip(
         &self,
         mut progress: impl FnMut(u16),
@@ -248,6 +290,7 @@ fn download_requires_raindrop_auth(link: &str) -> bool {
         .is_some_and(|host| host == "raindrop.io" || host.ends_with(".raindrop.io"))
 }
 
+/// Resolved download target after scheme/host/DNS allow-list checks.
 #[derive(Debug)]
 pub(super) struct PdfDownloadTarget {
     url: Url,
@@ -255,6 +298,7 @@ pub(super) struct PdfDownloadTarget {
     addresses: Vec<SocketAddr>,
 }
 
+/// Parses and validates a PDF download URL (public entry for tests / helpers).
 pub(super) async fn validated_pdf_download_target(link: &str) -> Result<PdfDownloadTarget> {
     let url = Url::parse(link).with_context(|| format!("Invalid PDF download URL: {link}"))?;
     validate_pdf_download_url(url).await
@@ -318,6 +362,7 @@ fn normalize_download_address(ip: IpAddr) -> IpAddr {
     }
 }
 
+/// Returns true when `ip` is loopback, private, link-local, or otherwise blocked for downloads.
 pub(super) fn is_blocked_download_address(ip: IpAddr) -> bool {
     match normalize_download_address(ip) {
         IpAddr::V4(ip) => is_blocked_ipv4_address(ip),
@@ -404,6 +449,11 @@ async fn read_limited_pdf_response(link: &str, mut response: reqwest::Response) 
     Ok(bytes)
 }
 
+/// Ensures downloaded bytes look like a PDF (`%PDF-` within the first 1 KiB).
+///
+/// # Errors
+///
+/// Returns an error with a short response preview when the magic bytes are absent.
 pub(crate) fn ensure_pdf_response(link: &str, bytes: &[u8]) -> Result<()> {
     if bytes
         .windows(b"%PDF-".len())
@@ -424,6 +474,7 @@ struct UserResponse {
     user: RaindropUser,
 }
 
+/// Authenticated Raindrop user (`_id`, optional full name).
 #[derive(Debug, Deserialize)]
 pub(crate) struct RaindropUser {
     #[serde(rename = "_id", deserialize_with = "i64_from_json")]
@@ -437,6 +488,7 @@ struct CollectionsResponse {
     items: Vec<RaindropCollection>,
 }
 
+/// Raindrop collection (folder) as returned by the collections APIs.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RaindropCollection {
     #[serde(rename = "_id", deserialize_with = "i64_from_json")]
@@ -451,6 +503,7 @@ pub(crate) struct RaindropCollection {
 }
 
 impl RaindropCollection {
+    /// Display title, or a stable fallback including the collection id.
     pub(crate) fn title(&self) -> String {
         self.title
             .as_deref()
@@ -460,6 +513,7 @@ impl RaindropCollection {
             .unwrap_or_else(|| format!("Raindrop collection {}", self.id))
     }
 
+    /// Parent collection id when nested.
     pub(crate) fn parent_id(&self) -> Option<i64> {
         self.parent.as_ref().map(|parent| parent.id)
     }
@@ -475,6 +529,7 @@ struct RaindropResponse {
     item: Raindrop,
 }
 
+/// One Raindrop bookmark/item (wire JSON + import helpers).
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Raindrop {
     #[serde(rename = "_id", deserialize_with = "i64_from_json")]
@@ -496,11 +551,13 @@ pub(crate) struct Raindrop {
     pub(crate) file: Option<RaindropFile>,
     #[serde(rename = "lastUpdate")]
     pub(crate) last_update: Option<String>,
+    /// Set when the item is known to be an uploaded Raindrop file (cache download path).
     #[serde(skip)]
     pub(crate) uploaded_file: bool,
 }
 
 impl Raindrop {
+    /// Heuristic: attached PDF file, document type with `.pdf` link, or link ends with `.pdf`.
     pub(crate) fn is_pdf(&self) -> bool {
         self.file.as_ref().is_some_and(|file| file.is_pdf())
             || self
@@ -511,10 +568,12 @@ impl Raindrop {
             || self.link.to_lowercase().ends_with(".pdf")
     }
 
+    /// Collection id when assigned.
     pub(crate) fn collection_id(&self) -> Option<i64> {
         self.collection.as_ref().map(|collection| collection.id)
     }
 
+    /// Preferred file name (file metadata, else title).
     pub(crate) fn file_name(&self) -> Option<String> {
         self.file
             .as_ref()
@@ -522,10 +581,12 @@ impl Raindrop {
             .or_else(|| self.title.clone())
     }
 
+    /// Declared remote file size when present.
     pub(crate) fn file_size(&self) -> Option<u64> {
         self.file.as_ref().and_then(|file| file.size)
     }
 
+    /// Best download URL (file link if set, otherwise bookmark `link`).
     pub(crate) fn download_link(&self) -> &str {
         self.file
             .as_ref()
@@ -534,6 +595,7 @@ impl Raindrop {
             .unwrap_or(&self.link)
     }
 
+    /// True when this item should use Raindrop’s authenticated cache download path.
     pub(crate) fn has_uploaded_file(&self) -> bool {
         if self.uploaded_file {
             return true;
@@ -547,6 +609,7 @@ impl Raindrop {
         })
     }
 
+    /// Cover image or first media link suitable as a thumbnail.
     pub(crate) fn thumbnail_url(&self) -> Option<String> {
         self.cover
             .as_ref()
@@ -560,6 +623,7 @@ impl Raindrop {
             })
     }
 
+    /// User-visible label (title, file name, or `Raindrop {id}`).
     pub(crate) fn display_label(&self) -> String {
         self.title
             .clone()
@@ -567,6 +631,7 @@ impl Raindrop {
             .unwrap_or_else(|| format!("Raindrop {}", self.id))
     }
 
+    /// Builds a public [`RaindropPdfCandidate`] for import UI/preview.
     pub(crate) fn to_candidate(
         &self,
         collection_titles: &HashMap<i64, String>,
@@ -588,12 +653,14 @@ impl Raindrop {
     }
 }
 
+/// Raindrop `$id` reference (collection parent/item collection).
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RaindropRef {
     #[serde(rename = "$id", deserialize_with = "i64_from_json")]
     pub(crate) id: i64,
 }
 
+/// Attached file metadata on a raindrop.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RaindropFile {
     pub(crate) name: Option<String>,
@@ -605,6 +672,7 @@ pub(crate) struct RaindropFile {
     pub(crate) mime_type: Option<String>,
 }
 
+/// Media entry used for cover/thumbnail fallbacks.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RaindropMedia {
     #[serde(default)]
@@ -672,6 +740,7 @@ where
 }
 
 impl RaindropFile {
+    /// True when MIME is `application/pdf` or the name ends with `.pdf`.
     pub(crate) fn is_pdf(&self) -> bool {
         self.mime_type
             .as_deref()

@@ -1,4 +1,48 @@
 //! Application messages exchanged between UI views and update logic.
+//!
+//! [`Message`] is the single event vocabulary for the entire iced app. Views
+//! and subscriptions emit variants; domain reducers pattern-match clusters of
+//! them. Prefer extending an existing cluster over inventing a parallel
+//! channel when adding features.
+//!
+//! # Message ownership
+//!
+//! 1. [`crate::library::update`] claims library selection, drag, folders,
+//!    tags, bulk ops, import/export, Raindrop, search, and registry switcher
+//!    flows that touch library data.
+//! 2. [`crate::viewer::update`] claims zoom, scroll, page jump, outline,
+//!    find-in-document, text selection, and page render results.
+//! 3. [`super::update`] handles the remainder: startup probes, sync auth and
+//!    auto-sync, file dialogs, chrome (context menu / command palette /
+//!    confirmations), theme/style reload, shortcuts fan-out, and settings.
+//!
+//! Related types in this module (`ContextMenuTarget`, `ConfirmationAction`,
+//! `Shortcut`, sidebar tabs) are small enums embedded in message payloads or
+//! chrome state—not alternate event buses.
+//!
+//! # `Message` clusters (for navigation)
+//!
+//! | Cluster | Representative variants |
+//! | --- | --- |
+//! | Startup / lifecycle | `StartupResponsivenessProbe`, `StartupBackgroundReady`, `SessionSaved` |
+//! | Sync auth & CRDT | `SyncSignIn*`, `AutoSync*`, `RemoteSyncAvailable`, `LibraryRegistry*` |
+//! | Multi-library | `OpenLibrarySwitcher`, `SelectLibrary`, `CreateLibrary`, `DeleteLibrary` |
+//! | File dialogs | `OpenFileDialog`, `FileSelected`, `Import*Dialog`, `ExportDestinationSelected` |
+//! | Document open/render | `DocumentOpened`, `PageRendered`, `LibraryDocumentOpened`, `DocumentError` |
+//! | Viewer navigation | `ScrollChanged`, `Viewport*`, `Jump*`, `PreviousPage` / `NextPage` |
+//! | Viewer zoom | `ZoomIn` / `ZoomOut` / `ZoomSet`, `ZoomPresetSelected`, `ZoomRenderSettled` |
+//! | Viewer text / find | `ViewerText*`, `OpenViewerFind`, `ViewerFind*`, `CopyViewerTextSelection` |
+//! | Outline / sidebar | `ToggleOutlineNode`, `ToggleTocPanel`, `ViewerSidebarTabSelected` |
+//! | Library data load | `LibraryLoaded`, `LibraryFoldersLoaded`, `LibraryRefresh`, `LibraryError` |
+//! | Library selection | `LibraryEntryClicked`, `EntryCheckboxToggled`, `SelectAll*`, clipboard |
+//! | Library drag | `BeginLibraryEntryDrag`, `FolderDrag*`, `End*Drag`, `ManualEntryOrderSaved` |
+//! | Search & filters | `SearchQueryChanged`, `TagFilterChanged`, `ReadingFilterChanged`, … |
+//! | Folders & tags | `CreateFolder`, `Rename*`, `DeleteTag`, `BulkAddTag`, inspector tags |
+//! | Bulk / destructive | `Bulk*`, `RequestConfirmation`, `ConfirmPendingAction` |
+//! | Export | `OpenExportDialog`, `StartExport`, `ExportFinished` |
+//! | Chrome | `ContextMenu*`, `CommandPalette*`, `CursorMoved` |
+//! | Appearance | `ThemeToggled`, `ReloadStyles`, `StylesReloaded` |
+//! | Input | `ShortcutPressed`, `ModifiersChanged`, `SettingsChanged` |
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -146,6 +190,10 @@ impl ViewerSidebarTab {
 }
 
 /// Messages handled by the PDF-Folio application update loop.
+///
+/// Every user action, async task completion, and subscription tick becomes a
+/// `Message`. See the module-level cluster table for where to add variants
+/// and which reducer typically handles them.
 #[derive(Debug, Clone)]
 pub enum Message {
     /// Startup responsiveness probe fired after launch.
@@ -852,7 +900,11 @@ pub enum Message {
     SettingsChanged(Settings),
 }
 
-/// Keyboard shortcuts handled by the Phase 1 viewer.
+/// Keyboard shortcuts recognized by the shell shortcut mapper.
+///
+/// Produced by [`super::shortcuts::keyboard_event_message`] and applied by
+/// [`super::shortcuts::handle_shortcut`]. Some variants are mode-sensitive
+/// (library selection vs viewer zoom/scroll).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shortcut {
     /// Increase zoom.

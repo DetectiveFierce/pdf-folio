@@ -1,3 +1,10 @@
+//! Library-oriented styled widgets: cards, list rows, and selection checkboxes.
+//!
+//! Grid cards and list rows are iced buttons styled with
+//! [`Class::LibraryCard`](crate::Class::LibraryCard) /
+//! [`Class::LibraryRow`](crate::Class::LibraryRow). Selection chrome includes
+//! per-entry checkboxes and the master (select-all) control with partial state.
+
 use iced::widget::{button, container, text, Svg};
 use iced::{Element, Length};
 

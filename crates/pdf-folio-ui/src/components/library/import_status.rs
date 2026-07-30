@@ -1,10 +1,14 @@
-//! Library import and background-operation progress UI.
+//! # Import and bulk-operation progress UI
+//!
+//! Banners and dialogs that show long-running library work (bulk ops,
+//! Raindrop import progress) without owning the tasks themselves.
 
 use crate::library::view::format_count;
 use crate::*;
 use iced::widget::{column, row};
 use pdf_folio_cloud::raindrop::RaindropImportPhase;
 
+/// Inline banner for an in-flight bulk operation with indeterminate progress.
 pub(crate) fn bulk_operation_progress_banner<'a>(
     app: &'a PDFolioApp,
     progress: &'a BulkOperationProgress,
@@ -42,11 +46,13 @@ pub(crate) fn bulk_operation_progress_banner<'a>(
     .into()
 }
 
+/// Oscillating 0..1 value for indeterminate progress bars from elapsed time.
 pub(crate) fn indeterminate_progress_value(elapsed_secs: f32) -> f32 {
     let sweep = (elapsed_secs * 0.72).fract();
     (0.18 + 0.64 * (0.5 - (sweep - 0.5).abs()) * 2.0).clamp(0.0, 1.0)
 }
 
+/// Modal progress UI while a Raindrop import stream is running.
 pub(crate) fn view_raindrop_import_progress_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let Some(progress) = app.library.raindrop_import_progress.as_ref() else {

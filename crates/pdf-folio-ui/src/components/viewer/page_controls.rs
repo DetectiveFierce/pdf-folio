@@ -1,6 +1,11 @@
+//! # Page navigation controls
+//!
+//! Previous/next controls and jump-to-page dialog for the open document.
+
 use crate::*;
 use iced::widget::{row, Svg};
 
+/// Page number display with prev/next and jump entry points.
 pub(crate) fn viewer_page_control<'a>(
     app: &'a PDFolioApp,
     current_page: u16,
@@ -109,6 +114,7 @@ fn class_text_color(
         .unwrap_or(fallback)
 }
 
+/// Modal to jump to a specific page number.
 pub(crate) fn view_jump_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let max_page = app.viewer.doc.as_ref().map_or(0, |doc| doc.page_count());

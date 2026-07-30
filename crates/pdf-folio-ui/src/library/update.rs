@@ -1,6 +1,36 @@
+//! # Library-domain `update` handler
+//!
+//! Central match arm for library-mode messages: view mode, sort/zoom, search,
+//! sidebar/inspector chrome, selection and details editing, folder/tag dialogs,
+//! drag completion, import/export/Raindrop, trash, undo/redo, and bulk ops.
+//!
+//! ## Contract
+//!
+//! [`update`] is invoked from the shell message router. It returns:
+//! - `Some(task)` when the message was handled (even if the task is `Task::none()`)
+//! - `None` when the message is not a library concern (caller continues routing)
+//!
+//! Handlers typically mutate `app.library` (and sometimes chrome/session), then
+//! spawn work via [`crate::library::tasks`] or refresh helpers on `PDFolioApp`
+//! (`refresh_library`, `request_visible_thumbnails`, preference saves).
+//!
+//! ## Relationship to other modules
+//!
+//! - Imperative multi-step intents (select range, finish drag, open folder) live
+//!   in [`crate::library::actions`]; this file mostly dispatches and wires tasks.
+//! - Registry switch/create messages may be handled here or in shell depending
+//!   on message type; multi-library persistence is in [`crate::library::registry`].
+//! - Presentation is never built here — only state and tasks.
+
 use crate::shell::tasks::start_auto_sync_now;
 use crate::*;
 
+/// Handle a library-domain [`Message`], mutating `app` and returning follow-up work.
+///
+/// Returns `None` if `message` is not owned by the library domain so the shell
+/// can try viewer/shell handlers. Prefer calling high-level helpers on
+/// `PDFolioApp` (from [`crate::library::actions`]) rather than duplicating
+/// selection or drag logic inside match arms.
 pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Message>> {
     match message {
         Message::ToggleViewMode => {

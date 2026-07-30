@@ -1,4 +1,16 @@
-//! Scrollables let users navigate an endless amount of content with a scrollbar.
+//! Patched iced scrollable with left vertical scrollbar support.
+//!
+//! This module is a near-copy of upstream `iced_widget::scrollable` at the git
+//! revision pinned by `iced_widget_upstream`. PDF-Folio patches layout so a
+//! vertical scrollbar with [`Anchor::End`] sits on the **left** edge while
+//! vertical wheel/drag deltas keep normal direction (content moves up when
+//! scrolling up). Upstream used the same anchor for “stick to end” semantics
+//! that inverted the vertical axis — undesirable for sidebar chrome.
+//!
+//! The workspace routes all `iced_widget` usage through `crates/iced-widget-patch`
+//! (see the crate root docs). Prefer configuring sidebar scrollables with
+//! vertical `Anchor::End` when a left rail is required; default
+//! [`Anchor::Start`] keeps the right-edge rail like upstream.
 //!
 //! # Example
 //! ```no_run
@@ -41,8 +53,11 @@ use crate::core::{
 
 pub use operation::scrollable::{AbsoluteOffset, RelativeOffset};
 
-/// A widget that can vertically display an infinite amount of content with a
-/// scrollbar.
+/// A scrollable container with optional vertical and horizontal scrollbars.
+///
+/// Behavior matches iced's scrollable except vertical [`Anchor::End`] places
+/// the vertical rail on the left without reversing vertical scroll direction
+/// (PDF-Folio patch). See the [module docs](self) for patch rationale.
 ///
 /// # Example
 /// ```no_run
@@ -369,14 +384,22 @@ impl Scrollbar {
     }
 }
 
-/// The anchor of the scroller of the [`Scrollable`] relative to its [`Viewport`]
-/// on a given axis.
+/// Placement / stickiness of a scrollbar relative to its [`Viewport`] axis.
+///
+/// # PDF-Folio vertical semantics
+///
+/// | Axis | [`Start`](Anchor::Start) | [`End`](Anchor::End) |
+/// | --- | --- | --- |
+/// | Vertical | Rail on the **right** (upstream default) | Rail on the **left** (patched) |
+/// | Horizontal | Content aligned to the start | Content / rail toward the end; horizontal deltas invert like upstream |
+///
+/// Vertical scroll direction is **not** inverted for [`End`] in this patch.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Anchor {
-    /// Scroller is anchoer to the start of the [`Viewport`].
+    /// Default edge for the axis (right for vertical rails).
     #[default]
     Start,
-    /// Content is aligned to the end of the [`Viewport`].
+    /// Opposite edge (left for vertical rails in this patch).
     End,
 }
 
@@ -1721,6 +1744,7 @@ impl State {
         )
     }
 
+    /// Vertical scrollbar grab position helper for the patched scrollable.
     pub fn y_scroller_grabbed_at(&self) -> Option<f32> {
         let Interaction::YScrollerGrabbed(at) = self.interaction else {
             return None;
@@ -1729,6 +1753,7 @@ impl State {
         Some(at)
     }
 
+    /// Horizontal scrollbar grab position helper for the patched scrollable.
     pub fn x_scroller_grabbed_at(&self) -> Option<f32> {
         let Interaction::XScrollerGrabbed(at) = self.interaction else {
             return None;
@@ -1981,6 +2006,7 @@ pub(super) mod internals {
     use super::Anchor;
 
     #[derive(Debug, Copy, Clone)]
+    /// Scrollbar data structure.
     pub struct Scrollbar {
         pub total_bounds: Rectangle,
         pub bounds: Rectangle,

@@ -1,15 +1,35 @@
-//! PDF-Folio binary entrypoint.
+//! `pdf-folio` binary entrypoint: tracing, CLI parse, then UI or sync.
 //!
-//! This crate produces the `pdf-folio` executable. It initializes the
-//! tracing subscriber, parses command-line arguments via [`clap`], and
-//! delegates to [`pdf_folio_ui::run`] to launch the application.
+//! This crate must stay thin. It owns process startup only — no database,
+//! Pdfium, or domain logic. Real work lives in `pdf-folio-ui` (desktop) and
+//! `pdf-folio-cloud` (sync CLI).
 //!
-//! Usage:
+//! # CLI surface
 //!
 //! ```text
-//! pdf-folio               # open the library manager
-//! pdf-folio document.pdf  # open a PDF directly
+//! pdf-folio                 # open the library manager UI
+//! pdf-folio document.pdf    # open the UI and that PDF
+//! pdf-folio sync <COMMAND>  # cloud sync maintenance (async Tokio)
 //! ```
+//!
+//! Sync subcommands (`auth`, `push`, `pull`, `sync-once`, …) are defined in
+//! `pdf_folio_cloud::sync::cli` and re-exported via the local [`cli`] module.
+//! See the operations CLI reference for flags (`--server`, `--library-id`, …).
+//!
+//! # Tracing setup
+//!
+//! On startup the binary installs a `tracing_subscriber` fmt layer with an
+//! [`EnvFilter`](tracing_subscriber::EnvFilter):
+//!
+//! - `RUST_LOG` when set (standard env-filter syntax)
+//! - otherwise `info` for the whole process
+//!
+//! # Dispatch
+//!
+//! | Parsed args | Runtime | Destination |
+//! | --- | --- | --- |
+//! | no subcommand | iced event loop | [`pdf_folio_ui::run`] with optional file path |
+//! | `sync …` | `tokio::Runtime::block_on` | [`cli::run_sync_command`] |
 //!
 //! [`clap`]: https://docs.rs/clap
 
@@ -22,7 +42,10 @@ use clap::{Parser, Subcommand};
 use cli::{run_sync_command, SyncArgs};
 use tracing_subscriber::EnvFilter;
 
-/// Command-line arguments for PDF-Folio.
+/// Top-level command-line arguments for the `pdf-folio` binary.
+///
+/// Either a sync subcommand **or** an optional PDF path for the desktop UI
+/// (not both as a combined mode — subcommand wins when present).
 #[derive(Debug, Parser)]
 #[command(
     name = "pdf-folio",
@@ -30,16 +53,17 @@ use tracing_subscriber::EnvFilter;
     about = "Native PDF viewer and library manager"
 )]
 struct Args {
-    /// Maintenance and sync commands.
+    /// Maintenance and sync commands (`pdf-folio sync …`).
     #[command(subcommand)]
     command: Option<Command>,
-    /// PDF file to open at startup.
+    /// PDF file to open when launching the desktop UI.
     file: Option<PathBuf>,
 }
 
+/// Top-level subcommands of `pdf-folio`.
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Manage PDF-Folio sync.
+    /// Cloud sync client commands (auth, push/pull, blobs, sync-once, …).
     Sync(SyncArgs),
 }
 

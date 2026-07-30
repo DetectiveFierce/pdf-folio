@@ -1,4 +1,7 @@
-//! App shell and viewer-surface rendering.
+//! # Root surface composition
+//!
+//! Top-level `view` that switches on app mode and stacks global overlays
+//! (menus, dialogs, loading). Domain modules supply library/viewer subtrees.
 
 use crate::components::shared::command_palette::{
     command_palette_capture_layer, view_command_palette,
@@ -26,6 +29,7 @@ use std::time::Instant;
 
 static VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
+/// Compose the full application surface for the current `PDFolioApp` state.
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     let probe_started_at = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").map(|_| Instant::now());
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);

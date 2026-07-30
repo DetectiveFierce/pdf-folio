@@ -1,10 +1,29 @@
 //! Keyboard shortcut mapping for the application shell.
+//!
+//! Translates iced window and keyboard events into [`Message`] values.
+//! Window resize becomes `WindowResized`; recognized key chords become
+//! [`Message::ShortcutPressed`] with a [`Shortcut`] payload. Global chords
+//! such as Ctrl+F / Ctrl+C / Ctrl+K / Escape may fire even when a widget has
+//! marked the event as captured.
+//!
+//! [`handle_shortcut`] applies the semantic action: viewer zoom and scroll,
+//! library selection/clipboard, command palette navigation, find, theme
+//! toggle, and style reload. Mode checks decide whether library-only actions
+//! run.
+//!
+//! Related: [`super::messages::Shortcut`] for the enum,
+//! [`super::subscriptions`] for how keyboard listening is registered,
+//! [`super::commands`] for palette intents that overlap some shortcuts.
 
 use crate::*;
 use iced::{event, keyboard, Event, Task};
 
 use crate::messages::{Message, Shortcut};
 
+/// Maps a raw iced event to a shell message, or `None` if unhandled.
+///
+/// Returns `None` for non-keyboard/window events and for captured key
+/// presses that are not on the global-shortcut allow-list.
 pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Option<Message> {
     match event {
         Event::Window(iced::window::Event::Opened { size, .. })
@@ -289,6 +308,12 @@ mod tests {
 
 // Shortcut action handling lives with keyboard shortcut mapping.
 
+/// Applies a recognized [`Shortcut`] to `app`, returning any follow-up tasks.
+///
+/// When the command palette is open, arrow-like fine scroll and Enter/Escape
+/// navigate the palette instead of the underlying surface. Otherwise handles
+/// zoom, theme, page scroll, library selection, clipboard, find, jump, and
+/// undo/redo depending on the shortcut and current [`AppMode`].
 pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<Message> {
     if app.chrome.command_palette_open {
         return match shortcut {

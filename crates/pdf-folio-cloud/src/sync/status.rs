@@ -1,8 +1,25 @@
-//! Sync status, report, and checkpoint types.
+//! Sync status, report, plan, and checkpoint types.
+//!
+//! These are pure data structures returned by [`super::crdt`] and [`super::run`]
+//! methods so UI and CLI code can display counters without depending on
+//! implementation details. No I/O lives here.
+//!
+//! # Registry stream
+//!
+//! [`REGISTRY_LIBRARY_ID`] is a synthetic library id for the app-level library
+//! registry CRDT (existence, rename, tombstone of libraries). Per-library
+//! content ops use the real library id as the stream key.
+//!
+//! # Related
+//!
+//! Produced by: [`super::crdt`], [`super::run`], [`super::cli`]
 
 use chrono::{DateTime, Utc};
 
-/// Synthetic CRDT stream used for app-level library registry operations.
+/// Synthetic CRDT stream id for app-level library registry operations.
+///
+/// Not a user-visible library; used only as the `library_id` partition for
+/// registry ops so library **existence** can sync independently of contents.
 pub const REGISTRY_LIBRARY_ID: &str = "__pdf_folio_registry__";
 
 /// Sync-visible app library profile.

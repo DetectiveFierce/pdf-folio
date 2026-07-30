@@ -1,3 +1,7 @@
+//! # Viewer sidebar shell
+//!
+//! Host container for outline (and related) tabs while viewing a document.
+
 use crate::components::viewer::outline::outline_list;
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
@@ -5,6 +9,7 @@ use iced::widget::{button, column, image, row, scrollable};
 use iced::ContentFit;
 use pdf_folio_core::TileKey;
 
+/// Compose the viewer sidebar for the open document.
 pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let heading = row![

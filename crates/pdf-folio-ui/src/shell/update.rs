@@ -1,3 +1,27 @@
+//! Top-level reducer: delegates library/viewer, then handles shell/sync/chrome messages.
+//!
+//! This is the iced `update` entrypoint wired from [`crate::run`]. It is
+//! intentionally thin at the front: library and viewer domain updaters run
+//! first and may short-circuit with a `Task`. Remaining messages are shell
+//! concerns—startup probes, Google sync, multi-library registry chrome,
+//! native file dialogs, context menus, command palette, theme/style, and
+//! shortcut fan-out.
+//!
+//! # Call order
+//!
+//! 1. [`crate::library::update::update`] — returns `Some(task)` when claimed.
+//! 2. [`crate::viewer::update::update`] — same for viewer-domain messages.
+//! 3. Local `match` on shell-owned variants.
+//!
+//! Side effects that must survive relaunch should batch
+//! [`crate::save_app_session_task`] (or [`crate::with_session_save`]) into the
+//! returned task. Prefer constructing async work via [`super::tasks`] or
+//! domain task modules rather than inlining `Task::perform` here.
+//!
+//! Related: [`super::messages`] for the full vocabulary,
+//! [`super::shortcuts`] for `ShortcutPressed` handling,
+//! [`super::session`] for auth and session persistence.
+
 use crate::library::registry::{
     create_library_profile, delete_library_profile, rename_library_profile,
 };
@@ -6,6 +30,11 @@ use crate::*;
 
 use tasks::*;
 
+/// Top-level iced update: domain delegation, then shell/sync/chrome handling.
+///
+/// Returns the task(s) scheduled for the handled message. Unrecognized
+/// messages fall through domain updaters and the shell match to `Task::none`
+/// (or a specific arm's empty task).
 pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
     if let Some(task) = crate::library::update::update(app, &message) {
         return task;

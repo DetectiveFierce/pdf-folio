@@ -1,4 +1,9 @@
-//! Per-side border drawing for styles that exceed iced's uniform border model.
+//! Widget implementation of asymmetric (per-side) borders.
+//!
+//! [`side_border`] wraps an arbitrary iced element and paints top/right/bottom/left
+//! strokes from a [`VisualBorder`] after the child layout. Layout size matches
+//! the content; borders are drawn inside the content bounds (overlay style),
+//! not as additional outer padding.
 
 use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::widget::Operation;
@@ -7,7 +12,11 @@ use iced::{Background, Color, Element, Event, Length, Rectangle, Size, Vector};
 
 use crate::tokens::{BorderSide, VisualBorder};
 
-/// Wraps an element with a custom per-side border layer.
+/// Wraps `content` so each side of `border` is drawn independently.
+///
+/// Use when a class style provides a non-uniform [`VisualBorder`] (see
+/// [`crate::classes::side_border_for_class`]). Uniform borders should stay on
+/// iced's native `Border` for simpler drawing.
 pub fn side_border<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
     border: VisualBorder,

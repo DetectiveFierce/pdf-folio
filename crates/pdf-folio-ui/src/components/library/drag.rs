@@ -1,4 +1,14 @@
-//! Drag, drop, and manual ordering helpers for the library UI.
+//! # Library drag/drop pure helpers
+//!
+//! Constants, state structs, and geometry functions for manual reorder and
+//! folder assignment drags. Free of iced widgets and `Db` access.
+//!
+//! Live drag state is stored on `app.library` (`LibraryDragState` /
+//! `FolderDragState`); domain methods in `crate::library::actions` mutate it
+//! using the hit-tests and reorder helpers defined here.
+//!
+//! Autoscroll uses edge-band velocity curves; folder drops require a dwell
+//! before activation to avoid accidental nesting while reordering.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -7,13 +17,21 @@ use iced::Point;
 use iced::Rectangle;
 use pdf_folio_core::{EntryId, Folder, FolderId, LibrarySortMode};
 
+/// Interval between drag autoscroll ticks (milliseconds).
 pub const LIBRARY_DRAG_AUTOSCROLL_TICK_MS: u64 = 16;
+/// Distance from the viewport edge that starts autoscroll (logical px).
 pub const LIBRARY_DRAG_AUTOSCROLL_EDGE_BAND: f32 = 96.0;
+/// Peak autoscroll speed in pixels per second.
 pub const LIBRARY_DRAG_AUTOSCROLL_MAX_SPEED: f32 = 980.0;
+/// Minimum non-zero autoscroll speed once the edge band is entered.
 pub const LIBRARY_DRAG_AUTOSCROLL_MIN_SPEED: f32 = 80.0;
+/// Cap on integration timestep so a stalled frame cannot jump the scroll.
 pub const LIBRARY_DRAG_AUTOSCROLL_MAX_DT: f32 = 1.0 / 20.0;
+/// Pointer movement required before a press becomes an active drag.
 pub const LIBRARY_DRAG_ACTIVATION_DISTANCE: f32 = 6.0;
+/// Hover time before a folder becomes an active drop target.
 pub const LIBRARY_FOLDER_DROP_DWELL_MS: u64 = 500;
+/// Duration of the success flash after dropping onto a folder.
 pub const LIBRARY_FOLDER_DROP_FLASH_MS: u64 = 900;
 
 /// Current manual-reorder drag state for the library view.
@@ -50,6 +68,7 @@ pub struct LibraryDragState {
 }
 
 impl LibraryDragState {
+    /// Start an inactive entry drag at `source_index` (activates after movement threshold).
     pub fn new(
         entry_id: EntryId,
         entry_ids: Vec<EntryId>,
@@ -74,6 +93,7 @@ impl LibraryDragState {
         }
     }
 
+    /// Track pointer motion; returns whether the drag has activated.
     pub fn update_cursor(&mut self, cursor: Point) -> bool {
         let press_cursor = *self.press_cursor.get_or_insert(cursor);
         self.cursor = Some(cursor);
@@ -83,6 +103,7 @@ impl LibraryDragState {
         self.active
     }
 
+    /// Update the dwell-pending folder hover target; returns whether it changed.
     pub fn set_pending_folder_target(&mut self, folder_id: Option<FolderId>, now: Instant) -> bool {
         if self.pending_drop_target == folder_id {
             return false;
@@ -96,6 +117,7 @@ impl LibraryDragState {
         true
     }
 
+    /// Toggle parent-strip targeting; clears folder targets when enabled.
     pub fn set_parent_drop_target(&mut self, active: bool) -> bool {
         if self.parent_drop_target == active {
             return false;
@@ -110,6 +132,7 @@ impl LibraryDragState {
         true
     }
 
+    /// Folder id whose dwell completed and can become the active drop target.
     pub fn pending_target_ready(&self, now: Instant) -> Option<FolderId> {
         if !self.active || self.drop_target.is_some() {
             return None;
@@ -144,6 +167,7 @@ pub struct FolderDragState {
 }
 
 impl FolderDragState {
+    /// Start an inactive folder drag for `folder_id`.
     pub fn new(folder_id: FolderId) -> Self {
         Self {
             folder_id,
@@ -158,6 +182,7 @@ impl FolderDragState {
         }
     }
 
+    /// Track pointer motion; returns whether the drag has activated.
     pub fn update_cursor(&mut self, cursor: Point) -> bool {
         let press_cursor = *self.press_cursor.get_or_insert(cursor);
         self.cursor = Some(cursor);
@@ -167,6 +192,7 @@ impl FolderDragState {
         self.active
     }
 
+    /// Update pending/active folder nest target; optionally activate immediately.
     pub fn set_drop_target(
         &mut self,
         target: Option<FolderId>,
@@ -187,6 +213,7 @@ impl FolderDragState {
         true
     }
 
+    /// Toggle parent-strip targeting; clears folder targets when enabled.
     pub fn set_parent_drop_target(&mut self, active: bool) -> bool {
         if self.parent_drop_target == active {
             return false;
@@ -201,6 +228,7 @@ impl FolderDragState {
         true
     }
 
+    /// Folder id whose dwell completed and can become the active drop target.
     pub fn pending_target_ready(&self, now: Instant) -> Option<FolderId> {
         if !self.active || self.drop_target.is_some() {
             return None;
@@ -211,6 +239,7 @@ impl FolderDragState {
     }
 }
 
+/// Whether drag-to-reorder is allowed in the current sort mode.
 pub fn can_drag_reorder_library(
     sort_mode: LibrarySortMode,
     search_query: &str,
@@ -224,6 +253,7 @@ pub fn can_drag_reorder_library(
         && !tag_filter_active
 }
 
+/// Resolves the active folder drop target during a drag.
 pub fn active_folder_drop_target<'a>(
     library_drag: Option<&'a LibraryDragState>,
     folder_drag: Option<&'a FolderDragState>,
@@ -233,6 +263,7 @@ pub fn active_folder_drop_target<'a>(
         .or_else(|| folder_drag.and_then(|drag| drag.drop_target.as_ref()))
 }
 
+/// Auto-scroll velocity when dragging near viewport edges.
 pub fn drag_auto_scroll_velocity(cursor_y: f32, viewport_y: f32, viewport_height: f32) -> f32 {
     if viewport_height <= 1.0 {
         return 0.0;
@@ -262,12 +293,14 @@ pub fn drag_auto_scroll_velocity(cursor_y: f32, viewport_y: f32, viewport_height
     strength.signum() * speed
 }
 
+/// Euclidean distance between two points.
 pub fn distance_between(a: Point, b: Point) -> f32 {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
     (dx * dx + dy * dy).sqrt()
 }
 
+/// Return a new sibling order with `dragged_folder` moved before `target_folder`.
 pub fn reorder_folder_ids_before_target(
     folders: &[FolderId],
     dragged_folder: &FolderId,
@@ -293,11 +326,13 @@ pub fn reorder_folder_ids_before_target(
     Some(next_order)
 }
 
+/// Whether the folder hover dwell has elapsed and the drop target may activate.
 pub fn folder_drop_target_ready(started_at: Instant, now: Instant) -> bool {
     now.checked_duration_since(started_at)
         .is_some_and(|elapsed| elapsed >= Duration::from_millis(LIBRARY_FOLDER_DROP_DWELL_MS))
 }
 
+/// Whether `folder_id` is within the post-drop flash window at `now`.
 pub fn folder_drop_flash_active_at(
     folder_id: &FolderId,
     flash: Option<(&FolderId, Instant)>,
@@ -310,6 +345,7 @@ pub fn folder_drop_flash_active_at(
     })
 }
 
+/// Whether a folder can be moved into a candidate parent.
 pub fn folder_can_move_into(
     folders: &[Folder],
     folder_id: &FolderId,
@@ -333,6 +369,7 @@ pub fn folder_can_move_into(
     folders.iter().any(|folder| &folder.id == target_id)
 }
 
+/// Hit-tests folder cards under the cursor.
 pub fn folder_card_target_at_cursor(
     cursor: Point,
     folders: &[Folder],
@@ -381,6 +418,7 @@ pub fn folder_card_target_at_cursor(
         .map(|folder| folder.id.clone())
 }
 
+/// First folder whose bounds contain the cursor among precomputed targets.
 pub fn folder_drop_target_at_cursor(
     cursor: Point,
     targets: &[(FolderId, Rectangle)],
@@ -396,6 +434,7 @@ pub fn folder_drop_target_at_cursor(
         .map(|(folder_id, _)| folder_id.clone())
 }
 
+/// Whether the cursor is over the parent-directory drop strip geometry.
 pub fn parent_directory_target_at_cursor(
     cursor: Point,
     viewport_x: f32,

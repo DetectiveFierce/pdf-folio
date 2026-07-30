@@ -1,9 +1,18 @@
+//! # Library navigation and details sidebars
+//!
+//! Builds the left navigation chrome (folder tree, tags, trash) and the
+//! contextual details panels for selected PDFs, multi-selection, or folders.
+//!
+//! Tree row widgets come from `components::library::folder_tree`; this
+//! module wires them to app state and action messages.
+
 use super::*;
 use iced::widget::column;
 
 const LIBRARIES_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="9" width="5" height="6" rx="1"/><rect x="9.5" y="9" width="5" height="6" rx="1"/><rect x="17.5" y="9" width="5" height="6" rx="1"/></svg>"##;
 const ACTIVE_TRASH_CAN_CONTENT_OFFSET: f32 = 4.0;
 
+/// Combined library sidebar shell (navigation + optional details) for tag/sidebar open state.
 pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let sidebar_width = app.library.library_tag_sidebar_width;
@@ -111,6 +120,7 @@ fn library_switcher_sidebar_button(app: &PDFolioApp, tokens: ThemeTokens) -> Ele
     .into()
 }
 
+/// Primary left rail: library root, folder tree, tags, trash, filters.
 pub(crate) fn view_library_navigation_sidebar<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -334,6 +344,7 @@ fn sidebar_section_heading_with_toggle(
     .into()
 }
 
+/// Expandable folder tree section of the navigation sidebar.
 pub(crate) fn view_file_tree_sidebar<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -342,6 +353,7 @@ pub(crate) fn view_file_tree_sidebar<'a>(
     folder_sidebar_rows(app, None, 0, sidebar_width, tokens)
 }
 
+/// Trash Can row with counts and active-state styling.
 pub(crate) fn trash_can_sidebar_row<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -443,6 +455,7 @@ pub(crate) fn trash_can_sidebar_row<'a>(
     }
 }
 
+/// Action buttons for the folder currently focused in details.
 pub(crate) fn selected_folder_actions_panel<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -530,6 +543,7 @@ pub(crate) fn selected_folder_actions_panel<'a>(
     )
 }
 
+/// Details panel when a folder is selected for inspection.
 pub(crate) fn view_selected_folder_sidebar<'a>(
     app: &'a PDFolioApp,
     folder: Folder,
@@ -601,6 +615,7 @@ pub(crate) fn view_selected_folder_sidebar<'a>(
     .into()
 }
 
+/// Tag list / tag filter section of the navigation sidebar.
 pub(crate) fn view_tag_tree_sidebar<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -686,6 +701,7 @@ fn tag_rename_row<'a>(
         .into()
 }
 
+/// Details panel for a single selected PDF (metadata, path, actions).
 pub(crate) fn view_selected_pdf_sidebar<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -822,6 +838,7 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
     .into()
 }
 
+/// Details panel summarizing a multi-PDF selection and bulk actions.
 pub(crate) fn view_multi_selection_sidebar<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -1010,6 +1027,7 @@ fn common_tags(entries: &[LibraryEntry]) -> Vec<String> {
     tags
 }
 
+/// Labeled value row used in details panels.
 pub(crate) fn sidebar_detail_row<'a>(
     label: &'a str,
     value: String,
@@ -1036,6 +1054,7 @@ pub(crate) fn sidebar_detail_row<'a>(
     .into()
 }
 
+/// Reading progress string for the selected entry.
 pub(crate) fn selected_pdf_progress_label(entry: &LibraryEntry) -> String {
     entry.page_count.map_or_else(
         || format!("Page {}", u32::from(entry.last_page) + 1),
@@ -1051,6 +1070,7 @@ pub(crate) fn selected_pdf_progress_label(entry: &LibraryEntry) -> String {
     )
 }
 
+/// Duplicate-file status text for an entry relative to the open library.
 pub(crate) fn duplicate_status_label(app: &PDFolioApp, entry: &LibraryEntry) -> String {
     let duplicate_count = app
         .library
@@ -1062,6 +1082,7 @@ pub(crate) fn duplicate_status_label(app: &PDFolioApp, entry: &LibraryEntry) -> 
     duplicate_status_label_for_count(duplicate_count)
 }
 
+/// Format a duplicate count into status copy.
 pub(crate) fn duplicate_status_label_for_count(duplicate_count: usize) -> String {
     if duplicate_count == 0 {
         String::from("Unique content hash")

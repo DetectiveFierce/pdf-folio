@@ -1,14 +1,23 @@
 //! Core PDF loading, rendering, cache, and database types for PDF-Folio.
 //!
-//! This crate is the foundational layer shared by the cloud integration,
-//! viewer, and UI crates:
+//! This crate is the foundational layer shared by the cloud integration
+//! (`pdf-folio-cloud`), desktop UI (`pdf-folio-ui`), and binary
+//! (`pdf-folio-main`) crates. It owns no UI state: callers pass paths and
+//! library IDs in, and receive pure data types and `Result`s back.
 //!
-//! - [`pdf`] wraps [`pdfium-render`] to open PDFs, extract outlines, page
-//!   text layers, and produce [`pdf::RenderedPage`] bitmaps, plus the
-//!   [`pdf::TileCache`] / [`pdf::TileKey`] on-demand rendering cache.
-//! - [`db`] provides the [`Db`] handle backed by SQLite, including library
-//!   entries, folders, tags, search indexing, import/watching, and the
-//!   raindrop-collection/entry mapping tables.
+//! # Modules
+//!
+//! - [`pdf`] wraps [`pdfium-render`] to open documents ([`PdfDoc`]), extract
+//!   outlines ([`OutlineNode`]) and per-character text layers
+//!   ([`PageTextLayer`]), render pages to RGBA ([`RenderedPage`]), and cache
+//!   on-demand tiles via [`TileCache`] / [`TileKey`]. Geometry for text
+//!   selection lives in [`pdf::geometry::TextRect`].
+//! - [`db`] owns the SQLite-backed [`Db`] handle: library entries, folders,
+//!   tags, preferences, import/watching, Tantivy search, Raindrop mapping
+//!   tables, and local sync/CRDT metadata used by the cloud crate.
+//!
+//! Most library and search types are re-exported at the crate root so
+//! callers can write `pdf_folio_core::{Db, EntryId, PdfDoc, ...}`.
 //!
 //! [`pdfium-render`]: https://docs.rs/pdfium-render
 

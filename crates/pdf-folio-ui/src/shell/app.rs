@@ -1,26 +1,59 @@
+//! Root application types: `PDFolioApp`, modes, runtimes, and library chrome state.
+//!
+//! This module defines the long-lived state bags mounted on [`PDFolioApp`].
+//! Domain behavior (search, render, drag, etc.) lives in `library/` and
+//! `viewer/`; those modules read and mutate these structs through
+//! `PDFolioApp` methods and the top-level reducers.
+//!
+//! # Key types
+//!
+//! - [`PDFolioApp`] — root iced state; holds all other runtimes plus `db`.
+//! - [`AppMode`] — which full-screen surface is visible.
+//! - [`LibraryRuntime`] — library browser selection, filters, dialogs, drag.
+//! - [`ChromeRuntime`] — cross-mode overlays (confirmations, context menu,
+//!   command palette, cursor).
+//! - [`AppearanceRuntime`] — theme id and loaded KDL style book.
+//! - Export / history / clipboard helpers used by library organization flows.
+//!
+//! # Related modules
+//!
+//! - [`super::messages`] — events that mutate these structs.
+//! - [`super::session`] — snapshots of mode/viewer/library for relaunch.
+//! - [`crate::library::registry`] — multi-library vault profiles on
+//!   `PDFolioApp::libraries`.
+//! - [`crate::viewer::document::ViewerRuntime`] — open PDF runtime on
+//!   `PDFolioApp::viewer`.
+
 use crate::*;
 
-/// Primary app mode.
+/// Primary full-screen surface shown by the application shell.
+///
+/// Mode switches are driven by messages (`OpenLibraryEntry`, `BackToLibrary`,
+/// sync sign-in, library switcher open/close) and restored from
+/// [`super::session::AppSession`] on launch when no CLI file is provided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
-    /// Sync sign-in gate.
+    /// Sync sign-in gate; blocks library access until Google auth succeeds.
     SignedOut,
-    /// Library manager view.
+    /// Library manager view (grid/list of PDFs, folders, tags).
     Library,
-    /// PDF viewer view.
+    /// PDF viewer view for the currently open document.
     Viewer,
-    /// Top-level library/vault selector.
+    /// Top-level multi-library / vault selector screen.
     LibrarySwitcher,
 }
 
-/// User-configurable application settings.
+/// User-configurable application settings shared across modes.
+///
+/// These are not the full preferences store (library layout lives in the DB
+/// and session JSON); they cover viewer defaults and filesystem watch roots.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
-    /// Default rendered page width.
+    /// Default rendered page width in logical pixels for newly opened docs.
     pub default_zoom_width: u16,
-    /// Number of rendered pages held in the tile cache.
+    /// Number of rendered pages held in the viewer tile cache.
     pub tile_cache_pages: usize,
-    /// Directories watched for PDFs.
+    /// Directories watched for PDF add/remove events.
     pub watch_directories: Vec<PathBuf>,
 }
 
@@ -34,42 +67,55 @@ impl Default for Settings {
     }
 }
 
-/// PDF-Folio application state.
+/// Root iced application state for PDF-Folio.
+///
+/// [`PDFolioApp`] is the single source of UI truth passed to `update`, `view`,
+/// and `subscription`. Child runtimes partition that state by surface so
+/// library and viewer code can evolve independently while still sharing the
+/// database handle, appearance, and chrome overlays.
+///
+/// Constructed at launch by `with_initial_file_and_session` (in the viewer
+/// state helpers). Prefer mutating through message handlers rather than
+/// constructing a new instance at runtime.
 #[derive(Debug, Clone)]
 pub struct PDFolioApp {
-    /// Current view mode.
+    /// Current full-screen surface (`Library`, `Viewer`, etc.).
     pub mode: AppMode,
-    /// PDF viewer document/runtime state.
+    /// Open PDF document, zoom, scroll, find, and outline state.
     pub viewer: ViewerRuntime,
-    /// Library browsing, selection, filtering, and drag state.
+    /// Library browsing, selection, filtering, dialogs, and drag state.
     pub library: LibraryRuntime,
-    /// User-created discrete libraries.
+    /// Multi-library vault registry (profiles, previews, switcher UI).
     pub libraries: LibraryRegistryRuntime,
-    /// App chrome state shared by menus, dialogs, and overlays.
+    /// Cross-mode chrome: confirmations, context menu, command palette.
     pub chrome: ChromeRuntime,
-    /// Runtime styling and theme state.
+    /// Active theme id and loaded KDL style book.
     pub appearance: AppearanceRuntime,
-    /// User settings.
+    /// Viewer defaults and filesystem watch directories.
     pub settings: Settings,
-    /// Sync sign-in state that gates access to the library.
+    /// Google sync sign-in state that gates access when configured.
     pub sync_auth: SyncAuthRuntime,
-    /// Library database handle.
+    /// Handle for the currently active library database.
     pub db: Arc<Db>,
-    /// Library currently being synchronized.
+    /// Library id currently mid automatic CRDT sync, if any.
     pub sync_in_progress: Option<String>,
     /// Libraries that should sync after the current pass finishes.
     pub sync_queued_libraries: HashSet<String>,
-    /// Last automatic sync start time.
+    /// Last automatic sync start time (rate-limiting / status UI).
     pub last_sync_started_at: Option<Instant>,
     /// Last successful automatic sync/check completion time.
     pub last_sync_completed_at: Option<SystemTime>,
-    /// Whether background subscriptions may start after the first local frame.
+    /// Whether heavier background subscriptions may run after first paint.
     pub startup_background_ready: bool,
-    /// Last-run state that is waiting for library/document prerequisites.
+    /// Last-run session waiting for library/document prerequisites to load.
     pub(crate) pending_session_restore: Option<AppSession>,
 }
 
-/// Runtime state owned by the library surface.
+/// Runtime state owned by the library manager surface.
+///
+/// Holds entry/folder lists, selection and drag, sidebar filters, inspector
+/// inputs, import/export dialogs, Raindrop UI, clipboard, and undo history.
+/// Mutated primarily by `library::update` and library async tasks.
 #[derive(Debug, Clone)]
 pub struct LibraryRuntime {
     pub compact_view_mode: bool,
@@ -172,30 +218,42 @@ pub struct LibraryRuntime {
     pub history: LibraryHistory,
 }
 
+/// In-app clipboard for cut/copy of library entries or folders.
+///
+/// Distinct from the OS clipboard: paste applies organization changes inside
+/// the open library (and may push undo history) rather than writing files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryClipboard {
     pub mode: LibraryClipboardMode,
     pub target: LibraryClipboardTarget,
 }
 
+/// Whether the library clipboard operation is cut (move) or copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryClipboardMode {
     Cut,
     Copy,
 }
 
+/// Payload held by the library clipboard.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LibraryClipboardTarget {
     Entries(Vec<EntryId>),
     Folder(FolderId),
 }
 
+/// Branching undo/redo stack of library organization snapshots.
+///
+/// Each applied move/tag/delete records a [`LibraryHistoryAction`]; undo/redo
+/// restores the corresponding `before` / `after` organization snapshot via
+/// database tasks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryHistory {
     pub nodes: Vec<LibraryHistoryNode>,
     pub current: usize,
 }
 
+/// One undo/redo graph node with optional action payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryHistoryNode {
     pub parent: Option<usize>,
@@ -203,6 +261,10 @@ pub struct LibraryHistoryNode {
     pub action: Option<LibraryHistoryAction>,
 }
 
+/// Labelled history action with before/after organization snapshots.
+///
+/// `refresh_search_on_restore` forces a search re-run when filters may have
+/// depended on the mutated organization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryHistoryAction {
     pub label: String,
@@ -211,6 +273,7 @@ pub struct LibraryHistoryAction {
     pub refresh_search_on_restore: bool,
 }
 
+/// State for the move-to-folder picker dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryMovePicker {
     pub target: LibraryMoveTarget,
@@ -218,12 +281,14 @@ pub struct LibraryMovePicker {
     pub expanded_folders: HashSet<FolderId>,
 }
 
+/// What the move picker is relocating (selected PDFs vs a single folder).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LibraryMoveTarget {
     SelectedEntries,
     Folder(FolderId),
 }
 
+/// Post-import review sheet: counts, errors, and suggested tags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportReviewState {
     pub title: String,
@@ -236,6 +301,7 @@ pub struct ImportReviewState {
     pub errors: Vec<String>,
 }
 
+/// Export dialog configuration: source set, packaging, naming, conflicts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryExportDialog {
     pub source: ExportSource,
@@ -250,6 +316,7 @@ pub struct LibraryExportDialog {
 }
 
 impl LibraryExportDialog {
+    /// Builds a dialog with default packaging options for `source`.
     pub(crate) fn new(source: ExportSource) -> Self {
         Self {
             source,
@@ -265,6 +332,7 @@ impl LibraryExportDialog {
     }
 }
 
+/// Which library entries an export includes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportSource {
     SelectedEntries,
@@ -273,6 +341,7 @@ pub enum ExportSource {
     Tag(String),
 }
 
+/// Export packaging mode (flat copy, preserved folders, or ZIP).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportMode {
     CopyFlat,
@@ -281,6 +350,7 @@ pub enum ExportMode {
 }
 
 impl ExportMode {
+    /// Returns the user-facing label.
     pub fn label(self) -> &'static str {
         match self {
             Self::CopyFlat => "Copy PDFs to folder",
@@ -290,6 +360,7 @@ impl ExportMode {
     }
 }
 
+/// Filename template used when exporting PDFs to disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFilenameTemplate {
     OriginalFilename,
@@ -299,6 +370,7 @@ pub enum ExportFilenameTemplate {
 }
 
 impl ExportFilenameTemplate {
+    /// Returns the user-facing label.
     pub fn label(self) -> &'static str {
         match self {
             Self::OriginalFilename => "Original filename",
@@ -309,6 +381,7 @@ impl ExportFilenameTemplate {
     }
 }
 
+/// How to handle name conflicts when exporting files to an existing path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportConflictBehavior {
     Skip,
@@ -317,6 +390,7 @@ pub enum ExportConflictBehavior {
 }
 
 impl ExportConflictBehavior {
+    /// Returns the user-facing label.
     pub fn label(self) -> &'static str {
         match self {
             Self::Skip => "Skip existing",
@@ -326,6 +400,7 @@ impl ExportConflictBehavior {
     }
 }
 
+/// Live progress indicator while a library export task runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryExportProgress {
     pub label: String,
@@ -333,6 +408,7 @@ pub struct LibraryExportProgress {
     pub started_at: Instant,
 }
 
+/// Summary counts shown after a library export completes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryExportSummary {
     pub destination: PathBuf,
@@ -342,6 +418,9 @@ pub struct LibraryExportSummary {
 }
 
 /// Restorable library view state captured before drilling into a tag pill.
+///
+/// Clicking a tag on a card filters the library; restoring this snapshot
+/// returns the previous search/filters/scroll without a full reload.
 #[derive(Debug, Clone)]
 pub struct LibraryViewSnapshot {
     pub search_query: String,
@@ -356,7 +435,10 @@ pub struct LibraryViewSnapshot {
     pub library_scroll_offset: f32,
 }
 
-/// Runtime state owned by app chrome and modal overlays.
+/// Cross-mode chrome: confirmations, context menu, command palette, cursor.
+///
+/// Lives on [`PDFolioApp`] rather than library/viewer so overlays can open
+/// from either surface without duplicating state.
 #[derive(Debug, Clone)]
 pub struct ChromeRuntime {
     pub pending_confirmation: Option<ConfirmationAction>,
@@ -369,14 +451,14 @@ pub struct ChromeRuntime {
     pub cursor_position: Point,
 }
 
-/// Runtime state for a right-click contextual menu.
+/// Open right-click contextual menu target and window position.
 #[derive(Debug, Clone)]
 pub struct ContextMenu {
     pub target: ContextMenuTarget,
     pub position: Point,
 }
 
-/// Runtime state for the active visual theme and loaded style book.
+/// Active visual theme and loaded KDL style book.
 #[derive(Debug, Clone)]
 pub struct AppearanceRuntime {
     pub theme: AppTheme,
@@ -384,6 +466,7 @@ pub struct AppearanceRuntime {
     pub style_load_error: Option<String>,
 }
 
+/// One item in a library list/grid render pass (real entry, drag ghost, or drop zone).
 #[derive(Debug, Clone)]
 pub(crate) enum LibraryRenderItem {
     Entry(LibraryEntry),
@@ -391,6 +474,7 @@ pub(crate) enum LibraryRenderItem {
     DropZone(LibraryEntry),
 }
 
+/// Cached smart counts for a folder tree node (total / in-progress / missing).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct FolderSmartCounts {
     pub(crate) total: usize,
@@ -398,6 +482,10 @@ pub(crate) struct FolderSmartCounts {
     pub(crate) missing: usize,
 }
 
+/// Progress indicator for multi-entry library bulk operations.
+///
+/// Shown while reindex, metadata refresh, trash, or similar tasks run; uses
+/// `started_at` for indeterminate animation when exact progress is unavailable.
 #[derive(Debug, Clone)]
 pub struct BulkOperationProgress {
     /// User-facing operation label.
@@ -408,6 +496,7 @@ pub struct BulkOperationProgress {
     pub started_at: Instant,
 }
 
+/// UI-facing Raindrop import progress snapshot, including cancel handle.
 #[derive(Debug, Clone)]
 pub struct RaindropImportProgressView {
     pub completed: usize,
@@ -422,12 +511,14 @@ pub struct RaindropImportProgressView {
     pub task_handle: Option<iced::task::Handle>,
 }
 
+/// Precomputed masonry column layout for the library grid.
 #[derive(Debug, Clone)]
 pub(crate) struct LibraryMasonryLayout {
     pub(crate) columns: Vec<Vec<LibraryMasonryItem>>,
     pub(crate) content_height: f32,
 }
 
+/// One card position inside a masonry column.
 #[derive(Debug, Clone)]
 pub(crate) struct LibraryMasonryItem {
     pub(crate) index: usize,
@@ -435,6 +526,7 @@ pub(crate) struct LibraryMasonryItem {
     pub(crate) height: f32,
 }
 
+/// How a library entry card should render during drag reorder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LibraryEntryRenderMode {
     Normal,
@@ -442,6 +534,7 @@ pub(crate) enum LibraryEntryRenderMode {
     Floating,
 }
 
+/// How a folder card should render during folder drag/nesting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FolderCardRenderMode {
     Normal,

@@ -1,3 +1,13 @@
+//! Document canvas region composition inside the viewer.
+//!
+//! Stacks the raster page canvas, text-selection overlay, optional floating
+//! sidebar toggle (when TOC is closed), and the find-in-document bar over a
+//! bidirectional scrollable. Scroll events emit [`Message::ViewportChanged`]
+//! so navigation and tile prefetch stay in sync with iced's scrollable.
+//!
+//! Related: [`crate::components::viewer::canvas`] for draw/hit-test,
+//! [`super::root`] for placement in the full viewer layout.
+
 use crate::components::viewer::canvas::{ViewerCanvas, ViewerSelectionOverlay};
 use crate::components::viewer::find_bar::viewer_find_anchor;
 use crate::components::viewer::toolbar::viewer_floating_sidebar_toggle;
@@ -5,6 +15,7 @@ use crate::*;
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{canvas, stack};
 
+/// Builds the scrollable document canvas stack (pages, selection, find bar).
 pub(crate) fn view_viewer_document(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let content_size = app.viewer_content_size(app.viewer.viewer_viewport_width);
     let viewer = canvas(ViewerCanvas { app })

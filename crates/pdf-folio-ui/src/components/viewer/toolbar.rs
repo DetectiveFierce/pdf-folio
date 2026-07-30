@@ -1,9 +1,15 @@
+//! # Viewer toolbar
+//!
+//! Top bar controls for navigation back to the library, find, zoom, and
+//! sidebar toggles while a document is open.
+
 use crate::components::shared::sidebar::chevron_button;
 use crate::components::viewer::page_controls::viewer_page_control;
 use crate::components::viewer::zoom::{zoom_control, zoom_menu};
 use crate::*;
 use iced::widget::{pin, row, Svg};
 
+/// Compose the viewer top toolbar for the current document session.
 pub(crate) fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
@@ -106,6 +112,7 @@ fn viewer_library_back_button<'a>(
     .style(move |_, status| crate::style::button_style(tokens, Class::ViewerToolbarButton, status))
 }
 
+/// Click-outside layer that closes the zoom dropdown.
 pub(crate) fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Message> {
     pin(
         mouse_area(container("").width(Length::Fill).height(Length::Fill))
@@ -117,6 +124,7 @@ pub(crate) fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Messa
     .into()
 }
 
+/// Zoom presets and width-fit options dropdown.
 pub(crate) fn view_zoom_menu_dropdown(
     app: &PDFolioApp,
     tokens: ThemeTokens,
@@ -259,6 +267,7 @@ fn viewer_zoom_menu_x(app: &PDFolioApp) -> f32 {
         .max(toolbar_layout.padding_left(Spacing::MD))
 }
 
+/// Floating control to open the viewer outline sidebar.
 pub(crate) fn viewer_floating_sidebar_toggle<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
     chevron_button(
         CHEVRON_RIGHT_SVG,

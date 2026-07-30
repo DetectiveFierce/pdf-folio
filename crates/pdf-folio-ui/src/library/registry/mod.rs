@@ -1,3 +1,21 @@
+//! # Multi-library registry
+//!
+//! Users can keep several independent vaults (each with its own SQLite
+//! file). This submodule owns profiles, the switcher UI state, persistence
+//! (`libraries.json`), cover previews, and cloud sync of library rows.
+//!
+//! ## Submodules
+//!
+//! - [`state`] — `LibraryProfile`, `LibraryRegistryRuntime`, dialogs
+//! - [`session`] — load/create/rename/delete + paths under app data
+//! - [`preview`] — switcher card thumbnails from each vault DB
+//! - [`tasks`] — merge remote sync rows into local registry
+//!
+//! ## App integration
+//!
+//! Methods on `PDFolioApp` here open the switcher, swap `app.db`, reset
+//! library runtime state, and refresh folders/entries for the new vault.
+
 pub(crate) mod preview;
 pub(crate) mod session;
 pub(crate) mod state;
@@ -10,12 +28,14 @@ pub(crate) use tasks::*;
 
 use crate::*;
 impl PDFolioApp {
+    /// Display name of the active vault profile (falls back to the default label).
     pub(crate) fn active_library_name(&self) -> &str {
         self.libraries
             .active_profile()
             .map_or(DEFAULT_LIBRARY_NAME, |profile| profile.name.as_str())
     }
 
+    /// Enter library-switcher mode and clear transient library interactions.
     pub(crate) fn open_library_switcher(&mut self) {
         self.mode = AppMode::LibrarySwitcher;
         self.clear_library_transient_interactions();
@@ -24,6 +44,7 @@ impl PDFolioApp {
         self.libraries.open_menu_library_id = None;
     }
 
+    /// Open `library_id` as the active vault: swap `Db`, reset runtime, refresh data.
     pub(crate) fn select_library(&mut self, library_id: String) -> anyhow::Result<Task<Message>> {
         let Some(profile) = self
             .libraries
@@ -48,6 +69,7 @@ impl PDFolioApp {
         ]))
     }
 
+    /// Replace runtime registry state after create/rename/delete/sync; reselect if active id changed.
     pub(crate) fn apply_library_registry(
         &mut self,
         registry: LibraryRegistryRuntime,
@@ -127,6 +149,7 @@ impl PDFolioApp {
         self.library.library_status = Some(format!("Loading {}...", self.active_library_name()));
     }
 
+    /// Refresh the switcher preview card for the active library from in-memory entries.
     pub(crate) fn set_active_library_preview_from_entries(&mut self) {
         let preview = LibraryPreview {
             total_entries: self.library.library_entries.len(),

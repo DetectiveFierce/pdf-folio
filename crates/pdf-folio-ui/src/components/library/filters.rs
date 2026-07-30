@@ -1,10 +1,14 @@
-//! Library filtering and search matching helpers.
+//! # Library filter and search matching
+//!
+//! Pure predicates for free-text field matching, reading-progress buckets,
+//! and folder-scope visibility. Used by layout/search tasks without app state.
 
 use pdf_folio_core::{FolderId, LibraryEntry};
 
 use super::metadata::{entry_author, entry_title};
 use super::state::LibraryReadingFilter;
 
+/// Whether an entry matches a free-text library query.
 pub fn entry_matches_query(entry: &LibraryEntry, normalized_query: &str) -> bool {
     entry_search_fields_match(
         &entry_title(entry),
@@ -16,6 +20,7 @@ pub fn entry_matches_query(entry: &LibraryEntry, normalized_query: &str) -> bool
     )
 }
 
+/// Label describing which field matched a search hit.
 pub fn search_match_source_label(entry: &LibraryEntry, normalized_query: &str) -> Option<String> {
     search_match_source_label_for_fields(
         &entry_title(entry),
@@ -27,6 +32,7 @@ pub fn search_match_source_label(entry: &LibraryEntry, normalized_query: &str) -
     )
 }
 
+/// Which field (title/author/tag/folder/path) matched, for search hit badges.
 pub fn search_match_source_label_for_fields<'a>(
     title: &str,
     author: &str,
@@ -60,6 +66,7 @@ pub fn search_match_source_label_for_fields<'a>(
     }
 }
 
+/// Whether any of the provided fields contains the normalized query substring.
 pub fn entry_search_fields_match<'a>(
     title: &str,
     author: &str,
@@ -79,10 +86,12 @@ pub fn entry_search_fields_match<'a>(
             .any(|folder| folder.to_lowercase().contains(normalized_query))
 }
 
+/// Reading progress classification for an entry.
 pub fn library_entry_reading_state(entry: &LibraryEntry) -> LibraryReadingFilter {
     library_reading_state(entry.last_page, entry.page_count)
 }
 
+/// Whether an entry is visible under the selected folder scope.
 pub fn entry_visible_in_folder_scope(
     entry: &LibraryEntry,
     selected_folder: Option<&FolderId>,
@@ -93,6 +102,7 @@ pub fn entry_visible_in_folder_scope(
     }
 }
 
+/// Reading progress classification helper.
 pub fn library_reading_state(last_page: u16, page_count: Option<u16>) -> LibraryReadingFilter {
     if page_count.is_some_and(|count| count > 0 && last_page.saturating_add(1) >= count) {
         LibraryReadingFilter::Finished

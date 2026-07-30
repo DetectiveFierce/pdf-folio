@@ -1,4 +1,7 @@
-//! Library view state types.
+//! # Library presentation enums
+//!
+//! Shared enums for metadata density and reading filters used by both pure
+//! helpers and domain state. Kept free of iced dependencies where possible.
 
 /// Density of metadata shown in library cards and rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +15,7 @@ pub enum LibraryMetadataDensity {
 }
 
 impl LibraryMetadataDensity {
+    /// From visible fields.
     pub fn from_visible_fields(fields: &[String]) -> Self {
         let has_file_size = fields.iter().any(|field| field == "file_size");
         let has_page_count = fields.iter().any(|field| field == "page_count");
@@ -24,6 +28,7 @@ impl LibraryMetadataDensity {
         }
     }
 
+    /// Visible fields.
     pub fn visible_fields(self) -> Vec<String> {
         match self {
             Self::Minimal => vec![String::from("author")],
@@ -36,6 +41,7 @@ impl LibraryMetadataDensity {
         }
     }
 
+    /// Returns the user-facing label.
     pub fn label(self) -> &'static str {
         match self {
             Self::Minimal => "Minimal",
@@ -63,6 +69,7 @@ pub enum LibraryReadingFilter {
 }
 
 impl LibraryReadingFilter {
+    /// Returns the user-facing label.
     pub fn label(self) -> &'static str {
         match self {
             Self::Unread => "Unread",

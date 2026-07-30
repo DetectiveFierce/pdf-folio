@@ -1,3 +1,8 @@
+//! # Folder tree presentation
+//!
+//! Renders indented folder rows with fold chevrons, drop targets, and drag
+//! styling for the library navigation sidebar.
+
 use crate::library::view::*;
 use crate::*;
 use iced::widget::{button, column, row, Svg};
@@ -5,6 +10,7 @@ use iced::widget::{button, column, row, Svg};
 const FILE_TREE_CHEVRON_RIGHT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M6.25 4.25 10 8l-3.75 3.75"/></svg>"##;
 const FILE_TREE_CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4.25 6.25 8 10l3.75-3.75"/></svg>"##;
 
+/// Expand/collapse chevron for a folder tree node.
 pub(crate) fn file_tree_fold_button<'a>(
     expanded: bool,
     toggle_message: Message,
@@ -45,6 +51,7 @@ pub(crate) fn file_tree_fold_button<'a>(
     .on_press(toggle_message)
 }
 
+/// Flattened list of visible folder tree rows given expansion state.
 pub(crate) fn folder_sidebar_rows<'a>(
     app: &'a PDFolioApp,
     parent_id: Option<&'a FolderId>,
@@ -113,6 +120,7 @@ pub(crate) fn folder_sidebar_rows<'a>(
     rows.into()
 }
 
+/// Single folder row with indentation, counts, and interaction handlers.
 pub(crate) fn file_tree_row<'a>(
     label: impl Into<String>,
     meta: Option<String>,
@@ -270,6 +278,7 @@ pub(crate) fn file_tree_row<'a>(
     }
 }
 
+/// Apply selected/hover/drop styles to a file tree row container.
 pub(crate) fn apply_file_tree_state_style(
     style: &mut button::Style,
     tokens: ThemeTokens,

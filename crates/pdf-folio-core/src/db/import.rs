@@ -1,4 +1,22 @@
-//! Library import helpers for hashing, scanning, and thumbnail cache paths.
+//! Library import helpers: hashing, scanning, thumbnails, sources, and watching.
+//!
+//! Turns filesystem paths into [`crate::LibraryEntry`] rows. Content identity
+//! is a BLAKE3 digest of file bytes ([`hash_file`]), stored as
+//! [`crate::EntryId`], so the same PDF under a new path merges on re-import.
+//! Folder import aggregates per-file failures into [`ImportSummary::errors`]
+//! rather than aborting the whole batch.
+//!
+//! Also owns:
+//! - Thumbnail cache path helpers under the XDG cache directory.
+//! - External [`crate::ImportSource`] rows (e.g. Raindrop accounts).
+//! - [`LibraryWatcher`], a thin `notify` wrapper that emits
+//!   [`LibraryWatchEvent`]s for PDF create/modify/remove under watched roots.
+//!
+//! # See also
+//!
+//! - [`crate::Db::insert_entry`] for the database write path.
+//! - [`crate::pdf::PdfDoc`] for post-import metadata enrichment.
+//! - [`super::raindrop`] for remote collection mapping after import.
 
 use std::fs;
 use std::io::Read;
@@ -10,23 +28,23 @@ use directories::ProjectDirs;
 
 use super::{Db, EntryId, NewLibraryEntry};
 
-/// Result of importing a single PDF path.
+/// Result of importing a single PDF path (always includes the content-hash id).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedEntry {
-    /// Stable content-derived identifier.
+    /// Stable content-derived identifier (BLAKE3 hex of file bytes).
     pub id: EntryId,
-    /// Imported PDF path.
+    /// Absolute or caller-supplied path written to the library row.
     pub path: PathBuf,
-    /// Whether the entry was newly inserted during this import.
+    /// `true` when no row existed for this path before the upsert.
     pub inserted: bool,
 }
 
-/// Summary returned after a folder import.
+/// Aggregate result of [`import_folder`]: successes plus per-path error messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportSummary {
-    /// All successfully imported or already-known PDFs.
+    /// Successfully hashed/upserted PDFs (includes already-known files).
     pub entries: Vec<ImportedEntry>,
-    /// Non-fatal import errors.
+    /// Non-fatal per-file failures (`"{path}: {error}"`); does not abort the batch.
     pub errors: Vec<String>,
 }
 
@@ -116,11 +134,14 @@ pub fn thumbnail_path(entry_id: &EntryId) -> Result<PathBuf> {
     Ok(thumbnail_cache_dir()?.join(format!("{}.rgba", entry_id.as_str())))
 }
 
-/// Hashes a file using BLAKE3.
+/// Streams `path` through BLAKE3 and returns the lowercase hex digest.
+///
+/// Used as the stable [`EntryId`] for library rows so identical file bytes
+/// map to the same entry across paths and machines.
 ///
 /// # Errors
 ///
-/// Returns an error when the file cannot be read.
+/// Returns an error when the file cannot be opened or read.
 pub fn hash_file(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path)
         .with_context(|| format!("Could not open file: {}.", path.display()))?;
@@ -263,23 +284,27 @@ use std::sync::mpsc::Sender;
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
-/// High-level PDF file event emitted by the library watcher.
+/// High-level PDF file event emitted by [`LibraryWatcher`] (non-PDF paths are ignored).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LibraryWatchEvent {
-    /// A PDF file was created or modified.
+    /// A PDF file was created or modified under a watched root.
     PdfCreated(PathBuf),
-    /// A PDF file was removed.
+    /// A PDF file was removed under a watched root.
     PdfRemoved(PathBuf),
 }
 
-/// Filesystem watcher for configured library folders.
+/// Filesystem watcher that translates `notify` events into [`LibraryWatchEvent`]s.
+///
+/// Only paths with a `.pdf` extension (case-insensitive) are forwarded. The
+/// caller owns the `mpsc` channel and should import/remove library rows in
+/// response. Dropping this value stops watching.
 #[derive(Debug)]
 pub struct LibraryWatcher {
     watcher: RecommendedWatcher,
 }
 
 impl LibraryWatcher {
-    /// Creates a new library watcher.
+    /// Creates a watcher that sends events on `sender` (errors from notify are dropped).
     ///
     /// # Errors
     ///
@@ -313,7 +338,7 @@ impl LibraryWatcher {
         Ok(Self { watcher })
     }
 
-    /// Starts watching a directory for PDF changes.
+    /// Recursively watches `path` for create/modify/remove events on PDF files.
     ///
     /// # Errors
     ///

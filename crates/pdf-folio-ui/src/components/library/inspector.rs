@@ -1,11 +1,18 @@
+//! # Library inspector panel
+//!
+//! Right-hand inspector chrome for library mode: visibility gate and panel
+//! composition for the focused entry or folder.
+
 use crate::library::view::*;
 use crate::*;
 use iced::widget::{column, row};
 
+/// Whether the inspector pane should be shown for the current app state.
 pub(crate) fn library_inspector_visible(app: &PDFolioApp) -> bool {
     app.mode == AppMode::Library && app.library.library_inspector_open
 }
 
+/// Compose the inspector contents for the current selection.
 pub(crate) fn view_library_inspector(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let width = app.library.library_inspector_width.clamp(

@@ -1,4 +1,23 @@
-//! Tantivy full-text index setup.
+//! Tantivy full-text index over extracted PDF page text.
+//!
+//! [`SearchIndex`] is a separate on-disk store from SQLite (default path under
+//! the XDG data directory as `search-index/`). Documents are page-granular:
+//! each [`IndexDocument`] is one page of one library entry so hits can jump
+//! the viewer to a page. Replacing an entry's pages deletes by `id` term then
+//! re-adds in a single commit to keep the index consistent.
+//!
+//! Queries search title, author, and body fields via Tantivy's query parser;
+//! empty queries return no hits. The index does not auto-update when the
+//! library changes — callers (UI/import tasks) must upsert or delete after
+//! text extraction.
+//!
+//! # See also
+//!
+//! - [`crate::pdf::PdfDoc::text_on_page`] for extracting page body text.
+//! - [`crate::LibraryOrganizationSnapshot::search_changed_entry_ids`] for
+//!   deciding which entries to reindex after organization undo.
+//!
+//! [`tantivy`]: https://docs.rs/tantivy
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -11,29 +30,32 @@ use tantivy::query::QueryParser;
 use tantivy::schema::{Field, Schema, TantivyDocument, Value, STORED, STRING, TEXT};
 use tantivy::{doc, Index, IndexWriter, ReloadPolicy, Term};
 
-/// A page-level document to add to the search index.
+/// One page of library content to index (title/author repeated per page for scoring).
+///
+/// `id` should match the library [`crate::db::EntryId`] string. Replacing pages
+/// for an entry deletes all prior docs with that `id` before inserting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexDocument {
-    /// Library entry identifier.
+    /// Library entry identifier (Tantivy `STRING` field, exact match).
     pub id: String,
-    /// PDF title.
+    /// PDF title (tokenized; used for ranking and display context).
     pub title: String,
-    /// PDF author.
+    /// PDF author (tokenized).
     pub author: String,
-    /// Page body text.
+    /// Extracted page body text (tokenized; primary full-text field).
     pub body: String,
-    /// Zero-based page index.
+    /// Zero-based page index stored with the hit for navigation.
     pub page: u64,
 }
 
-/// A search hit returned from Tantivy.
+/// A single ranked search hit pointing at an entry page.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchHit {
-    /// Library entry identifier.
+    /// Library entry identifier matching [`IndexDocument::id`].
     pub id: String,
-    /// Matching zero-based page index.
+    /// Matching zero-based page index within that entry.
     pub page: u64,
-    /// Tantivy relevance score.
+    /// Tantivy relevance score (higher is better; not normalized across queries).
     pub score: f32,
 }
 
@@ -46,7 +68,11 @@ struct SearchFields {
     page: Field,
 }
 
-/// Tantivy search index handle and schema.
+/// Handle to the on-disk Tantivy index and its fixed PDF-Folio schema.
+///
+/// Cheap to clone (shares the underlying index). Writers use a 50 MB heap and
+/// disable merges for interactive upsert latency; a full optimize is left to
+/// maintenance paths outside this type.
 #[derive(Debug, Clone)]
 pub struct SearchIndex {
     schema: Schema,
@@ -56,7 +82,7 @@ pub struct SearchIndex {
 }
 
 impl SearchIndex {
-    /// Creates the PDF-Folio Tantivy schema.
+    /// Builds the fixed schema: `id` (string), `title`/`author`/`body` (text), `page` (u64).
     pub fn new_schema() -> Schema {
         let mut schema_builder = Schema::builder();
         schema_builder.add_text_field("id", STRING | STORED);
@@ -105,17 +131,17 @@ impl SearchIndex {
         })
     }
 
-    /// Returns the active Tantivy schema.
+    /// Returns the Tantivy schema used when this index was opened/created.
     pub fn schema(&self) -> &Schema {
         &self.schema
     }
 
-    /// Returns the index path.
+    /// Directory containing the on-disk Tantivy segment files.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Adds or updates a single page document in the index.
+    /// Indexes one page, replacing any prior pages for the same entry id.
     ///
     /// # Errors
     ///
@@ -124,7 +150,7 @@ impl SearchIndex {
         self.replace_entry_pages([document])
     }
 
-    /// Replaces all indexed pages for an entry.
+    /// Replaces every indexed page for the entry ids present in `documents`.
     ///
     /// # Errors
     ///
@@ -136,7 +162,10 @@ impl SearchIndex {
         self.replace_entries_pages(documents)
     }
 
-    /// Replaces indexed pages for one or more entries in a single commit.
+    /// Batch variant of [`Self::replace_entry_pages`]: one commit for many entries.
+    ///
+    /// Each distinct `document.id` is fully deleted from the index before its
+    /// new page docs are added. Empty iterators are a no-op.
     ///
     /// # Errors
     ///
@@ -172,7 +201,9 @@ impl SearchIndex {
         Ok(())
     }
 
-    /// Searches the full-text index.
+    /// Full-text search over title, author, and body; returns up to `limit` hits by score.
+    ///
+    /// Empty or whitespace-only queries return an empty vec without touching Tantivy.
     ///
     /// # Errors
     ///

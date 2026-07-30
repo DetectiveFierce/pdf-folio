@@ -1,3 +1,27 @@
+//! Desktop Google OAuth (PKCE) against the sync control plane.
+//!
+//! Part of the sync **client** product ([`crate::sync`]). The desktop app never
+//! holds Google client secrets for confidential clients when using PKCE; it
+//! opens a browser, catches the redirect on a loopback port, and posts
+//! `code` + `code_verifier` to the control plane’s
+//! `POST /auth/google/callback`. The server performs Google token exchange,
+//! allow-list checks, and returns a session JWT.
+//!
+//! # Security notes
+//!
+//! - Uses S256 PKCE; state nonce is checked on the loopback callback.
+//! - Loopback URL is fixed: `http://127.0.0.1:53149/callback` (must match the
+//!   Google OAuth client’s authorized redirect URIs).
+//! - Successful sessions are written via [`super::session::save_session`]; the
+//!   JWT is a bearer credential for Turso/R2 token routes — treat the cache file
+//!   as secret.
+//!
+//! # Related
+//!
+//! - Server callback: control-plane handlers under [`crate::server`]
+//! - Session persistence: [`super::session`]
+//! - CLI: `pdf-folio sync auth` in [`super::cli`]
+
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,10 +52,13 @@ pub struct GoogleAuthConfig {
 
 /// Starts the browser-based Google PKCE flow and caches the returned sync session.
 ///
+/// Opens the system browser, waits on the loopback redirect, exchanges the code
+/// with the control plane, and persists a [`Session`] under the XDG data dir.
+///
 /// # Errors
 ///
 /// Returns an error when browser sign-in, the loopback callback, or the sync
-/// server token exchange fails.
+/// server token exchange fails (including allow-list rejection on the server).
 pub async fn sign_in_with_google(config: &GoogleAuthConfig) -> Result<Session> {
     let state = nonce();
     let code_verifier = pkce_verifier();

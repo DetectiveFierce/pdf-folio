@@ -1,3 +1,7 @@
+//! # Application menus
+//!
+//! Menu bar / library switcher structures and item builders shared by the shell.
+
 use crate::*;
 use iced::widget::image;
 use iced::widget::{button, column, row, stack, Svg};
@@ -7,6 +11,7 @@ const OVERFLOW_HORIZONTAL_SVG: &[u8] =
     include_bytes!("../../../assets/icons/overflow-horizontal.svg");
 const OVERFLOW_VERTICAL_SVG: &[u8] = include_bytes!("../../../assets/icons/overflow-vertical.svg");
 
+/// Library switcher panel listing vault profiles with previews and actions.
 pub(crate) fn view_library_switcher(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let card_width = app.layout().metric("LibrarySwitcher", "card_width", 230.0);
     let card_height = app.layout().metric("LibrarySwitcher", "card_height", 362.0);

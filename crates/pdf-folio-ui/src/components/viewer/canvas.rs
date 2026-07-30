@@ -1,4 +1,7 @@
-//! Viewer canvas rendering and wheel interaction.
+//! # Viewer canvas
+//!
+//! Custom iced widgets that paint PDF pages, selection overlays, and handle
+//! wheel/scroll interaction for the continuous viewer.
 
 use crate::*;
 use iced::widget::canvas;
@@ -9,21 +12,25 @@ use std::time::Instant;
 const EMPTY_CANVAS_CLICK_DRAG_THRESHOLD: f32 = 4.0;
 
 #[derive(Debug)]
+/// Viewer Canvas.
 pub(crate) struct ViewerCanvas<'a> {
     pub(crate) app: &'a PDFolioApp,
 }
 
 #[derive(Debug, Default)]
+/// Viewer Canvas State.
 pub(crate) struct ViewerCanvasState {
     pending_empty_click: Option<Point>,
 }
 
 #[derive(Debug)]
+/// Viewer Selection Overlay.
 pub(crate) struct ViewerSelectionOverlay<'a> {
     pub(crate) app: &'a PDFolioApp,
 }
 
 #[derive(Debug, Clone, Copy)]
+/// History Restore Spinner.
 pub(crate) struct HistoryRestoreSpinner {
     pub(crate) started_at: Instant,
     pub(crate) now: Instant,
@@ -530,6 +537,7 @@ fn point_in_rect(point: Point, rect: Rectangle) -> bool {
         && point.y >= rect.y
         && point.y <= rect.y + rect.height
 }
+/// Convert a wheel event into a pixel scroll delta for the viewer.
 pub(crate) fn scroll_delta_pixels(
     delta: mouse::ScrollDelta,
     line_scroll_pixels: f32,

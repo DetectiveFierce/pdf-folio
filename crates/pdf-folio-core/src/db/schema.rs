@@ -1,4 +1,19 @@
 //! Database opening, connection setup, and SQLite migrations.
+//!
+//! Owns the lifecycle of the on-disk `library.db` file used by [`Db`].
+//! Opening always runs `migrate`, which creates the baseline schema (entries,
+//! folders, tags, import/raindrop tables, sync/CRDT tables) and applies
+//! additive `ALTER TABLE` upgrades for older installs.
+//!
+//! Connections are not pooled: each domain method opens a short-lived rusqlite
+//! handle with foreign keys enabled. Prefer [`Db::open_default`] for production
+//! (XDG data dir) and [`Db::open`] with a temp path in tests.
+//!
+//! # See also
+//!
+//! - [`crate::LibraryEntry`], [`crate::Folder`], and related types for row shapes.
+//! - [`super::library`], [`super::organization`], [`super::sync`] for queries
+//!   against this schema.
 
 use std::path::{Path, PathBuf};
 
@@ -11,6 +26,9 @@ use super::Db;
 
 impl Db {
     /// Opens the default library database under the XDG data directory.
+    ///
+    /// Resolves `…/PDF-Folio/library.db` via the `dev.pdf-folio.PDF-Folio`
+    /// project dirs, creating the parent directory when needed.
     ///
     /// # Errors
     ///
@@ -25,7 +43,7 @@ impl Db {
         Self::open(data_dir.join("library.db"))
     }
 
-    /// Opens a library database at `path` and runs migrations.
+    /// Opens a library database at `path` and runs migrations before returning.
     ///
     /// # Errors
     ///
@@ -36,11 +54,19 @@ impl Db {
         Ok(db)
     }
 
-    /// Returns the database path.
+    /// Returns the filesystem path of this database file.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    /// Opens a short-lived SQLite connection with foreign keys enabled.
+    ///
+    /// Used by all domain methods on [`Db`]. Callers must not hold the
+    /// connection across `await` points; drop it promptly after the query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file cannot be opened by rusqlite.
     pub(super) fn connection(&self) -> Result<Connection> {
         let connection = Connection::open(&self.path).with_context(|| {
             format!("Could not open library database: {}.", self.path.display())

@@ -1,12 +1,25 @@
 //! Platform integration helpers used by the UI.
+//!
+//! Isolates OS-specific file manager invocation so library “Reveal in file
+//! manager” / “Open containing folder” actions stay portable. Windows uses
+//! Explorer, macOS uses `open`, and Linux tries FreeDesktop FileManager1 D-Bus
+//! then common file managers before falling back to `xdg-open`.
+//!
+//! Related: native pickers live in `rfd` tasks constructed from shell update;
+//! this module only builds argv for an already-known path.
 
 use std::path::Path;
 
 #[cfg(test)]
+/// Returns the preferred single file-manager command for tests.
 pub(crate) fn file_manager_command(path: &Path, reveal: bool) -> Option<(String, Vec<String>)> {
     file_manager_commands(path, reveal).into_iter().next()
 }
 
+/// Builds ordered (program, args) candidates to open or reveal `path`.
+///
+/// When `reveal` is true, prefers select-in-folder behavior; otherwise opens
+/// the parent directory. Callers try candidates until one exits successfully.
 pub(crate) fn file_manager_commands(path: &Path, reveal: bool) -> Vec<(String, Vec<String>)> {
     let Some(parent) = path.parent() else {
         return Vec::new();
@@ -58,6 +71,7 @@ pub(crate) fn file_manager_commands(path: &Path, reveal: bool) -> Vec<(String, V
     }
 }
 
+/// Percent-encodes `path` as a `file://` URI for D-Bus FileManager1.
 pub(crate) fn file_uri(path: &Path) -> String {
     let path = path.to_string_lossy();
     let mut uri = String::from("file://");

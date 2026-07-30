@@ -1,3 +1,18 @@
+//! # Library modal dialogs
+//!
+//! View builders for blocking/overlay dialogs used in library mode: confirm
+//! destructive actions, import menus, create folder, import review, export,
+//! tag manager, move picker, and Raindrop connect/import flows.
+//!
+//! ## Ownership
+//!
+//! Presentation only: reads dialog state from `PDFolioApp` / chrome and emits
+//! `Message`s. Business logic for the confirmed actions lives in
+//! `crate::library::{update, tasks, actions}`.
+//!
+//! Most dialogs share `modal_container` styling; confirmation copy is
+//! centralized in [`confirmation_copy`].
+
 use crate::components::library::cards::{document_preview_lines, ghost_tags_row};
 use crate::library::view::*;
 use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
@@ -8,6 +23,7 @@ use pdf_folio_cloud::raindrop::RaindropImportDestination;
 const RAINDROP_INTEGRATIONS_URL: &str = "https://app.raindrop.io/settings/integrations";
 const FOLDER_PLUS_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"##;
 
+/// Generic yes/cancel confirmation overlay; special-cases folder delete.
 pub(crate) fn view_confirmation_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let Some(action) = app.chrome.pending_confirmation.as_ref() else {
@@ -45,6 +61,7 @@ pub(crate) fn view_confirmation_dialog(app: &PDFolioApp) -> Element<'_, Message>
     .into()
 }
 
+/// Rich confirmation for moving a folder tree to trash (counts + suppress checkbox).
 pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
     app: &'a PDFolioApp,
     folder_id: &'a FolderId,
@@ -130,6 +147,7 @@ pub(crate) fn view_delete_folder_confirmation_dialog<'a>(
     .into()
 }
 
+/// Chooser for PDF / folder / Raindrop import entry points.
 pub(crate) fn view_import_menu_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let mut actions = column![].spacing(Spacing::SM);
@@ -189,6 +207,7 @@ fn delete_folder_count_card<'a>(
     .into()
 }
 
+/// Name input modal for creating a folder under the current parent.
 pub(crate) fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let parent = app
@@ -230,6 +249,7 @@ pub(crate) fn view_create_folder_dialog(app: &PDFolioApp) -> Element<'_, Message
     .into()
 }
 
+/// Post-import summary with optional tagging of newly imported entries.
 pub(crate) fn view_import_review_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let Some(review) = app.library.import_review.as_ref() else {
@@ -308,6 +328,7 @@ pub(crate) fn view_import_review_dialog(app: &PDFolioApp) -> Element<'_, Message
     modal_container(app, tokens, dialog, "ImportReviewDialog", 500.0)
 }
 
+/// Configure destination, naming, and options for exporting library PDFs.
 pub(crate) fn view_export_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     if let Some(summary) = app.library.last_export_summary.as_ref() {
@@ -471,6 +492,7 @@ pub(crate) fn view_export_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     modal_container(app, tokens, dialog, "ExportDialog", 560.0)
 }
 
+/// Rename/delete tags library-wide.
 pub(crate) fn view_tag_manager_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let query = app.library.tag_manager_filter.trim().to_lowercase();
@@ -597,6 +619,7 @@ fn modal_container<'a>(
     .into()
 }
 
+/// Folder tree picker for moving or adding entries to a destination folder.
 pub(crate) fn view_library_move_picker_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let Some(picker) = app.library.move_picker.as_ref() else {
@@ -775,6 +798,7 @@ fn view_move_picker_folder_rows<'a>(
     rows.into()
 }
 
+/// Prompt to connect a Raindrop.io token / open integrations settings.
 pub(crate) fn view_raindrop_connect_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let can_submit = !app.library.raindrop_client_id_input.trim().is_empty()
@@ -854,6 +878,7 @@ pub(crate) fn view_raindrop_connect_dialog(app: &PDFolioApp) -> Element<'_, Mess
     .into()
 }
 
+/// Configure and start a Raindrop collection import (destination + structure).
 pub(crate) fn view_raindrop_import_dialog(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let selected_count = app.library.selected_raindrop_pdf_ids.len();
@@ -1396,6 +1421,7 @@ fn format_remote_file_size(bytes: u64) -> String {
     }
 }
 
+/// Title, body, and confirm button label for a pending `ConfirmationAction`.
 pub(crate) fn confirmation_copy<'a>(
     action: &'a ConfirmationAction,
     app: &'a PDFolioApp,

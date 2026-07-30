@@ -1,4 +1,18 @@
 //! Library display metadata, preferences, and attribution state.
+//!
+//! [`Db`] methods here update user-facing fields on entries without changing
+//! folder membership or import identity: display title/author overrides,
+//! sort-key cleanup, library view preferences, reading progress, ratings,
+//! cover hashes, and one-shot attribution flags (so background jobs do not
+//! re-extract the same author/page count forever).
+//!
+//! Display overrides set `metadata_locked` so later import/sync passes leave
+//! the user's labels alone until [`Db::reset_display_metadata`] unlocks them.
+//!
+//! # See also
+//!
+//! - [`crate::LibraryPreferences`] for the preference payload shape.
+//! - [`super::library`] for entry insert and listing.
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -200,7 +214,7 @@ impl Db {
         Ok(())
     }
 
-    /// Updates reading progress for an entry.
+    /// Records the last zero-based page read and refreshes `opened_at` to now.
     ///
     /// # Errors
     ///

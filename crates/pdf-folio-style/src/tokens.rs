@@ -1,11 +1,34 @@
-//! Semantic design tokens for the UI crate.
+//! Semantic design tokens shared by the style book and the UI crate.
+//!
+//! This module is the typed vocabulary of the design system. Values either
+//! come from KDL (via [`crate::StyleBook`]) or from the constant tables below
+//! (`Spacing`, `FontSize`, `Radius`, …) so views avoid magic numbers.
+//!
+//! # Groups
+//!
+//! | Type | Purpose |
+//! | --- | --- |
+//! | [`ThemeTokens`] | Full resolved palette + per-class styles + primitives |
+//! | [`AppLayoutTokens`] | Window, sidebar, card, toolbar, viewer metrics |
+//! | [`AppLabelTokens`] | Chrome strings loaded from KDL label sections |
+//! | [`ClassStyle`] / [`VisualStyle`] | Per-state paint for a [`crate::Class`] |
+//! | [`ComponentLayout`] / [`ComponentTextStyle`] | Size/padding/text from KDL |
+//! | [`VisualBorder`] / [`BorderSide`] / [`BoxShadow`] | Side-aware chrome |
+//! | [`Spacing`], [`FontSize`], [`Radius`], [`BorderWidth`] | Constant scales |
+//!
+//! Prefer [`ui_font`] and [`display_font`] when constructing iced text so the
+//! bundled IBM Plex Sans / Vollkorn families stay consistent.
 
 use iced::{font, Color, Font};
 use std::collections::HashMap;
 
 use crate::classes::{Class, ComponentState};
 
-/// KDL-backed layout, sizing, and spacing values used by the app shell.
+/// KDL-backed layout metrics for the app shell (window, sidebars, grids, menus).
+///
+/// Populated from `application.kdl`, component `layout { … }` blocks, and top-level
+/// `layout { metric …; count … }` nodes. Extra keys land in [`Self::metrics`] /
+/// [`Self::counts`] via `Component.property` names.
 #[derive(Debug, Clone)]
 pub struct AppLayoutTokens {
     /// Default application window size.
@@ -256,7 +279,10 @@ impl Default for AppLayoutTokens {
     }
 }
 
-/// KDL-backed user-facing labels for app chrome and command surfaces.
+/// KDL-backed user-facing strings for menus, selection toolbar, and chrome copy.
+///
+/// Loaded from `labels { … }` nodes and component `labels` blocks so product
+/// copy can change without recompiling Rust (when hot-reloading styles).
 #[derive(Debug, Clone)]
 pub struct AppLabelTokens {
     /// App menu names.
@@ -1029,7 +1055,10 @@ impl Default for PrimitiveTokens {
     }
 }
 
-/// Resolved theme color and component tokens used by PDF-Folio views.
+/// Fully resolved palette, per-class styles, and drawing primitives for one theme.
+///
+/// Obtained from [`crate::StyleBook::tokens`] or [`crate::AppTheme::tokens`].
+/// Views should treat this as an immutable snapshot for a single frame.
 #[derive(Debug, Clone, Copy)]
 pub struct ThemeTokens {
     /// Window background.
@@ -1062,63 +1091,66 @@ pub struct ThemeTokens {
     pub primitives: PrimitiveTokens,
 }
 
-/// Spacing tokens in logical pixels.
+/// Spacing scale in logical pixels (padding, gaps between controls).
+///
+/// Prefer these constants over raw numbers so density stays consistent. Larger
+/// layout metrics (sidebar width, card size) live in [`AppLayoutTokens`].
 pub struct Spacing;
 
 impl Spacing {
-    /// Extra-small space.
+    /// Extra-small space (tight icon padding).
     pub const XS: f32 = 4.0;
-    /// Small space.
+    /// Small space (compact control padding).
     pub const SM: f32 = 6.0;
-    /// Medium space.
+    /// Medium space (default row/section gap).
     pub const MD: f32 = 9.0;
-    /// Large space.
+    /// Large space (toolbar group separation).
     pub const LG: f32 = 14.0;
-    /// Extra-large space.
+    /// Extra-large space (panel-level separation).
     pub const XL: f32 = 24.0;
-    /// Viewer page gutter.
+    /// Horizontal gutter around viewer pages.
     pub const PAGE_GUTTER: f32 = 32.0;
-    /// Vertical space between rendered pages.
+    /// Vertical gap between rendered PDF pages.
     pub const PAGE_GAP: f32 = 24.0;
 }
 
-/// Border-radius tokens in logical pixels.
+/// Corner-radius scale in logical pixels.
 pub struct Radius;
 
 impl Radius {
-    /// Sharp edge.
+    /// Sharp edge (no rounding).
     pub const NONE: f32 = 0.0;
-    /// Small radius for compact controls.
+    /// Small radius for compact controls and menus.
     pub const SM: f32 = 6.0;
-    /// Medium radius for repeated cards.
+    /// Medium radius for cards and raised surfaces.
     pub const MD: f32 = 10.0;
 }
 
-/// Border-width tokens in logical pixels.
+/// Border-width scale in logical pixels.
 pub struct BorderWidth;
 
 impl BorderWidth {
     /// No visible border.
     pub const NONE: f32 = 0.0;
-    /// Hairline border used for normal controls and surfaces.
+    /// Single-pixel hairline for surfaces and controls.
     pub const HAIRLINE: f32 = 1.0;
 }
 
-/// Font-size tokens in logical pixels.
+/// Font-size scale in logical pixels for UI text roles.
 pub struct FontSize;
 
 impl FontSize {
-    /// Small metadata text.
+    /// Small metadata / secondary labels.
     pub const SM: u32 = 12;
-    /// Body text.
+    /// Default body text.
     pub const MD: u32 = 13;
-    /// Control label text.
+    /// Control labels (buttons, inputs).
     pub const CONTROL: u32 = 14;
-    /// Section heading text.
+    /// Section headings.
     pub const HEADING: u32 = 16;
 }
 
-/// Font-weight tokens for semantic text roles.
+/// Font-weight aliases for semantic text roles.
 pub struct FontWeight;
 
 impl FontWeight {
@@ -1132,12 +1164,12 @@ impl FontWeight {
     pub const BOLD: iced::font::Weight = iced::font::Weight::Bold;
 }
 
-/// Primary application font family.
+/// Primary UI font family name (IBM Plex Sans), registered from bundled bytes.
 pub const UI_FONT_FAMILY: &str = "IBM Plex Sans";
-/// Bundled Vollkorn family for bookish titles and brand marks.
+/// Display / brand font family name (Vollkorn), registered from bundled bytes.
 pub const DISPLAY_FONT_FAMILY: &str = "Vollkorn";
 
-/// Returns the primary UI font with a semantic weight.
+/// iced [`Font`] for the primary UI face at the given weight.
 pub fn ui_font(weight: iced::font::Weight) -> Font {
     Font {
         family: font::Family::Name(UI_FONT_FAMILY),
@@ -1146,7 +1178,7 @@ pub fn ui_font(weight: iced::font::Weight) -> Font {
     }
 }
 
-/// Returns the bundled display font with a semantic variable weight.
+/// iced [`Font`] for the display face at the given weight.
 pub fn display_font(weight: iced::font::Weight) -> Font {
     Font {
         family: font::Family::Name(DISPLAY_FONT_FAMILY),
@@ -1155,7 +1187,7 @@ pub fn display_font(weight: iced::font::Weight) -> Font {
     }
 }
 
-/// Icon-size tokens in logical pixels.
+/// Icon-size scale in logical pixels for SVG / glyph slots.
 pub struct IconSize;
 
 impl IconSize {

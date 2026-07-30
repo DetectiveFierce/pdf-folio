@@ -1,8 +1,25 @@
+//! # Library viewport and animation state helpers
+//!
+//! Methods on `PDFolioApp` that compute what is on screen (list windows,
+//! masonry items), card heights, and short-lived interaction animations
+//! (card hover lift, folder drop flash). Re-exports presentation enums
+//! such as [`LibraryMetadataDensity`] from `components::library::state`.
+//!
+//! ## Ownership
+//!
+//! Geometry here is **domain-aware**: it reads live app layout metrics,
+//! zoom, and thumbnail cache. Pure constants and density enums stay in
+//! components; anything that needs `self.library` belongs here.
+//!
+//! Used by [`crate::library::view`] for virtualization and by
+//! [`crate::library::data`] when requesting visible thumbnails.
+
 pub(crate) use crate::components::library::state::*;
 
 use crate::*;
 
 impl PDFolioApp {
+    /// Index range of list-mode entries that intersect the viewport (with overscan).
     pub(crate) fn visible_library_entry_window_at(
         &self,
         entries_len: usize,
@@ -29,6 +46,7 @@ impl PDFolioApp {
         start..end
     }
 
+    /// Masonry items whose vertical span intersects the scroll window (with overscan).
     pub(crate) fn visible_library_masonry_layout_items_at<'a>(
         &self,
         layout: &'a LibraryMasonryLayout,
@@ -49,6 +67,7 @@ impl PDFolioApp {
         items
     }
 
+    /// Column count for grid mode (1 in compact/list mode).
     pub(crate) fn library_entries_per_row(&self) -> usize {
         if self.library.compact_view_mode {
             1
@@ -63,6 +82,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Row pitch used for list virtualization or grid zoom scaling.
     pub(crate) fn library_row_height(&self) -> f32 {
         if self.library.compact_view_mode {
             self.layout().library_list_row_height + self.library_row_hover_lift()
@@ -71,6 +91,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Build shortest-column masonry positions for the given entries.
     pub(crate) fn library_masonry_layout(&self, entries: &[LibraryEntry]) -> LibraryMasonryLayout {
         let column_count = self.library_entries_per_row().max(1);
         let mut columns = vec![Vec::new(); column_count];
@@ -95,6 +116,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Masonry layout for drag-aware render items (same heights as entry layout).
     pub(crate) fn library_render_item_masonry_layout(
         &self,
         items: &[LibraryRenderItem],
@@ -107,6 +129,7 @@ impl PDFolioApp {
         self.library_masonry_layout(&entries)
     }
 
+    /// Estimated card height from thumbnail aspect ratio and info chrome.
     pub(crate) fn library_card_estimated_height(&self, entry_id: &EntryId) -> f32 {
         let thumbnail_height = self
             .thumbnail_for_entry(entry_id, self.thumbnail_size_for_grid_zoom())
@@ -120,6 +143,7 @@ impl PDFolioApp {
         thumbnail_height + self.library_card_info_height() + self.library_card_hover_lift()
     }
 
+    /// 0..1 hover-lift animation progress for a card.
     pub(crate) fn library_card_hover_progress(&self, entry_id: &EntryId) -> f32 {
         self.library
             .library_card_hover_animations
@@ -129,6 +153,7 @@ impl PDFolioApp {
             .clamp(0.0, 1.0)
     }
 
+    /// Start or reverse the hover animation for `entry_id`.
     pub(crate) fn set_library_card_hover(&mut self, entry_id: EntryId, hovered: bool) {
         self.library.animation_now = Instant::now();
         let animation = self
@@ -139,6 +164,7 @@ impl PDFolioApp {
         animation.go_mut(hovered, self.library.animation_now);
     }
 
+    /// Advance library animation clocks and expire finished hover/drop flashes.
     pub(crate) fn tick_animations(&mut self, now: Instant) {
         self.library.animation_now = now;
         let visible_entry_ids = self
@@ -155,6 +181,7 @@ impl PDFolioApp {
         self.expire_viewer_page_fades(now);
     }
 
+    /// Show indeterminate bulk-op progress chrome for a long-running batch.
     pub(crate) fn start_bulk_operation_progress(&mut self, label: impl Into<String>, total: usize) {
         let label = label.into();
         self.library.library_status = Some(format!("{label} {total} PDFs..."));
@@ -165,11 +192,13 @@ impl PDFolioApp {
         });
     }
 
+    /// Briefly highlight a folder after a successful drop.
     pub(crate) fn start_folder_drop_flash(&mut self, folder_id: FolderId, now: Instant) {
         self.library.folder_drop_flash = Some((folder_id, now));
         self.library.animation_now = now;
     }
 
+    /// Clear the drop flash once its display duration has elapsed.
     pub(crate) fn expire_folder_drop_flash(&mut self, now: Instant) {
         if self
             .library
@@ -184,6 +213,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Whether `folder_id` should currently show the post-drop flash style.
     pub(crate) fn folder_drop_flash_active(&self, folder_id: &FolderId) -> bool {
         folder_drop_flash_active_at(
             folder_id,
@@ -195,12 +225,14 @@ impl PDFolioApp {
         )
     }
 
+    /// Default hover animation curve/duration for library cards.
     pub(crate) fn library_card_hover_animation() -> Animation<bool> {
         Animation::new(false)
             .duration(Duration::from_millis(LIBRARY_CARD_HOVER_DURATION_MS))
             .easing(animation::Easing::EaseOutCubic)
     }
 
+    /// True when any card hover animation still needs frames.
     pub(crate) fn library_card_hover_animation_active(&self) -> bool {
         self.library
             .library_card_hover_animations
@@ -208,6 +240,7 @@ impl PDFolioApp {
             .any(|animation| animation.is_animating(self.library.animation_now))
     }
 
+    /// Drop finished viewer page-fade timestamps (shared animation tick).
     pub(crate) fn expire_viewer_page_fades(&mut self, now: Instant) {
         let fade_ms = self.layout().viewer_page_fade_ms;
         self.viewer.page_fade_started.retain(|_, started_at| {
@@ -215,10 +248,12 @@ impl PDFolioApp {
         });
     }
 
+    /// Whether any viewer page fade is still running.
     pub(crate) fn viewer_page_fade_active(&self) -> bool {
         !self.viewer.page_fade_started.is_empty()
     }
 
+    /// Reset drags, hovers, resize grips, and flashes (e.g. on mode switch).
     pub(crate) fn clear_library_transient_interactions(&mut self) {
         self.library.library_card_hover_animations.clear();
         self.library.folder_drop_flash = None;

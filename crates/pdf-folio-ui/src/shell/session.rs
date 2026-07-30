@@ -1,4 +1,22 @@
-//! Last-session persistence for reopening PDF-Folio where it was left.
+//! Last-session persistence and Google sync auth runtime for PDF-Folio.
+//!
+//! Serializes enough of [`PDFolioApp`] into `session.json` under the XDG data
+//! directory so relaunch restores window size, theme, library filters,
+//! selection, and the last open document (page, zoom, find, outline expand).
+//! CLI file open skips session document restore so the provided path wins.
+//!
+//! # Key types
+//!
+//! - [`AppSession`] — on-disk snapshot schema (versioned).
+//! - [`SessionViewer`] — document path, page, scroll, zoom, find, outline.
+//! - [`SyncAuthRuntime`] / [`SyncAuthState`] — Google sign-in gate for cloud
+//!   features and library access when sync is configured.
+//!
+//! # Related modules
+//!
+//! - [`crate::save_app_session_task`] — async wrapper used by updaters.
+//! - [`super::update`] — applies sign-in results and session-related messages.
+//! - [`crate::library::registry`] — active library id is part of the snapshot.
 
 use std::path::{Path, PathBuf};
 
@@ -14,6 +32,7 @@ use crate::*;
 
 const SESSION_SCHEMA_VERSION: u16 = 1;
 
+/// Versioned on-disk snapshot of app mode, window, viewer, and library UI.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AppSession {
     version: u16,
@@ -44,6 +63,7 @@ struct SessionAppearance {
     theme: String,
 }
 
+/// Viewer portion of an [`AppSession`]: document identity, page, zoom, find.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SessionViewer {
     pub(crate) document_path: Option<PathBuf>,
@@ -89,12 +109,14 @@ struct SessionLibrary {
 }
 
 impl AppSession {
+    /// Logical window size restored on the next launch.
     pub(crate) fn window_size(&self) -> [f32; 2] {
         [self.window.width.max(1.0), self.window.height.max(1.0)]
     }
 }
 
 impl PDFolioApp {
+    /// Captures restorable UI state into an [`AppSession`] for disk write.
     pub(crate) fn snapshot_session(&self) -> AppSession {
         AppSession {
             version: SESSION_SCHEMA_VERSION,
@@ -187,6 +209,10 @@ impl PDFolioApp {
         }
     }
 
+    /// Applies pending session library filters/selection after entries load.
+    ///
+    /// May open a restored library entry in the viewer and always requests
+    /// visible thumbnails plus a scroll restore task.
     pub(crate) fn apply_pending_session_to_loaded_library(&mut self) -> Task<Message> {
         let Some(session) = self.pending_session_restore.clone() else {
             return Task::none();
@@ -218,6 +244,7 @@ impl PDFolioApp {
         ])
     }
 
+    /// Applies pending session page/zoom/find state after a document opens.
     pub(crate) fn apply_pending_session_to_open_document(&mut self) -> Task<Message> {
         let Some(session) = self.pending_session_restore.clone() else {
             return Task::none();
@@ -264,6 +291,7 @@ impl PDFolioApp {
         ])
     }
 
+    /// Applies theme, mode, and library UI fields from a loaded session snapshot.
     pub(crate) fn apply_library_session(&mut self, session: &AppSession) {
         self.appearance.theme = parse_theme(&session.appearance.theme);
         self.mode = match session.mode {
@@ -356,6 +384,7 @@ impl PDFolioApp {
     }
 }
 
+/// Reads `session.json` if present and schema-compatible; otherwise `Ok(None)`.
 pub(crate) fn load_app_session() -> Result<Option<AppSession>> {
     let path = session_path()?;
     if !path.exists() {
@@ -379,6 +408,7 @@ pub(crate) fn load_app_session() -> Result<Option<AppSession>> {
     }
 }
 
+/// Writes `session` as pretty JSON under the PDF-Folio data directory.
 pub(crate) fn save_app_session(session: &AppSession) -> Result<()> {
     let path = session_path()?;
     if let Some(parent) = path.parent() {
@@ -532,6 +562,10 @@ fn default_session_library_id() -> String {
 const DEFAULT_ALLOWED_GOOGLE_EMAIL: &str = "aidanjwagner03@gmail.com";
 const DEFAULT_SYNC_SERVER_BASE_URL: &str = "http://mind-palace:53148";
 
+/// Sync sign-in gate: expected allow-list email, server URL, and auth phase.
+///
+/// When not signed in, the shell shows a sign-in surface instead of the
+/// library. Loaded from cached cloud session on startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncAuthRuntime {
     pub state: SyncAuthState,
@@ -540,6 +574,7 @@ pub struct SyncAuthRuntime {
     pub error: Option<String>,
 }
 
+/// Auth phase for the Google sync gate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncAuthState {
     SignedOut,
@@ -549,6 +584,7 @@ pub enum SyncAuthState {
 }
 
 impl SyncAuthRuntime {
+    /// Restores auth from the cached cloud session, or starts signed out.
     pub fn load() -> Self {
         let expected_email = expected_google_email();
         let server_base_url = sync_server_base_url();
@@ -598,10 +634,12 @@ impl SyncAuthRuntime {
         }
     }
 
+    /// Returns true when sync auth is in the signed-in state.
     pub fn is_signed_in(&self) -> bool {
         matches!(self.state, SyncAuthState::SignedIn { .. })
     }
 
+    /// Applies a successful sync session to auth runtime state.
     pub fn apply_signed_in_session(&mut self, session: Session) -> Result<()> {
         if !session_matches_expected_email(&session, &self.expected_email) {
             self.state = SyncAuthState::WrongAccount {
@@ -629,6 +667,9 @@ impl SyncAuthRuntime {
     }
 }
 
+/// Runs browser Google OAuth and emits [`Message::SyncSignInFinished`].
+///
+/// Rejects sessions whose email is not the configured allow-list address.
 pub(crate) fn sync_sign_in_task(expected_email: String, server_base_url: String) -> Task<Message> {
     Task::perform(
         async move {

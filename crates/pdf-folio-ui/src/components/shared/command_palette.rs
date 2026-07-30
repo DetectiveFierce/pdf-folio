@@ -1,10 +1,13 @@
-//! Command palette overlays and list rendering.
+//! # Command palette
+//!
+//! Overlay capture layer and filtered command list for keyboard-driven actions.
 
 use crate::shell::commands::{command_matches, library_commands, CommandDanger};
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 use iced::widget::{column, row};
 
+/// Full-window click-catcher that dismisses the palette when clicked.
 pub(crate) fn command_palette_capture_layer<'a>() -> Element<'a, Message> {
     pin(
         mouse_area(container("").width(Length::Fill).height(Length::Fill))
@@ -15,6 +18,7 @@ pub(crate) fn command_palette_capture_layer<'a>() -> Element<'a, Message> {
     .into()
 }
 
+/// Searchable command list overlay for the current command surface.
 pub(crate) fn view_command_palette(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let panel_width = app
         .layout()

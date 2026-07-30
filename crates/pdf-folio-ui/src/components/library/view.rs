@@ -1,4 +1,8 @@
-//! Reusable rendered library UI components.
+//! # Reusable library toolbar widgets
+//!
+//! Message-generic controls: layout toggle, grid zoom, sort/density pickers,
+//! scrollable shell, and new-folder button styling. Domain views bind them to
+//! concrete `Message` constructors.
 
 use iced::widget::scrollable::{Direction, Scrollbar, Viewport};
 use iced::widget::{button, container, pick_list, row, scrollable, slider, text, tooltip, Svg};
@@ -12,13 +16,16 @@ use std::time::Duration;
 
 use crate::library::state::LibraryMetadataDensity;
 
+/// LIBRARY SCROLLABLE ID constant used by this module.
 pub const LIBRARY_SCROLLABLE_ID: &str = "library-scrollable";
 
+/// Returns a copy with alpha applied.
 pub fn with_alpha(mut color: iced::Color, alpha: f32) -> iced::Color {
     color.a *= alpha.clamp(0.0, 1.0);
     color
 }
 
+/// Breadcrumb button.
 pub fn breadcrumb_button<'a, Message: Clone + 'a>(
     label: String,
     active: bool,
@@ -54,6 +61,7 @@ pub fn breadcrumb_button<'a, Message: Clone + 'a>(
     .into()
 }
 
+/// Library scrollable.
 pub fn library_scrollable<'a, Message: 'a>(
     content: iced::widget::Column<'a, Message>,
     tokens: ThemeTokens,
@@ -79,6 +87,7 @@ pub fn library_scrollable<'a, Message: 'a>(
         .into()
 }
 
+/// Library layout toggle button.
 pub fn library_layout_toggle_button<'a, Message: Clone + 'a>(
     compact_view_mode: bool,
     tokens: ThemeTokens,
@@ -137,6 +146,7 @@ pub fn library_layout_toggle_button<'a, Message: Clone + 'a>(
     .into()
 }
 
+/// Library grid zoom control.
 pub fn library_grid_zoom_control<'a, Message: Clone + 'a>(
     min: f32,
     max: f32,
@@ -184,6 +194,7 @@ pub fn library_grid_zoom_control<'a, Message: Clone + 'a>(
     .into()
 }
 
+/// Library new folder button.
 pub fn library_new_folder_button<'a, Message: 'a>(
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
@@ -204,6 +215,7 @@ pub fn library_new_folder_button<'a, Message: 'a>(
     .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
 }
 
+/// Library metadata density picker.
 pub fn library_metadata_density_picker<'a, Message: Clone + 'a>(
     selected: LibraryMetadataDensity,
     options: &'static [LibraryMetadataDensity],
@@ -228,6 +240,7 @@ pub fn library_metadata_density_picker<'a, Message: Clone + 'a>(
         .into()
 }
 
+/// Library sort picker.
 pub fn library_sort_picker<'a, Message: Clone + 'a>(
     selected: LibrarySortMode,
     options: &'static [LibrarySortMode],

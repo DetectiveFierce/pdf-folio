@@ -1,3 +1,22 @@
+//! Cloudflare R2 presigned URL helpers (SigV4) for the control plane.
+//!
+//! R2 secret keys never leave the server. Handlers call [`presigned_r2_url`] to
+//! mint single-object PUT/GET URLs for content-addressed PDF keys
+//! (`blobs/<blake3>.pdf`). Turso credentials are served from config in
+//! handlers rather than minted here; this module focuses on object storage.
+//!
+//! # Invariants
+//!
+//! - Blob object keys always follow [`r2_blob_key`].
+//! - Hashes must be 64-character lowercase/upper hex BLAKE3 digests
+//!   ([`validate_hash`]) before a URL is issued.
+//! - Presigned URL TTL is short ([`R2_URL_TTL_SECONDS`], ~15 minutes).
+//!
+//! # Related
+//!
+//! - [`super::handlers`] — `/token/r2/*` routes
+//! - Client: [`crate::sync::blobs::R2Client`]
+
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use hmac::{Hmac, Mac};
@@ -7,8 +26,14 @@ use super::config::Config;
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Lifetime of R2 presigned URLs (~15 minutes).
 pub(crate) const R2_URL_TTL_SECONDS: i64 = 60 * 15;
 
+/// Builds an AWS SigV4 query-string presigned URL for R2 (`method` is `GET` or `PUT`).
+///
+/// # Errors
+///
+/// Returns an error when the R2 endpoint has no host or HMAC signing fails.
 pub(crate) fn presigned_r2_url(
     config: &Config,
     method: &str,
@@ -88,10 +113,17 @@ fn percent_encode(value: &str) -> String {
         .replace("%7E", "~")
 }
 
+/// Object key for a content-addressed PDF: `blobs/<hash>.pdf`.
 pub(crate) fn r2_blob_key(hash: &str) -> String {
     format!("blobs/{hash}.pdf")
 }
 
+/// Validates that `hash` is a 64-character hex BLAKE3 digest.
+///
+/// # Errors
+///
+/// Returns an error when the string is the wrong length or contains non-hex chars.
+/// Callers must validate before presigning so clients cannot request arbitrary keys.
 pub(crate) fn validate_hash(hash: &str) -> Result<()> {
     if hash.len() == 64 && hash.chars().all(|ch| ch.is_ascii_hexdigit()) {
         Ok(())

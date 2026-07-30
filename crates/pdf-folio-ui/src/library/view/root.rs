@@ -1,3 +1,13 @@
+//! # Library root view
+//!
+//! Entry point for library mode rendering: header or selection toolbar,
+//! breadcrumbs, virtualized entry/folder content, navigation sidebar, and
+//! optional inspector. Dialogs and drag previews are stacked by the shell
+//! around this tree.
+//!
+//! Reads derived data via `visible_library_entries`, `child_folders`, and
+//! layout helpers; does not mutate app state.
+
 use super::*;
 use iced::widget::{column, row};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -5,6 +15,7 @@ use std::time::Instant;
 
 static LIBRARY_VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
+/// Compose the full library mode UI for the current app state.
 pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let probe_started_at = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").map(|_| Instant::now());
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);

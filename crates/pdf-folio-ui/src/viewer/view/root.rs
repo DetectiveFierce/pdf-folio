@@ -1,3 +1,13 @@
+//! Root viewer mode view: toolbar, sidebar, canvas, find bar.
+//!
+//! Entry point for `AppMode::Viewer` content (chrome overlays such as the
+//! command palette are layered by the shared root surface). Layout is a
+//! toolbar row above a horizontal split of optional TOC/thumbnail sidebar and
+//! the main document column (error banner, jump dialog, canvas).
+//!
+//! Related: [`super::document`] for the canvas stack,
+//! [`crate::components::viewer`] for toolbar/sidebar widgets.
+
 use crate::components::shared::error_banner::dismissible_error_banner;
 use crate::components::viewer::page_controls::view_jump_dialog;
 use crate::components::viewer::sidebar::view_sidebar;
@@ -6,6 +16,7 @@ use crate::viewer::view::document::view_viewer_document;
 use crate::*;
 use iced::widget::{column, row};
 
+/// Builds the full viewer-mode element tree for the current app state.
 pub(crate) fn view_viewer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let sidebar: Element<'_, Message> = if app.viewer.toc_open {
         view_sidebar(app).into()

@@ -1,4 +1,35 @@
-//! Async task constructors and blocking helpers for library operations.
+//! # Library async tasks and blocking I/O helpers
+//!
+//! Builds iced [`Task`]s that perform database, search-index, import/export, and
+//! Raindrop work off the UI thread, then map results back to [`Message`] variants.
+//! Also hosts a few synchronous helpers used by those tasks (import with index,
+//! watch-event application, Raindrop rollback file I/O).
+//!
+//! ## Ownership
+//!
+//! This module is **domain I/O**, not presentation. Callers (primarily
+//! [`crate::library::update`] and [`crate::library::actions`]) own UX state;
+//! tasks only receive the data they need (`Arc<Db>`, paths, entry ids) and
+//! return messages that the update path applies.
+//!
+//! Organization snapshots (`LibraryHistoryAction` before/after) are captured
+//! inside many mutating tasks so undo/redo can restore folder/entry layout
+//! without re-deriving diffs on the UI thread.
+//!
+//! ## Major task families
+//!
+//! - **Order / structure:** manual entry & folder order, create/rename/move/
+//!   delete folders, move/add entries, paste clipboard
+//! - **Metadata:** edit/reset/relink, bulk reset/refresh/delete metadata, reindex
+//! - **Trash:** bulk restore, permanent entry/folder delete
+//! - **Import/export:** PDF/folder import with search index, library export,
+//!   import-review helpers
+//! - **Raindrop:** import stream, thumbnail prefetch, pending rollback
+//!   persistence and cleanup
+//! - **Search:** debounced full-library search returning entries + hit pages
+//!
+//! Prefer `Task::perform` + `spawn_blocking` for SQLite; keep pure path/title
+//! cleanup helpers free of app state so tests and import paths can share them.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -33,12 +64,14 @@ enum RaindropImportTaskEvent {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// Disk-backed record of a Raindrop import that may still need rollback on cancel/crash.
 pub(crate) struct PendingRaindropRollback {
     entries: Vec<PendingRaindropRollbackEntry>,
     folders: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// One imported PDF path (and whether it was newly inserted) for Raindrop rollback cleanup.
 pub(crate) struct PendingRaindropRollbackEntry {
     id: String,
     path: PathBuf,
@@ -46,6 +79,7 @@ pub(crate) struct PendingRaindropRollbackEntry {
 }
 
 impl PendingRaindropRollback {
+    /// Build a rollback payload from the entries and folders created during an import.
     pub(crate) fn from_progress(
         imported_entries: Vec<ImportedEntry>,
         created_folders: Vec<FolderId>,
@@ -66,11 +100,13 @@ impl PendingRaindropRollback {
         }
     }
 
+    /// True when there is nothing left to delete or clear on disk.
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty() && self.folders.is_empty()
     }
 }
 
+/// Path to `pending-rollback.json` under the app data `raindrop/` directory.
 pub(crate) fn pending_raindrop_rollback_path() -> anyhow::Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "pdf-folio", "PDF-Folio")
         .ok_or_else(|| anyhow::anyhow!("Could not find a data directory for PDF-Folio."))?;
@@ -80,6 +116,7 @@ pub(crate) fn pending_raindrop_rollback_path() -> anyhow::Result<PathBuf> {
         .join("pending-rollback.json"))
 }
 
+/// Load a pending Raindrop rollback file if present.
 pub(crate) fn load_pending_raindrop_rollback() -> anyhow::Result<Option<PendingRaindropRollback>> {
     let path = pending_raindrop_rollback_path()?;
     if !path.exists() {
@@ -92,6 +129,7 @@ pub(crate) fn load_pending_raindrop_rollback() -> anyhow::Result<Option<PendingR
     Ok(Some(rollback))
 }
 
+/// Persist a Raindrop rollback payload so a canceled import can clean up later.
 pub(crate) fn save_pending_raindrop_rollback(
     rollback: &PendingRaindropRollback,
 ) -> anyhow::Result<()> {
@@ -105,6 +143,7 @@ pub(crate) fn save_pending_raindrop_rollback(
     Ok(())
 }
 
+/// Remove the pending Raindrop rollback file (no-op if missing).
 pub(crate) fn clear_pending_raindrop_rollback() -> anyhow::Result<()> {
     let path = pending_raindrop_rollback_path()?;
     match std::fs::remove_file(&path) {
@@ -117,6 +156,7 @@ pub(crate) fn clear_pending_raindrop_rollback() -> anyhow::Result<()> {
     }
 }
 
+/// Delete canceled Raindrop download files on a background thread; optionally clear the rollback file.
 pub(crate) fn cleanup_raindrop_import_files(
     entries: Vec<PendingRaindropRollbackEntry>,
     clear_when_done: bool,
@@ -150,6 +190,7 @@ pub(crate) fn cleanup_raindrop_import_files(
     });
 }
 
+/// Persist root-level manual PDF order and return a history action for undo.
 pub(crate) fn persist_manual_entry_order_task(
     db: Arc<Db>,
     entry_ids: Vec<EntryId>,
@@ -186,6 +227,7 @@ pub(crate) fn persist_manual_entry_order_task(
     )
 }
 
+/// Concurrently fetch remote cover images for Raindrop PDF candidates.
 pub(crate) fn raindrop_thumbnail_task(pdfs: Vec<RaindropPdfCandidate>) -> Task<Message> {
     let candidates = pdfs
         .into_iter()
@@ -239,6 +281,7 @@ pub(crate) fn raindrop_thumbnail_task(pdfs: Vec<RaindropPdfCandidate>) -> Task<M
     )
 }
 
+/// Whether the destination mode recreates Raindrop folder hierarchy.
 pub(crate) fn raindrop_import_preserves_structure(destination: &RaindropImportDestination) -> bool {
     matches!(
         destination,
@@ -247,6 +290,7 @@ pub(crate) fn raindrop_import_preserves_structure(destination: &RaindropImportDe
     )
 }
 
+/// Optional local root folder id for the chosen Raindrop destination mode.
 pub(crate) fn raindrop_import_root_folder(
     destination: &RaindropImportDestination,
 ) -> Option<FolderId> {
@@ -258,6 +302,7 @@ pub(crate) fn raindrop_import_root_folder(
     }
 }
 
+/// Map UI toggles (preserve structure + root) into a `RaindropImportDestination`.
 pub(crate) fn raindrop_import_destination(
     preserve_structure: bool,
     root_folder: Option<FolderId>,
@@ -277,6 +322,7 @@ pub(crate) fn raindrop_import_destination(
     }
 }
 
+/// Stream a Raindrop import with progress events; returns the task and a cancel handle.
 pub(crate) fn raindrop_import_task(
     db: Arc<Db>,
     preview: pdf_folio_cloud::raindrop::RaindropImportPreview,
@@ -364,6 +410,7 @@ pub(crate) fn raindrop_import_task(
     .abortable()
 }
 
+/// Undo a partially completed Raindrop import using the on-disk rollback payload.
 pub(crate) fn rollback_pending_raindrop_import_task(
     db: Arc<Db>,
     rollback: PendingRaindropRollback,
@@ -454,6 +501,7 @@ pub(crate) fn rollback_pending_raindrop_import_task(
     )
 }
 
+/// On startup, load any pending Raindrop rollback so the UI can offer cleanup.
 pub(crate) fn pending_raindrop_rollback_check_task() -> Task<Message> {
     Task::perform(
         async {
@@ -474,6 +522,7 @@ pub(crate) fn pending_raindrop_rollback_check_task() -> Task<Message> {
     )
 }
 
+/// Persist per-folder manual PDF order inside `folder_id` and emit a history action.
 pub(crate) fn persist_manual_folder_entry_order_task(
     db: Arc<Db>,
     folder_id: FolderId,
@@ -511,6 +560,7 @@ pub(crate) fn persist_manual_folder_entry_order_task(
     )
 }
 
+/// Persist sibling folder order under `parent_id` and emit a history action.
 pub(crate) fn persist_manual_folder_order_task(
     db: Arc<Db>,
     parent_id: Option<FolderId>,
@@ -548,6 +598,7 @@ pub(crate) fn persist_manual_folder_order_task(
     )
 }
 
+/// Run `operation` for each entry id, snapshot organization for undo, and report counts.
 pub(crate) fn bulk_operation_task<F>(
     db: Arc<Db>,
     entry_ids: Vec<EntryId>,
@@ -597,6 +648,7 @@ where
     )
 }
 
+/// Rename a tag across all entries; history-backed.
 pub(crate) fn rename_tag_task(db: Arc<Db>, old_tag: String, new_tag: String) -> Task<Message> {
     Task::perform(
         async move {
@@ -630,6 +682,7 @@ pub(crate) fn rename_tag_task(db: Arc<Db>, old_tag: String, new_tag: String) -> 
     )
 }
 
+/// Remove a tag from all entries; history-backed.
 pub(crate) fn delete_tag_task(db: Arc<Db>, tag: String) -> Task<Message> {
     Task::perform(
         async move {
@@ -663,6 +716,7 @@ pub(crate) fn delete_tag_task(db: Arc<Db>, tag: String) -> Task<Message> {
     )
 }
 
+/// Rename a folder in the database; history-backed.
 pub(crate) fn rename_folder_task(db: Arc<Db>, folder_id: FolderId, name: String) -> Task<Message> {
     Task::perform(
         async move {
@@ -696,6 +750,7 @@ pub(crate) fn rename_folder_task(db: Arc<Db>, folder_id: FolderId, name: String)
     )
 }
 
+/// Reparent a folder under `new_parent` (or library root); history-backed.
 pub(crate) fn move_folder_task(
     db: Arc<Db>,
     folder_id: FolderId,
@@ -733,6 +788,7 @@ pub(crate) fn move_folder_task(
     )
 }
 
+/// Move a folder tree to trash (soft delete); history-backed.
 pub(crate) fn delete_folder_task(db: Arc<Db>, folder_id: FolderId) -> Task<Message> {
     Task::perform(
         async move {
@@ -801,6 +857,7 @@ fn collect_folder_subtree_ids(
     }
 }
 
+/// Assign selected entries exclusively to `folder_id` (or clear folders); history-backed.
 pub(crate) fn move_entries_to_folder_task(
     db: Arc<Db>,
     entry_ids: Vec<EntryId>,
@@ -850,6 +907,7 @@ pub(crate) fn move_entries_to_folder_task(
     )
 }
 
+/// Add folder membership without removing existing folders; history-backed.
 pub(crate) fn add_entries_to_folder_task(
     db: Arc<Db>,
     entry_ids: Vec<EntryId>,
@@ -864,6 +922,7 @@ pub(crate) fn add_entries_to_folder_task(
     )
 }
 
+/// Create a folder under the optional parent and return a history action.
 pub(crate) fn create_folder_task(
     db: Arc<Db>,
     name: String,
@@ -894,6 +953,7 @@ pub(crate) fn create_folder_task(
     )
 }
 
+/// Paste or move clipboard entries/folders into the current destination; history-backed.
 pub(crate) fn paste_library_clipboard_task(
     db: Arc<Db>,
     clipboard: LibraryClipboard,
@@ -975,6 +1035,7 @@ pub(crate) fn paste_library_clipboard_task(
     )
 }
 
+/// Restore a before/after organization snapshot for undo or redo.
 pub(crate) fn restore_library_history_snapshot_task(
     db: Arc<Db>,
     snapshot: LibraryOrganizationSnapshot,
@@ -1026,6 +1087,7 @@ pub(crate) fn restore_library_history_snapshot_task(
     )
 }
 
+/// Write edited title/author (and related fields) for one entry.
 pub(crate) fn edit_metadata_task(
     db: Arc<Db>,
     entry: LibraryEntry,
@@ -1066,6 +1128,7 @@ pub(crate) fn edit_metadata_task(
     )
 }
 
+/// Reset one entry's display metadata back to file-derived defaults.
 pub(crate) fn reset_metadata_task(db: Arc<Db>, entry: LibraryEntry) -> Task<Message> {
     Task::perform(
         async move {
@@ -1101,6 +1164,7 @@ pub(crate) fn reset_metadata_task(db: Arc<Db>, entry: LibraryEntry) -> Task<Mess
     )
 }
 
+/// Point a library entry at a new filesystem path after a missing-file relink.
 pub(crate) fn relink_entry_task(db: Arc<Db>, entry_id: EntryId, path: PathBuf) -> Task<Message> {
     Task::perform(
         async move {
@@ -1121,6 +1185,7 @@ pub(crate) fn relink_entry_task(db: Arc<Db>, entry_id: EntryId, path: PathBuf) -
     )
 }
 
+/// Reset display metadata for many entries and report bulk progress.
 pub(crate) fn bulk_reset_metadata_task(db: Arc<Db>, entries: Vec<LibraryEntry>) -> Task<Message> {
     Task::perform(
         async move {
@@ -1168,6 +1233,7 @@ pub(crate) fn bulk_reset_metadata_task(db: Arc<Db>, entries: Vec<LibraryEntry>) 
     )
 }
 
+/// Re-read PDF metadata from disk for many entries.
 pub(crate) fn bulk_refresh_metadata_task(db: Arc<Db>, entries: Vec<LibraryEntry>) -> Task<Message> {
     Task::perform(
         async move {
@@ -1199,6 +1265,7 @@ pub(crate) fn bulk_refresh_metadata_task(db: Arc<Db>, entries: Vec<LibraryEntry>
     )
 }
 
+/// Soft-delete many entries (move to trash) with history support.
 pub(crate) fn bulk_delete_metadata_task(db: Arc<Db>, entry_ids: Vec<EntryId>) -> Task<Message> {
     Task::perform(
         async move {
@@ -1245,6 +1312,7 @@ pub(crate) fn bulk_delete_metadata_task(db: Arc<Db>, entry_ids: Vec<EntryId>) ->
     )
 }
 
+/// Restore trashed entries and/or folders back into the live library.
 pub(crate) fn bulk_restore_trash_items_task(
     db: Arc<Db>,
     entries: Vec<LibraryEntry>,
@@ -1313,6 +1381,7 @@ pub(crate) fn bulk_restore_trash_items_task(
     )
 }
 
+/// Permanently remove trashed entries from the database (not disk files unless configured).
 pub(crate) fn bulk_permanently_delete_entries_task(
     db: Arc<Db>,
     entry_ids: Vec<EntryId>,
@@ -1346,6 +1415,7 @@ pub(crate) fn bulk_permanently_delete_entries_task(
     )
 }
 
+/// Permanently remove a trashed folder (and its trash relationships).
 pub(crate) fn permanently_delete_folder_from_trash_task(
     db: Arc<Db>,
     folder_id: FolderId,
@@ -1372,6 +1442,7 @@ pub(crate) fn permanently_delete_folder_from_trash_task(
     )
 }
 
+/// Rebuild full-text search index documents for the given entries.
 pub(crate) fn bulk_reindex_task(entries: Vec<LibraryEntry>) -> Task<Message> {
     Task::perform(
         async move {
@@ -1393,6 +1464,7 @@ pub(crate) fn bulk_reindex_task(entries: Vec<LibraryEntry>) -> Task<Message> {
     )
 }
 
+/// Copy/export selected entries to a destination directory using export dialog options.
 pub(crate) fn export_library_entries_task(
     entries: Vec<LibraryEntry>,
     dialog: LibraryExportDialog,
@@ -1803,6 +1875,7 @@ fn export_metadata_json_bytes(
     Ok(serde_json::to_vec_pretty(&items)?)
 }
 
+/// Build the post-import review dialog state from an `ImportSummary`.
 pub(crate) fn import_review_from_summary(
     title: String,
     summary: &ImportSummary,
@@ -1831,6 +1904,7 @@ pub(crate) fn import_review_from_summary(
     }
 }
 
+/// Resolve which entries an export dialog source (selection/folder/tag/single) refers to.
 pub(crate) fn export_entries_for_source(
     app: &PDFolioApp,
     source: &ExportSource,
@@ -1857,6 +1931,7 @@ pub(crate) fn export_entries_for_source(
     }
 }
 
+/// Flush deferred author/title attribution work against the open database.
 pub(crate) fn attribute_pending_metadata_task(db: Arc<Db>) -> Task<Message> {
     Task::perform(
         async move { tokio::task::spawn_blocking(move || attribute_pending_metadata(&db)).await? },
@@ -1867,6 +1942,7 @@ pub(crate) fn attribute_pending_metadata_task(db: Arc<Db>) -> Task<Message> {
     )
 }
 
+/// Full-library search returning matching entries and page hit maps for the query.
 pub(crate) async fn search_library_task(
     db: Arc<Db>,
     query: String,
@@ -1912,6 +1988,7 @@ pub(crate) async fn search_library_task(
     .await?
 }
 
+/// Scan a directory for PDFs, import new files, and update the search index.
 pub(crate) fn import_folder_with_index(db: &Db, root: &Path) -> anyhow::Result<ImportSummary> {
     let paths = scan_pdf_files(root)?;
     let mut entries = Vec::new();
@@ -1927,6 +2004,7 @@ pub(crate) fn import_folder_with_index(db: &Db, root: &Path) -> anyhow::Result<I
     Ok(ImportSummary { entries, errors })
 }
 
+/// Apply a filesystem watch event (create/modify/remove) to the library database.
 pub(crate) fn apply_watch_event(db: &Db, event: LibraryWatchEvent) -> anyhow::Result<()> {
     match event {
         LibraryWatchEvent::PdfCreated(path) => {
@@ -2016,6 +2094,7 @@ fn index_documents_for_entry(entry: &LibraryEntry) -> anyhow::Result<Vec<IndexDo
     Ok(documents)
 }
 
+/// Import a single PDF path and index it for search.
 pub(crate) fn import_pdf_with_index(db: &Db, path: PathBuf) -> anyhow::Result<ImportedEntry> {
     let id = EntryId::new(hash_file(&path)?);
     let inserted = db.entry_by_path(&path)?.is_none();
@@ -2096,6 +2175,7 @@ fn attributed_title(doc: &PdfDoc) -> Option<String> {
 }
 
 #[cfg(test)]
+/// Best-effort display title derived from a PDF file path stem.
 pub(crate) fn title_from_path(path: &Path) -> Option<String> {
     title_from_path_inner(path)
 }
@@ -2111,6 +2191,7 @@ fn title_from_path_inner(path: &Path) -> Option<String> {
         .and_then(clean_import_title)
 }
 
+/// Normalize a raw title string for import (trim, strip controls, empty → None).
 pub(crate) fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
     let title = value
         .as_ref()

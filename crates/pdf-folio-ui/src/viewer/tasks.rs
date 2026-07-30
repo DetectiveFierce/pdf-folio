@@ -1,4 +1,12 @@
 //! Async task constructors for viewer document loading and rendering.
+//!
+//! Keeps blocking PDF open/render work off the iced UI thread. Completions
+//! return through the crate [`Message`] bus (`DocumentOpened`,
+//! `LibraryDocumentOpened`, `PageRendered`, `ZoomRenderSettled`, etc.).
+//!
+//! Related: [`super::update`] handles those messages, [`super::navigation`]
+//! schedules zoom debounce, library update calls open tasks when a card is
+//! activated.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,6 +19,7 @@ use pdf_folio_core::{PdfDoc, RenderedPage, TileKey};
 use crate::messages::Message;
 use crate::PDFolioApp;
 
+/// Renders one page at `key.width_px` on a blocking thread pool worker.
 pub(crate) async fn render_page(
     doc: Arc<PdfDoc>,
     key: TileKey,
@@ -20,6 +29,9 @@ pub(crate) async fn render_page(
     Ok((key, page))
 }
 
+/// Opens a PDF from an arbitrary filesystem path (file dialog / CLI).
+///
+/// Emits [`Message::DocumentOpened`] or [`Message::DocumentError`].
 pub(crate) fn open_document_task(path: PathBuf) -> Task<Message> {
     Task::perform(
         async move {
@@ -37,6 +49,9 @@ pub(crate) fn open_document_task(path: PathBuf) -> Task<Message> {
     )
 }
 
+/// Opens a library entry's PDF, tagging the result with `entry_id`.
+///
+/// Emits [`Message::LibraryDocumentOpened`] or [`Message::DocumentError`].
 pub(crate) fn open_library_document_task(entry_id: EntryId, path: PathBuf) -> Task<Message> {
     Task::perform(
         async move { tokio::task::spawn_blocking(move || PdfDoc::open(&path)).await? },
@@ -50,6 +65,10 @@ pub(crate) fn open_library_document_task(entry_id: EntryId, path: PathBuf) -> Ta
     )
 }
 
+/// Records “last opened” for the current library entry after a successful open.
+///
+/// No-op when the document was not opened from a library entry. Emits
+/// [`Message::ProgressSaved`] or [`Message::LibraryError`].
 pub(crate) fn mark_entry_opened_task(app: &PDFolioApp) -> Task<Message> {
     let Some(entry_id) = app.viewer.current_entry_id.clone() else {
         return Task::none();
@@ -67,6 +86,9 @@ pub(crate) fn mark_entry_opened_task(app: &PDFolioApp) -> Task<Message> {
     )
 }
 
+/// Waits 140 ms then emits [`Message::ZoomRenderSettled`] for `generation`.
+///
+/// Stale generations are ignored when a newer zoom superseded the gesture.
 pub(crate) fn schedule_zoom_render(generation: u64) -> Task<Message> {
     Task::perform(
         async move {

@@ -1,0 +1,4 @@
+node_modules/
+site/
+# Generated from crates/**/*.rs by extract-rustdoc.mjs
+content/api/

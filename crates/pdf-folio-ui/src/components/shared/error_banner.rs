@@ -1,8 +1,11 @@
-//! Shared error presentation helpers.
+//! # Error banners
+//!
+//! Dismissible error presentation used by library and shell surfaces.
 
 use crate::*;
 use iced::widget::row;
 
+/// Inline error message with a dismiss control.
 pub(crate) fn dismissible_error_banner<'a>(
     message: &'a str,
     tokens: ThemeTokens,

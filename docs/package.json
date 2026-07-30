@@ -1,0 +1,16 @@
+{
+  "name": "pdf-folio-docs",
+  "private": true,
+  "type": "module",
+  "description": "Minimal static docs site builder for PDF-Folio",
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "extract": "node extract-rustdoc.mjs",
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "serve": "node build.mjs --serve"
+  },
+  "dependencies": {
+    "marked": "^15.0.12"
+  }
+}

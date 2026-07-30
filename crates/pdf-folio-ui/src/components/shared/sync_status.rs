@@ -1,4 +1,6 @@
-//! Shared sync status indicators.
+//! # Sync status indicators
+//!
+//! Small status glyphs/labels for cloud sync state in toolbars.
 
 use crate::components::library::view::with_alpha;
 use crate::components::viewer::canvas::HistoryRestoreSpinner;
@@ -9,6 +11,7 @@ use std::time::{Duration, SystemTime};
 
 const SYNC_CHECK_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"##;
 
+/// Toolbar indicator reflecting library cloud sync status.
 pub(crate) fn library_sync_indicator(
     app: &PDFolioApp,
     tokens: ThemeTokens,

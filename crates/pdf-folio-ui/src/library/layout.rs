@@ -1,3 +1,18 @@
+//! # Library layout metrics and visible entry projection
+//!
+//! Zoom limits, column caps, and the primary **`visible_library_entries`**
+//! pipeline: apply tag/folder/reading/missing/recent filters and manual
+//! sort within the selected folder.
+//!
+//! ## Ownership
+//!
+//! Domain geometry bound to `PDFolioApp` layout tokens and library filter
+//! state. Filter predicates themselves are pure helpers from
+//! `components::library::filters`.
+//!
+//! Consumers: view composition, drag hit-testing, thumbnail windowing, and
+//! selection pruning after filter changes.
+
 use crate::*;
 
 fn entry_folder_manual_order(entry: &LibraryEntry, folder_id: &FolderId) -> i64 {
@@ -10,36 +25,43 @@ fn entry_folder_manual_order(entry: &LibraryEntry, folder_id: &FolderId) -> i64 
 }
 
 impl PDFolioApp {
+    /// Minimum grid zoom factor from layout metrics.
     pub(crate) fn library_grid_zoom_min(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "grid_zoom_min", 0.25)
     }
 
+    /// Maximum grid zoom factor from layout metrics.
     pub(crate) fn library_grid_zoom_limit(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "grid_zoom_max", 12.0)
     }
 
+    /// Discrete zoom step for wheel/button adjustments.
     pub(crate) fn library_grid_zoom_step(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "grid_zoom_step", 0.05)
     }
 
+    /// Hard cap on masonry columns at minimum zoom.
     pub(crate) fn library_grid_dense_column_cap(&self) -> usize {
         self.layout()
             .count("LibraryInteraction", "grid_zoom_dense_column_cap", 28)
     }
 
+    /// Extra vertical space reserved for card hover elevation.
     pub(crate) fn library_card_hover_lift(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "card_hover_lift", 2.0)
     }
 
+    /// Extra vertical space reserved for list-row hover elevation.
     pub(crate) fn library_row_hover_lift(&self) -> f32 {
         self.layout()
             .metric("LibraryInteraction", "row_hover_lift", 1.0)
     }
 
+    /// Entries shown in the main pane after search, tag, folder, and smart filters.
     pub(crate) fn visible_library_entries(&self) -> Vec<LibraryEntry> {
         let source = self
             .library
@@ -91,6 +113,7 @@ impl PDFolioApp {
         entries
     }
 
+    /// Live or trash entry list depending on `trash_view_active`.
     pub(crate) fn active_library_entries(&self) -> &Vec<LibraryEntry> {
         if self.library.trash_view_active {
             &self.library.library_trash_entries
@@ -99,12 +122,14 @@ impl PDFolioApp {
         }
     }
 
+    /// Current grid zoom factor clamped to layout min/max.
     pub(crate) fn library_grid_zoom(&self) -> f32 {
         self.library
             .library_grid_zoom
             .clamp(self.library_grid_zoom_min(), self.library_grid_zoom_max())
     }
 
+    /// Alias for the configured maximum grid zoom.
     pub(crate) fn library_grid_zoom_max(&self) -> f32 {
         let width = self.library_available_grid_width();
         (width / self.layout().library_grid_card_width)
@@ -112,6 +137,7 @@ impl PDFolioApp {
             .clamp(1.0, self.library_grid_zoom_limit())
     }
 
+    /// Width available for masonry columns after sidebars and padding.
     pub(crate) fn library_available_grid_width(&self) -> f32 {
         let sidebar_width = if self.library.library_tag_sidebar_open {
             self.library.library_tag_sidebar_width + self.layout().sidebar_resize_handle_width
@@ -130,6 +156,7 @@ impl PDFolioApp {
         (viewport_width - self.layout().library_scrollbar_gutter).max(1.0)
     }
 
+    /// Recompute content viewport width after sidebar/inspector open or resize.
     pub(crate) fn recalculate_library_viewport_width(&mut self) {
         let sidebar_width = if self.library.library_tag_sidebar_open {
             self.library.library_tag_sidebar_width + self.layout().sidebar_resize_handle_width
@@ -146,6 +173,7 @@ impl PDFolioApp {
                 .max(1.0);
     }
 
+    /// Adjust zoom so the grid keeps approximately `columns` columns after a chrome change.
     pub(crate) fn fit_library_grid_zoom_to_columns(&mut self, columns: usize) {
         if self.library.compact_view_mode || columns == 0 {
             return;
@@ -158,14 +186,17 @@ impl PDFolioApp {
             .clamp(self.library_grid_zoom_min(), self.library_grid_zoom_max());
     }
 
+    /// Horizontal/vertical gap between masonry cards.
     pub(crate) fn library_grid_column_gap(&self) -> f32 {
         self.layout().library_masonry_gap
     }
 
+    /// Ideal card width implied by current zoom before column packing.
     pub(crate) fn library_grid_target_card_width(&self) -> f32 {
         self.layout().library_grid_card_width * self.library_grid_zoom()
     }
 
+    /// Actual card width after dividing available width by column count.
     pub(crate) fn library_grid_card_width(&self) -> f32 {
         if self.library.compact_view_mode {
             return self.library_grid_target_card_width();
@@ -176,40 +207,49 @@ impl PDFolioApp {
         ((self.library_available_grid_width() - total_gap) / columns as f32).max(1.0)
     }
 
+    /// Fixed chrome height under the thumbnail for title/meta at the current density.
     pub(crate) fn library_card_info_height(&self) -> f32 {
         (self.layout().library_card_info_height * self.library_grid_zoom()).clamp(88.0, 176.0)
     }
 
+    /// Cap on thumbnail media height inside a card.
     pub(crate) fn library_card_media_max_height(&self) -> f32 {
         self.layout().library_card_media_max_height * self.library_grid_zoom()
     }
 
+    /// Text measure width for card titles.
     pub(crate) fn library_card_title_width(&self) -> f32 {
         self.layout().library_card_title_width * self.library_grid_zoom()
     }
 
+    /// Font scale factor for card text at the current zoom.
     pub(crate) fn library_card_text_scale(&self) -> f32 {
         self.library_grid_zoom().clamp(0.55, 1.35)
     }
 
+    /// Resolved card body font size in points.
     pub(crate) fn library_card_font_size(&self, base_size: u32) -> u32 {
         ((base_size as f32) * self.library_card_text_scale())
             .round()
             .clamp(8.0, 28.0) as u32
     }
 
+    /// Inner padding for library cards.
     pub(crate) fn library_card_padding(&self) -> f32 {
         (Spacing::LG * self.library_card_text_scale()).clamp(4.0, 24.0)
     }
 
+    /// Vertical spacing between card text rows.
     pub(crate) fn library_card_spacing(&self) -> f32 {
         (Spacing::SM * self.library_card_text_scale()).clamp(2.0, Spacing::SM)
     }
 
+    /// Resolved title font size for cards.
     pub(crate) fn library_card_title_font_size(&self) -> u32 {
         self.library_card_font_size(16)
     }
 
+    /// Choose Small/Default/Large cover tier for the current zoom.
     pub(crate) fn thumbnail_size_for_grid_zoom(&self) -> ThumbnailSize {
         let width = self.library_grid_card_width();
         if width <= 140.0 {
@@ -221,6 +261,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Best available cached thumbnail for an entry at the preferred size (with fallbacks).
     pub(crate) fn thumbnail_for_entry(
         &self,
         entry_id: &EntryId,
@@ -241,6 +282,7 @@ impl PDFolioApp {
         })
     }
 
+    /// Human-readable zoom percentage for toolbar controls.
     pub(crate) fn library_grid_zoom_label(&self) -> String {
         format!("{:.0}%", self.library_grid_zoom() * 100.0)
     }

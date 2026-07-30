@@ -1,8 +1,13 @@
+//! # Document outline
+//!
+//! Hierarchical table-of-contents list that jumps to pages on activation.
+
 use crate::*;
 use iced::widget::{column, row};
 use pdf_folio_core::OutlineNode;
 use std::collections::HashSet;
 
+/// Render outline entries as an interactive nested list.
 pub(crate) fn outline_list<'a>(
     nodes: &'a [OutlineNode],
     depth: u16,

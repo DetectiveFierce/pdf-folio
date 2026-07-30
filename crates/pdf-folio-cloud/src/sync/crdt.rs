@@ -1,3 +1,40 @@
+//! CRDT operation preparation, LWW merge, remote exchange, and materialization.
+//!
+//! Core of the sync **client** metadata path. Local library edits become
+//! append-only ops in `sync_crdt_operations` (SQLite, via `pdf-folio-core`).
+//! Those ops are pushed to Turso’s op log; remote ops are pulled by sequence;
+//! each entity is resolved with deterministic last-writer-wins
+//! (`logical_time`, then `device_id`, then `op_id`). Winners materialize into
+//! sync-visible entry/folder/membership rows, and optional hydration creates
+//! normal library rows when PDF blobs are available.
+//!
+//! # Entity kinds
+//!
+//! - `entry`, `folder`, `entry_folder` — per-library content streams
+//! - `library` — app registry stream keyed by [`super::status::REGISTRY_LIBRARY_ID`]
+//!
+//! # SyncClient methods in this module
+//!
+//! Planning and legacy relational push/pull, library registry CRDT, schema
+//! ensure, blob upload, full CRDT pass, and remote hydration all hang off
+//! [`SyncClient`] here. Automatic preflight/skip lives in [`super::run`].
+//!
+//! # Invariants
+//!
+//! - Ops are content-addressed by payload hash; unchanged entities do not
+//!   generate new ops.
+//! - Remote inserts use conflict-safe upserts (`ON CONFLICT DO NOTHING` style).
+//! - Blob upload failures are counted, not fatal to the whole pass.
+//! - Hydration is separate from CRDT replay so missing blobs do not block
+//!   metadata convergence.
+//!
+//! # Related
+//!
+//! - Local tables: `pdf-folio-core` sync module
+//! - Transport: [`super::remote`]
+//! - Blobs: [`super::blobs`]
+//! - Reports: [`super::status`]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -250,6 +287,8 @@ impl SyncClient {
             .await
     }
 
+    /// Continues a CRDT pass after [`super::run::SyncClient::preflight_crdt_sync`]
+    /// already generated local ops (avoids double snapshot work).
     pub(super) async fn sync_crdt_metadata_after_preflight(
         &self,
         db: &Db,
@@ -484,6 +523,7 @@ impl SyncClient {
     }
 }
 
+/// Locally prepared CRDT batch: newly generated ops plus still-unpushed ops.
 #[derive(Debug)]
 pub(super) struct PreparedCrdtOperations {
     pub(super) summary: SyncCrdtPrepareSummary,
@@ -603,6 +643,15 @@ struct LibraryPayload {
     deleted_at: Option<i64>,
 }
 
+/// Snapshots local library state into immutable CRDT ops when payloads changed.
+///
+/// Walks entries, folders, and memberships; records ops only when the payload
+/// hash differs from the last recorded op for that entity. Returns all
+/// still-unpushed operations for this device.
+///
+/// # Errors
+///
+/// Returns an error when local sync metadata cannot be read or written.
 pub(super) fn prepare_local_crdt_operations(
     db: &Db,
     library_id: &str,
@@ -1018,6 +1067,7 @@ fn materialize_crdt_winner(
     Ok(())
 }
 
+/// LWW total order: higher `logical_time` wins; ties break on `device_id`, then `op_id`.
 fn operation_wins(candidate: &SyncCrdtOperation, current: &SyncCrdtOperation) -> bool {
     (
         candidate.logical_time,
@@ -1135,6 +1185,13 @@ async fn remote_sync_operations_since(
     Ok(output)
 }
 
+/// Returns `MAX(remote_sequence)` for a library’s CRDT op log in Turso (or 0).
+///
+/// Cheap head poll used by preflight and UI live-watchers.
+///
+/// # Errors
+///
+/// Returns an error when the remote query fails.
 pub(super) async fn remote_sync_head_sequence(
     remote: &TursoRemote,
     library_id: &str,

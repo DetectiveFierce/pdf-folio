@@ -1,3 +1,10 @@
+//! Viewer canvas drawing primitives derived from theme tokens.
+//!
+//! Toolbar/find-bar chrome uses the shared `*_style` helpers with viewer
+//! [`Class`](super::Class) variants. This module focuses on **non-widget** paint
+//! used by the page canvas: background, placeholders, page shadow, and find /
+//! text-selection fills.
+
 use iced::Color;
 
 use crate::tokens::ThemeTokens;

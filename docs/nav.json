@@ -1,0 +1,185 @@
+{
+  "title": "PDF-Folio",
+  "tagline": "Maintainer guide to the source",
+  "groups": [
+    {
+      "label": null,
+      "items": [
+        { "title": "Home", "path": "index.md" }
+      ]
+    },
+    {
+      "label": "Architecture",
+      "collapsed": false,
+      "items": [
+        {
+          "title": "Overview",
+          "path": "architecture/overview.md",
+          "children": [
+            { "title": "Process entry", "anchor": "process-entry" },
+            { "title": "Update routing", "anchor": "update-routing" },
+            { "title": "Side effects", "anchor": "side-effects-as-tasks" }
+          ]
+        },
+        {
+          "title": "Workspace & Crates",
+          "path": "architecture/workspace.md",
+          "children": [
+            { "title": "Members", "anchor": "members" },
+            { "title": "Dependency rules", "anchor": "dependency-rules" },
+            { "title": "Where to put new code", "anchor": "where-to-put-new-code" }
+          ]
+        },
+        {
+          "title": "Application Shell",
+          "path": "architecture/shell.md",
+          "children": [
+            { "title": "Launch sequence", "anchor": "launch-sequence" },
+            { "title": "Session and auth", "anchor": "session-and-auth" },
+            { "title": "Chrome", "anchor": "chrome" }
+          ]
+        },
+        {
+          "title": "Message Surface",
+          "path": "architecture/messages.md",
+          "children": [
+            { "title": "Clusters", "anchor": "clusters-mental-index" },
+            { "title": "Routing ownership", "anchor": "routing-ownership" },
+            { "title": "How to add a message", "anchor": "how-to-add-a-new-message" }
+          ]
+        },
+        {
+          "title": "Runtime State",
+          "path": "architecture/state.md",
+          "children": [
+            { "title": "Field guide", "anchor": "field-guide" },
+            { "title": "Persistence map", "anchor": "persistence-map" },
+            { "title": "Where mutations happen", "anchor": "where-mutations-happen" }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Crates",
+      "collapsed": false,
+      "items": [
+        { "title": "pdf-folio-main", "path": "crates/main.md" },
+        {
+          "title": "pdf-folio-core",
+          "path": "crates/core.md",
+          "children": [
+            { "title": "pdf/ documents", "anchor": "pdf-documents-and-tiles" },
+            { "title": "db/ storage", "anchor": "db-library-storage" }
+          ]
+        },
+        {
+          "title": "pdf-folio-ui",
+          "path": "crates/ui.md",
+          "children": [
+            { "title": "shell/", "anchor": "shell-process-level-app" },
+            { "title": "library/", "anchor": "library-library-mode-domain" },
+            { "title": "viewer/", "anchor": "viewer-viewer-mode-domain" },
+            { "title": "components/", "anchor": "components-ui-building-blocks" }
+          ]
+        },
+        { "title": "pdf-folio-style", "path": "crates/style.md" },
+        {
+          "title": "pdf-folio-cloud",
+          "path": "crates/cloud.md",
+          "children": [
+            { "title": "Three products", "anchor": "three-products-in-one-crate" },
+            { "title": "Sync client flow", "anchor": "sync-client-flow-summary" }
+          ]
+        },
+        { "title": "iced-widget-patch", "path": "crates/iced-patch.md" }
+      ]
+    },
+    {
+      "label": "Subsystems",
+      "collapsed": false,
+      "items": [
+        {
+          "title": "Rendering Pipeline",
+          "path": "subsystems/rendering.md",
+          "children": [
+            { "title": "Opening a document", "anchor": "opening-a-document" },
+            { "title": "Tiles & cache", "anchor": "tiles-and-the-render-cache" },
+            { "title": "Zoom without flicker", "anchor": "zoom-without-flicker" },
+            { "title": "Text layer & outline", "anchor": "text-layer-and-outline" }
+          ]
+        },
+        {
+          "title": "Library Database",
+          "path": "subsystems/database.md",
+          "children": [
+            { "title": "Content identity", "anchor": "pdf-identity-is-its-bytes" },
+            { "title": "Schema", "anchor": "schema-anatomy" },
+            { "title": "Folders & trash", "anchor": "folders-tags-and-trash" },
+            { "title": "Undo snapshots", "anchor": "undo-as-snapshots" }
+          ]
+        },
+        {
+          "title": "Search & Watching",
+          "path": "subsystems/search.md",
+          "children": [
+            { "title": "Full-text index", "anchor": "full-text-index-tantivy" },
+            { "title": "Filesystem watching", "anchor": "filesystem-watching" }
+          ]
+        },
+        {
+          "title": "Style System",
+          "path": "subsystems/style-system.md",
+          "children": [
+            { "title": "Load pipeline", "anchor": "load-pipeline" },
+            { "title": "KDL shape", "anchor": "kdl-shape" }
+          ]
+        },
+        {
+          "title": "Cross-Device Sync",
+          "path": "subsystems/sync.md",
+          "children": [
+            { "title": "Three tiers", "anchor": "three-tiers" },
+            { "title": "CRDT model", "anchor": "crdt-metadata-model" },
+            { "title": "A sync pass", "anchor": "a-sync-pass" }
+          ]
+        },
+        { "title": "Raindrop Import", "path": "subsystems/raindrop.md" },
+        {
+          "title": "Multi-Library Registry",
+          "path": "subsystems/multi-library.md",
+          "children": [
+            { "title": "Model", "anchor": "model" },
+            { "title": "Sync interaction", "anchor": "sync-interaction" }
+          ]
+        },
+        { "title": "Life of a Bulk Action", "path": "subsystems/bulk-action.md" }
+      ]
+    },
+    {
+      "label": "Operations",
+      "collapsed": false,
+      "items": [
+        {
+          "title": "Development",
+          "path": "operations/development.md",
+          "children": [
+            { "title": "Common cargo commands", "anchor": "common-cargo-commands" },
+            { "title": "Where to make changes", "anchor": "where-to-make-changes" },
+            { "title": "Docs site", "anchor": "docs-site" }
+          ]
+        },
+        { "title": "CLI Reference", "path": "operations/cli.md" },
+        { "title": "Data Directories", "path": "operations/data-dirs.md" },
+        { "title": "Packaging", "path": "operations/packaging.md" },
+        { "title": "Testing", "path": "operations/testing.md" }
+      ]
+    },
+    {
+      "label": "Reference",
+      "collapsed": false,
+      "items": [
+        { "title": "Glossary", "path": "reference/glossary.md" }
+      ]
+    }
+  ]
+}

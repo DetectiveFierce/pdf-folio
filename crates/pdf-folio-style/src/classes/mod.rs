@@ -1,8 +1,34 @@
-//! Reusable semantic style classes.
+//! Semantic style classes and iced stylesheet closures.
+//!
+//! A [`Class`] names a **UI role** (`LibraryCard`, `ViewerFindBar`, `Sidebar`),
+//! not a paint description (`BlueButton`). Each class has an array of
+//! [`ComponentState`] styles inside [`ThemeTokens`](crate::ThemeTokens), filled
+//! from KDL `component "…"` blocks.
+//!
+//! # Mapping to iced
+//!
+//! | Helper | iced widget |
+//! | --- | --- |
+//! | [`button_style`] | `button` |
+//! | [`container_style`] | `container` |
+//! | [`text_input_style`] | `text_input` |
+//! | [`scrollable_style`] / [`sidebar_scrollable_style`] | `scrollable` |
+//! | [`slider_style`] | `slider` |
+//! | [`pick_list_style`] / [`menu_style`] | pick list / overlay menu |
+//! | [`progress_bar_style`] | `progress_bar` |
+//!
+//! Submodules split the surface area: [`core`] (shell chrome), [`library`]
+//! (sidebar scrollbars), [`viewer`] (canvas primitives).
+//!
+//! Class names in KDL must match the PascalCase enum variants (e.g.
+//! `component "ToolbarButton" { … }`).
 
 use crate::tokens::VisualStyle;
 
-/// Semantic style classes used by UI widgets.
+/// Semantic style class identifying a UI role for theming.
+///
+/// Indices from [`Class::index`] address `ThemeTokens.class_styles`. Keep
+/// [`Class::COUNT`] in sync when adding variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
     /// Whole application shell.
@@ -149,24 +175,28 @@ pub enum Class {
     SelectionDangerIconButton,
 }
 
-/// Visual state shared by components that do not expose an iced status directly.
+/// Interaction / selection state for a styled component.
+///
+/// Mirrors KDL state children under `component "…"` (`normal`, `hovered`, …).
+/// iced widgets map their native status into these states inside the `*_style`
+/// helpers; custom chrome can pass a state explicitly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComponentState {
-    /// Normal state.
+    /// Default resting appearance.
     Normal,
-    /// Hovered state.
+    /// Pointer is over the control.
     Hovered,
-    /// Pressed state.
+    /// Pointer is pressed on the control.
     Pressed,
-    /// Focused state.
+    /// Keyboard / focus ring active.
     Focused,
-    /// Disabled state.
+    /// Control is not interactive.
     Disabled,
-    /// Selected state.
+    /// Item is selected in a list/grid.
     Selected,
-    /// Active state.
+    /// Toggle or mode is active (e.g. current sidebar tab).
     Active,
-    /// Error state.
+    /// Validation or operational error emphasis.
     Error,
 }
 
@@ -275,8 +305,12 @@ pub mod core;
 pub mod library;
 pub mod viewer;
 
-/// Applies a parsed KDL visual override to an iced widget style.
+/// Applies a parsed KDL [`VisualStyle`] on top of an iced widget style.
+///
+/// Implemented for iced `container`, `button`, and similar style structs so
+/// stylesheet helpers can start from a baseline and layer book overrides.
 pub trait VisualOverride {
+    /// Merges non-empty fields from `style` into `self`.
     fn with_visual_override(self, style: VisualStyle) -> Self;
 }
 

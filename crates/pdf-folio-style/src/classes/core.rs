@@ -1,3 +1,13 @@
+//! Core UI class → iced stylesheet mappings for shell chrome.
+//!
+//! Produces iced style structs for containers, buttons, text inputs, scrollables,
+//! sliders, pick lists, menus, and progress bars. Each helper reads
+//! [`ThemeTokens`](crate::ThemeTokens) for a [`Class`](super::Class) and maps
+//! iced status enums onto [`ComponentState`](super::ComponentState).
+//!
+//! Also exports side-border extractors ([`side_border_for_class`]) and
+//! [`mix_color`] for token-relative blends used by KDL and scroll rails.
+
 use iced::widget::{button, container, pick_list, progress_bar, scrollable, slider, text_input};
 use iced::{overlay, Background, Border, Color, Shadow as IcedShadow, Vector};
 
@@ -110,7 +120,7 @@ impl VisualOverride for text_input::Style {
     }
 }
 
-/// Returns an iced container style for a semantic class.
+/// iced `container` stylesheet for `class`, with KDL visual overrides applied.
 pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
     let (background, text_color, border_color, border_width, radius) = match class {
         Class::AppShell => (
@@ -274,7 +284,7 @@ pub fn container_style(tokens: ThemeTokens, class: Class) -> container::Style {
     .with_visual_override(override_style)
 }
 
-/// Returns an iced button style for a semantic class.
+/// iced `button` stylesheet for `class`, mapping `status` onto component states.
 pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -> button::Style {
     let base = match class {
         Class::LibraryCard | Class::LibraryFolderCard | Class::LibraryRow => tokens.surface_raised,
@@ -345,7 +355,7 @@ pub fn button_style(tokens: ThemeTokens, class: Class, status: button::Status) -
     .with_visual_override(override_style)
 }
 
-/// Returns an iced slider style for a semantic class.
+/// iced `slider` stylesheet for `class` (e.g. library grid zoom).
 pub fn slider_style(tokens: ThemeTokens, class: Class, status: slider::Status) -> slider::Style {
     let state = match status {
         slider::Status::Active => ComponentState::Normal,
@@ -384,7 +394,7 @@ pub fn slider_style(tokens: ThemeTokens, class: Class, status: slider::Status) -
     }
 }
 
-/// Returns an iced pick-list style for a semantic class.
+/// iced `pick_list` stylesheet for `class` (sort dropdowns and similar).
 pub fn pick_list_style(
     tokens: ThemeTokens,
     class: Class,
@@ -424,12 +434,12 @@ pub fn pick_list_style(
     .with_visual_override(override_style)
 }
 
-/// Returns an iced dropdown menu style for themed popup menus.
+/// Overlay menu stylesheet using [`Class::MenuPanel`] defaults.
 pub fn menu_style(tokens: ThemeTokens) -> overlay::menu::Style {
     menu_style_for_class(tokens, Class::MenuPanel)
 }
 
-/// Returns an iced dropdown menu style for a semantic class.
+/// Overlay menu stylesheet for an arbitrary panel `class`.
 pub fn menu_style_for_class(tokens: ThemeTokens, class: Class) -> overlay::menu::Style {
     let override_style = tokens.class_styles[class.index()].resolve(ComponentState::Normal);
     let style = overlay::menu::Style {
@@ -472,7 +482,7 @@ pub fn menu_style_for_class(tokens: ThemeTokens, class: Class) -> overlay::menu:
     }
 }
 
-/// Returns an iced text-input style for a semantic class.
+/// iced `text_input` stylesheet for `class` (search, find, rename fields).
 pub fn text_input_style(
     tokens: ThemeTokens,
     class: Class,
@@ -529,7 +539,7 @@ pub fn text_input_style(
     .with_visual_override(override_style)
 }
 
-/// Returns an iced progress-bar style for a semantic class.
+/// iced `progress_bar` stylesheet (import / sync progress chrome).
 pub fn progress_bar_style(tokens: ThemeTokens, _class: Class) -> progress_bar::Style {
     let override_style =
         tokens.class_styles[Class::ProgressBar.index()].resolve(ComponentState::Normal);
@@ -547,7 +557,7 @@ pub fn progress_bar_style(tokens: ThemeTokens, _class: Class) -> progress_bar::S
     }
 }
 
-/// Returns an iced scrollable style for a semantic class.
+/// iced `scrollable` stylesheet for document/content areas (not sidebars).
 pub fn scrollable_style(
     tokens: ThemeTokens,
     _class: Class,
@@ -605,7 +615,9 @@ pub fn scrollable_style(
     }
 }
 
-/// Blends two colors by the provided amount.
+/// Linearly blends `base` toward `overlay` by `amount` in `0.0..=1.0`.
+///
+/// Used by KDL `mix($a, $b, t)` expressions and by scrollbar/rail paint.
 pub fn mix_color(base: Color, overlay: Color, amount: f32) -> Color {
     let amount = amount.clamp(0.0, 1.0);
     Color {

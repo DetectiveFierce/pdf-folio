@@ -1,3 +1,27 @@
+//! Environment-backed configuration for the sync control-plane process.
+//!
+//! [`Config::load`] merges process environment variables with optional files
+//! under `PDF_FOLIO_SECRETS_DIR` (default `secrets/`): Google
+//! `client_secret_*.json`, `turso credentials`, and `cloudflare credentials`.
+//! Env vars always win when set.
+//!
+//! # Required security settings
+//!
+//! At least one of `PDF_FOLIO_ALLOWED_GOOGLE_SUB` or
+//! `PDF_FOLIO_ALLOWED_GOOGLE_EMAIL` must be set; otherwise the server refuses
+//! to start. Without an allow-list any Google account that completes OAuth
+//! could mint credentials for Turso/R2.
+//!
+//! # Session secret
+//!
+//! `PDF_FOLIO_SESSION_SECRET` is preferred. If unset, a stable secret is derived
+//! by hashing Turso + R2 credentials — convenient for single-host deploys, but
+//! rotating those credentials will invalidate existing session JWTs.
+//!
+//! # Related
+//!
+//! Used by [`super::run`] and held inside handler [`super::handlers`] app state.
+
 use std::env;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -10,25 +34,46 @@ use url::Url;
 const DEFAULT_GOOGLE_TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 const DEFAULT_R2_BUCKET: &str = "pdf-folio";
 
+/// Fully resolved runtime configuration for the control-plane process.
 #[derive(Debug)]
 pub(crate) struct Config {
+    /// Address the HTTP server binds (default `127.0.0.1:53148`).
     pub(crate) bind_addr: SocketAddr,
+    /// Google OAuth desktop/web client id.
     pub(crate) google_client_id: String,
+    /// Google client secret when the OAuth client is confidential.
     pub(crate) google_client_secret: Option<String>,
+    /// Google token endpoint URI.
     pub(crate) google_token_uri: String,
+    /// Allowed Google subject (`sub`); either this or email must be set.
     pub(crate) allowed_google_sub: Option<String>,
+    /// Allowed Google email (case-insensitive match).
     pub(crate) allowed_google_email: Option<String>,
+    /// HMAC key material for session JWTs.
     pub(crate) session_secret: Vec<u8>,
+    /// Turso / libSQL database URL handed to authenticated clients.
     pub(crate) turso_database_url: String,
+    /// Turso auth token handed to authenticated clients.
     pub(crate) turso_auth_token: String,
+    /// Cloudflare account id (loaded for completeness; unused by handlers today).
     pub(crate) _r2_account_id: String,
+    /// R2 bucket name (default `pdf-folio`).
     pub(crate) r2_bucket: String,
+    /// R2 access key id for SigV4 signing.
     pub(crate) r2_access_key_id: String,
+    /// R2 secret access key for SigV4 signing (never sent to clients).
     pub(crate) r2_secret_access_key: String,
+    /// R2 S3-compatible endpoint URL.
     pub(crate) r2_endpoint: Url,
 }
 
 impl Config {
+    /// Loads configuration from the environment and optional secrets directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when secrets cannot be read, required allow-list vars
+    /// are missing, or URLs/addresses fail to parse.
     pub(crate) fn load() -> Result<Self> {
         let secrets_dir = env::var("PDF_FOLIO_SECRETS_DIR")
             .map(PathBuf::from)

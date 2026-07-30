@@ -1,3 +1,23 @@
+//! # High-level library intents
+//!
+//! Imperative methods on `PDFolioApp` (plus small helpers on history/clipboard
+//! types) that implement library UX: selection, folder navigation, clipboard,
+//! drag/drop lifecycle, smart counts, and breadcrumbs.
+//!
+//! ## Role vs `update` / `tasks` / components
+//!
+//! - **`update`** matches messages and decides *when* to call these methods.
+//! - **This module** owns multi-step state changes that must stay consistent
+//!   (e.g. selection + details editor sync, drag target + autoscroll).
+//! - **`tasks`** performs durable Db work; actions often finish by returning or
+//!   scheduling those tasks.
+//! - **`components::library::{drag, selection}`** supply pure helpers (reorder
+//!   math, dwell timing); actions hold the live `LibraryDragState` / selection
+//!   sets on the app.
+//!
+//! Prefer adding a method here when a gesture needs more than one field update
+//! or must share logic between keyboard shortcuts, menus, and pointer events.
+
 use crate::*;
 
 impl Default for LibraryHistory {
@@ -14,30 +34,38 @@ impl Default for LibraryHistory {
 }
 
 impl LibraryHistory {
+    /// Whether the current history cursor has a parent action that can be undone.
     pub(crate) fn can_undo(&self) -> bool {
         self.nodes
             .get(self.current)
             .is_some_and(|node| node.parent.is_some())
     }
 
+    /// Whether the current node has a child branch that can be redone.
     pub(crate) fn can_redo(&self) -> bool {
         self.nodes
             .get(self.current)
             .is_some_and(|node| !node.children.is_empty())
     }
 
+    /// Parent index and action to apply when undoing from the current cursor.
     pub(crate) fn undo_target(&self) -> Option<(usize, LibraryHistoryAction)> {
         let node = self.nodes.get(self.current)?;
         let parent = node.parent?;
         Some((parent, node.action.clone()?))
     }
 
+    /// Child index and action to apply when redoing from the current cursor.
     pub(crate) fn redo_target(&self) -> Option<(usize, LibraryHistoryAction)> {
         let node = self.nodes.get(self.current)?;
         let child = node.children.last().copied()?;
         Some((child, self.nodes.get(child)?.action.clone()?))
     }
 
+    /// Append a new history node as a child of the current cursor.
+    ///
+    /// No-ops when `before == after` so empty organization diffs never pollute
+    /// the undo stack. Moves `current` to the new node (linear redo fork).
     pub(crate) fn push(&mut self, action: LibraryHistoryAction) {
         if action.before == action.after {
             return;
@@ -55,6 +83,7 @@ impl LibraryHistory {
         self.current = index;
     }
 
+    /// Move the history cursor to `index` if it is in range (after undo/redo).
     pub(crate) fn set_current(&mut self, index: usize) {
         if index < self.nodes.len() {
             self.current = index;
@@ -63,6 +92,7 @@ impl LibraryHistory {
 }
 
 impl LibraryClipboard {
+    /// Short noun phrase describing what was cut/copied (menus, status).
     pub(crate) fn label(&self) -> &'static str {
         match (&self.mode, &self.target) {
             (LibraryClipboardMode::Cut, LibraryClipboardTarget::Entries(_)) => "Cut PDFs",
@@ -72,6 +102,7 @@ impl LibraryClipboard {
         }
     }
 
+    /// Verb phrase for the paste/move action that would consume this clipboard.
     pub(crate) fn paste_label(&self) -> &'static str {
         match (&self.mode, &self.target) {
             (LibraryClipboardMode::Cut, LibraryClipboardTarget::Entries(_)) => "Move PDFs",
@@ -83,12 +114,14 @@ impl LibraryClipboard {
 }
 
 impl PDFolioApp {
+    /// Whether cut/copy commands should be enabled for the current library selection.
     pub(crate) fn can_cut_or_copy_library_selection(&self) -> bool {
         self.mode == AppMode::Library
             && (!self.library.selected_library_entries.is_empty()
                 || self.library.details_folder_id.is_some())
     }
 
+    /// Whether paste is valid given clipboard mode, target, and current folder.
     pub(crate) fn can_paste_library_clipboard(&self) -> bool {
         self.mode == AppMode::Library
             && self.library.clipboard.as_ref().is_some_and(|clipboard| {
@@ -115,6 +148,10 @@ impl PDFolioApp {
             })
     }
 
+    /// Capture the current entry or details-folder selection into the clipboard.
+    ///
+    /// Returns `false` when there is nothing to cut/copy. Entry ids are sorted
+    /// for stable clipboard payloads.
     pub(crate) fn set_library_clipboard(&mut self, mode: LibraryClipboardMode) -> bool {
         let target = if !self.library.selected_library_entries.is_empty() {
             let mut entry_ids = self
@@ -137,6 +174,7 @@ impl PDFolioApp {
 }
 
 impl PDFolioApp {
+    /// Live or trash folder list depending on `trash_view_active`.
     pub(crate) fn active_library_folders(&self) -> &Vec<Folder> {
         if self.library.trash_view_active {
             &self.library.library_trash_folders
@@ -145,6 +183,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Immediate children of the selected folder (empty under a tag filter).
     pub(crate) fn child_folders(&self) -> Vec<Folder> {
         if self.library.active_tag_filter.is_some() {
             return Vec::new();
@@ -160,10 +199,12 @@ impl PDFolioApp {
         folders
     }
 
+    /// Cached total / in-progress / missing counts for a folder subtree in the active view.
     pub(crate) fn folder_smart_counts(&self, folder_id: Option<&FolderId>) -> FolderSmartCounts {
         self.folder_smart_counts_for(folder_id, self.library.trash_view_active)
     }
 
+    /// Smart counts for the non-trash library (ignores trash view flag).
     pub(crate) fn normal_folder_smart_counts(
         &self,
         folder_id: Option<&FolderId>,
@@ -171,6 +212,7 @@ impl PDFolioApp {
         self.folder_smart_counts_for(folder_id, false)
     }
 
+    /// Smart counts for `folder_id` (or library root when `None`) in live or trash data.
     pub(crate) fn folder_smart_counts_for(
         &self,
         folder_id: Option<&FolderId>,
@@ -214,6 +256,7 @@ impl PDFolioApp {
         counts
     }
 
+    /// Recompute the full folder smart-count cache after library/folder reloads.
     pub(crate) fn rebuild_folder_smart_count_cache(&mut self) {
         let mut cache = HashMap::new();
         cache.extend(Self::build_folder_smart_count_cache_for(
@@ -271,10 +314,12 @@ impl PDFolioApp {
         cache
     }
 
+    /// Folder id plus all descendants in the active (live or trash) tree.
     pub(crate) fn folder_subtree_ids(&self, folder_id: &FolderId) -> HashSet<FolderId> {
         self.folder_subtree_ids_for(folder_id, self.library.trash_view_active)
     }
 
+    /// Folder id plus all descendants, choosing live or trash folder lists.
     pub(crate) fn folder_subtree_ids_for(
         &self,
         folder_id: &FolderId,
@@ -285,6 +330,7 @@ impl PDFolioApp {
         folder_ids
     }
 
+    /// Folder ids currently expanded in the sidebar (used by the move-picker tree).
     pub(crate) fn move_picker_expanded_folders(&self) -> HashSet<FolderId> {
         self.library
             .library_folders
@@ -299,6 +345,7 @@ impl PDFolioApp {
             .collect()
     }
 
+    /// Recursively insert `folder_id` and descendants into `folder_ids`.
     pub(crate) fn collect_folder_subtree_ids_for(
         &self,
         folder_id: &FolderId,
@@ -321,10 +368,12 @@ impl PDFolioApp {
         }
     }
 
+    /// Display name of the navigated folder, if any.
     pub(crate) fn selected_folder_name(&self) -> Option<String> {
         self.selected_folder().map(|folder| folder.name.clone())
     }
 
+    /// Folder currently open in the main library view (`selected_folder`).
     pub(crate) fn selected_folder(&self) -> Option<&Folder> {
         self.library.selected_folder.as_ref().and_then(|selected| {
             self.active_library_folders()
@@ -333,6 +382,7 @@ impl PDFolioApp {
         })
     }
 
+    /// Folder shown in the details/inspector pane (`details_folder_id`).
     pub(crate) fn details_folder(&self) -> Option<&Folder> {
         self.library
             .details_folder_id
@@ -344,6 +394,7 @@ impl PDFolioApp {
             })
     }
 
+    /// Parent id, sibling folder ids in manual order, and index of the details folder.
     pub(crate) fn selected_folder_sibling_order(
         &self,
     ) -> Option<(Option<FolderId>, Vec<FolderId>, usize)> {
@@ -365,6 +416,7 @@ impl PDFolioApp {
         Some((parent_id, folder_ids, index))
     }
 
+    /// Sibling order after moving the details folder by `direction` (-1 up / +1 down).
     pub(crate) fn selected_folder_manual_reorder(
         &self,
         direction: isize,
@@ -378,6 +430,7 @@ impl PDFolioApp {
         Some((parent_id, folder_ids))
     }
 
+    /// Sibling order after dropping `folder_id` before `target_id` under a shared parent.
     pub(crate) fn folder_drag_manual_reorder(
         &self,
         folder_id: &FolderId,
@@ -409,12 +462,14 @@ impl PDFolioApp {
         (next_order != folder_ids).then_some((folder.parent_id.clone(), next_order))
     }
 
+    /// Copy the details folder name into the rename text field.
     pub(crate) fn sync_folder_rename_input(&mut self) {
         self.library.folder_rename_input = self
             .details_folder()
             .map_or_else(String::new, |folder| folder.name.clone());
     }
 
+    /// Root-to-current path labels for the toolbar breadcrumb row.
     pub(crate) fn folder_breadcrumbs(&self) -> Vec<(String, Option<FolderId>)> {
         let mut breadcrumbs = vec![(
             if self.library.trash_view_active {
@@ -464,6 +519,7 @@ fn add_folder_smart_count(
 }
 
 impl PDFolioApp {
+    /// Apply click selection with shift-range / ctrl-toggle modifiers, then sync details.
     pub(crate) fn select_library_entry(&mut self, entry_id: EntryId) {
         let visible_entries = self.visible_library_entries();
         if self.viewer.modifiers.shift() {
@@ -489,6 +545,7 @@ impl PDFolioApp {
         self.sync_details_editor_to_selection();
     }
 
+    /// Toggle one entry in the multi-selection set and refresh the details editor.
     pub(crate) fn toggle_library_entry_selection(&mut self, entry_id: EntryId) {
         toggle_selection_entry_id(&mut self.library.selected_library_entries, entry_id.clone());
         self.library.library_selection_anchor = Some(entry_id);
@@ -497,6 +554,7 @@ impl PDFolioApp {
         self.sync_details_editor_to_selection();
     }
 
+    /// None / Partial / All for the visible-entry master checkbox.
     pub(crate) fn master_checkbox_state(&self) -> MasterCheckboxState {
         let visible_entries = self.visible_library_entries();
         if visible_entries.is_empty() {
@@ -511,6 +569,7 @@ impl PDFolioApp {
         master_checkbox_state_for_counts(selected_visible, visible_entries.len())
     }
 
+    /// Select the inclusive range from the selection anchor to `entry_id`.
     pub(crate) fn select_library_range(
         &mut self,
         entry_id: EntryId,
@@ -548,6 +607,7 @@ impl PDFolioApp {
         self.library.library_selection_anchor = Some(anchor);
     }
 
+    /// Select every entry currently shown under filters/search.
     pub(crate) fn select_all_visible_library_entries(&mut self) {
         let visible_entries = self.visible_library_entries();
         self.library.selected_library_entries = visible_entries
@@ -559,6 +619,7 @@ impl PDFolioApp {
         self.sync_details_editor_to_selection();
     }
 
+    /// Clear multi-selection and reset details editor linkage.
     pub(crate) fn clear_library_selection(&mut self) {
         self.library.selected_library_entries.clear();
         self.library.library_selection_anchor = None;
@@ -569,6 +630,7 @@ impl PDFolioApp {
         self.sync_details_editor_to_selection();
     }
 
+    /// Clear details folder/entry focus used by the navigation sidebar panels.
     pub(crate) fn clear_library_sidebar_details(&mut self) {
         self.clear_library_selection();
         self.library.details_folder_id = None;
@@ -576,6 +638,7 @@ impl PDFolioApp {
         self.library.folder_rename_input.clear();
     }
 
+    /// Focus a folder in the details pane without changing navigation.
     pub(crate) fn select_folder_for_details(&mut self, folder_id: Option<FolderId>) {
         self.library.selected_library_entries.clear();
         self.library.library_selection_anchor = None;
@@ -587,6 +650,7 @@ impl PDFolioApp {
         self.sync_folder_rename_input();
     }
 
+    /// Select a folder in the tree for details; may expand ancestors as needed.
     pub(crate) fn select_folder_in_tree(&mut self, folder_id: Option<FolderId>) {
         self.library.trash_view_active = false;
         self.library.selected_library_entries.clear();
@@ -599,6 +663,7 @@ impl PDFolioApp {
         self.sync_folder_rename_input();
     }
 
+    /// Navigate into a folder (sets `selected_folder`) and clear entry selection.
     pub(crate) fn open_folder_from_tree(&mut self, folder_id: Option<FolderId>) {
         self.library.trash_view_active = false;
         self.library.selected_folder = folder_id.clone();
@@ -609,6 +674,7 @@ impl PDFolioApp {
         self.library.library_scroll_offset = 0.0;
     }
 
+    /// Drop selected ids that are no longer in the visible list after filter/search changes.
     pub(crate) fn prune_selection_to_visible_entries(&mut self, visible_entries: &[LibraryEntry]) {
         let visible_ids = visible_entries
             .iter()
@@ -629,6 +695,7 @@ impl PDFolioApp {
         self.sync_details_editor_to_selection();
     }
 
+    /// Full `LibraryEntry` records for the current multi-selection (stable order).
     pub(crate) fn selected_entries(&self) -> Vec<LibraryEntry> {
         self.active_library_entries()
             .iter()
@@ -637,6 +704,7 @@ impl PDFolioApp {
             .collect()
     }
 
+    /// Preferred single entry for details/inspector (anchor or sole selection).
     pub(crate) fn primary_selected_entry(&self) -> Option<LibraryEntry> {
         if self.library.selected_library_entries.len() != 1 {
             return None;
@@ -649,6 +717,7 @@ impl PDFolioApp {
             .cloned()
     }
 
+    /// Push title/author fields from the primary selected entry into editor inputs.
     pub(crate) fn sync_details_editor_to_selection(&mut self) {
         let Some(entry) = self.primary_selected_entry() else {
             self.library.details_entry_id = None;
@@ -680,6 +749,7 @@ fn rect_distance_squared(px: f32, py: f32, x: f32, y: f32, width: f32, height: f
 }
 
 impl PDFolioApp {
+    /// Whether manual-order drag is allowed in the current sort/filter context.
     pub(crate) fn can_drag_reorder_library(&self) -> bool {
         if self.library.trash_view_active {
             return false;
@@ -693,6 +763,7 @@ impl PDFolioApp {
         )
     }
 
+    /// Start an entry drag (single or multi-selection) from pointer press on `entry_id`.
     pub(crate) fn begin_library_drag(&mut self, entry_id: EntryId) {
         self.library.folder_drag = None;
         let visible_entries = self.visible_library_entries();
@@ -723,6 +794,7 @@ impl PDFolioApp {
         self.adjust_scroll_for_parent_directory_drop_box(true);
     }
 
+    /// Start a folder-card drag in the main content area.
     pub(crate) fn begin_folder_drag(&mut self, folder_id: FolderId) {
         if !self
             .library
@@ -739,6 +811,7 @@ impl PDFolioApp {
         self.adjust_scroll_for_parent_directory_drop_box(true);
     }
 
+    /// Start a folder drag originating from the sidebar tree.
     pub(crate) fn begin_folder_tree_drag(&mut self, folder_id: FolderId) {
         self.begin_folder_drag(folder_id);
         if self.library.folder_drag.is_some() {
@@ -746,6 +819,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Recompute reorder index and folder drop targets from the pointer position.
     pub(crate) fn update_library_drag_target(&mut self, cursor: Point) {
         if self.library.library_drag.is_none() {
             return;
@@ -782,6 +856,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Update pending/active folder drop target and dwell-based tree expansion.
     pub(crate) fn set_folder_drop_hover_target(
         &mut self,
         folder_id: Option<FolderId>,
@@ -829,6 +904,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Promote a pending folder hover to an active drop target after the dwell timeout.
     pub(crate) fn update_folder_drop_target_dwell(&mut self, now: Instant) {
         let library_target = self
             .library
@@ -871,6 +947,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Recompute folder-drag drop target (sibling reorder vs nest) from the cursor.
     pub(crate) fn update_folder_drag_target(&mut self, cursor: Point) {
         let Some(drag) = &mut self.library.folder_drag else {
             return;
@@ -890,6 +967,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Set the folder-card highlight target while dragging a folder.
     pub(crate) fn set_folder_drag_card_target(&mut self, folder_id: Option<FolderId>) {
         let Some(drag) = &mut self.library.folder_drag else {
             return;
@@ -900,6 +978,7 @@ impl PDFolioApp {
         drag.set_drop_target(target, Instant::now(), true);
     }
 
+    /// Set the entry-list insertion index while dragging library entries.
     pub(crate) fn set_library_drag_card_target(
         &mut self,
         folder_id: Option<FolderId>,
@@ -911,6 +990,7 @@ impl PDFolioApp {
         drag.set_pending_folder_target(folder_id, now);
     }
 
+    /// Folder id that will receive a drop if the pointer is released now.
     pub(crate) fn active_folder_drop_target(&self) -> Option<&FolderId> {
         active_folder_drop_target(
             self.library.library_drag.as_ref(),
@@ -918,12 +998,14 @@ impl PDFolioApp {
         )
     }
 
+    /// Whether the “move to parent” drop strip should be shown during a drag.
     pub(crate) fn parent_directory_drop_box_visible(&self) -> bool {
         self.library.active_tag_filter.is_none()
             && self.library.selected_folder.is_some()
             && (self.library.library_drag.is_some() || self.library.folder_drag.is_some())
     }
 
+    /// Whether the parent-directory strip is the active drop target.
     pub(crate) fn parent_directory_drop_target_active(&self) -> bool {
         self.library
             .library_drag
@@ -936,6 +1018,7 @@ impl PDFolioApp {
                 .is_some_and(|drag| drag.parent_drop_target)
     }
 
+    /// Parent of the currently open folder (destination for the parent drop strip).
     pub(crate) fn parent_directory_folder_id(&self) -> Option<FolderId> {
         let selected_folder = self.library.selected_folder.as_ref()?;
         self.library
@@ -945,6 +1028,7 @@ impl PDFolioApp {
             .and_then(|folder| folder.parent_id.clone())
     }
 
+    /// Toggle parent-strip hover and adjust scroll padding when the strip appears.
     pub(crate) fn set_parent_directory_drop_hover_target(&mut self, active: bool) {
         if let Some(drag) = &mut self.library.library_drag {
             if drag.active {
@@ -959,6 +1043,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Preserve visual position when the parent drop strip is inserted or removed.
     pub(crate) fn adjust_scroll_for_parent_directory_drop_box(&mut self, visible: bool) {
         if self.library.selected_folder.is_none() {
             return;
@@ -979,6 +1064,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Hit-test folder cards under the cursor for drop targeting.
     pub(crate) fn folder_card_target_at_cursor(
         &self,
         cursor: Point,
@@ -1005,6 +1091,7 @@ impl PDFolioApp {
         )
     }
 
+    /// Hit-test main-content folder cards under the cursor during entry or folder drag.
     pub(crate) fn library_folder_card_target_at_cursor(&self, cursor: Point) -> Option<FolderId> {
         let child_folders = self.child_folders();
         let dragged_folder_sentinel = FolderId::new("__pdf_folio_core_drag__");
@@ -1028,6 +1115,7 @@ impl PDFolioApp {
         )
     }
 
+    /// Collapse sidebar folders that were auto-expanded only for the current drag.
     pub(crate) fn collapse_drag_expanded_folders(&mut self, folders: HashSet<FolderId>) {
         for folder_id in folders {
             self.library
@@ -1036,6 +1124,7 @@ impl PDFolioApp {
         }
     }
 
+    /// Whether `folder_id` has at least one child folder in the active tree.
     pub(crate) fn folder_has_children(&self, folder_id: &FolderId) -> bool {
         self.library
             .library_folders
@@ -1043,6 +1132,7 @@ impl PDFolioApp {
             .any(|folder| folder.parent_id.as_ref() == Some(folder_id))
     }
 
+    /// Convenience wrapper that re-targets using the last known pointer position.
     pub(crate) fn update_library_drag_target_from_cursor(&mut self) {
         let entries = self.visible_library_entries();
         let entries_len = entries.len();
@@ -1224,6 +1314,7 @@ impl PDFolioApp {
             .map(|item| item.index.saturating_add(1).min(compact_len))
     }
 
+    /// Estimated scrollable content height for `entries_len` entries in the current layout.
     pub(crate) fn library_content_height_for_len(&self, entries_len: usize) -> f32 {
         if entries_len == 0 {
             return 0.0;
@@ -1244,6 +1335,7 @@ impl PDFolioApp {
         rows as f32 * self.library_row_height() + rows.saturating_sub(1) as f32 * row_gap
     }
 
+    /// Maximum valid `library_scroll_offset` for the current content and viewport.
     pub(crate) fn max_library_scroll_offset(&self) -> f32 {
         let content_height = self
             .library_content_height_for_len(self.visible_library_entries().len())
@@ -1251,6 +1343,7 @@ impl PDFolioApp {
         (content_height - self.library.library_viewport_height.max(1.0)).max(0.0)
     }
 
+    /// Pixels-per-second autoscroll velocity from edge proximity during drag.
     pub(crate) fn library_drag_auto_scroll_velocity(&self) -> f32 {
         let Some(cursor) = self
             .library
@@ -1281,6 +1374,7 @@ impl PDFolioApp {
         )
     }
 
+    /// Apply one autoscroll tick during drag and return any scroll/target update tasks.
     pub(crate) fn auto_scroll_library_drag(&mut self, tick: Instant) -> Task<Message> {
         if self.library.library_drag.is_none() && self.library.folder_drag.is_none() {
             return Task::none();
@@ -1331,6 +1425,10 @@ impl PDFolioApp {
         ])
     }
 
+    /// Complete an entry drag: drop into folder, reorder manually, or cancel.
+    ///
+    /// Persists manual order via tasks when the drop changes organization; restores
+    /// drag-expanded tree folders and scroll position afterward.
     pub(crate) fn finish_library_drag(&mut self) -> Task<Message> {
         let Some(drag) = self.library.library_drag.take() else {
             return Task::none();
@@ -1444,6 +1542,7 @@ impl PDFolioApp {
         ])
     }
 
+    /// Complete a folder drag: nest into target, move to parent, reorder siblings, or treat as click.
     pub(crate) fn finish_folder_drag(&mut self) -> Task<Message> {
         let Some(drag) = self.library.folder_drag.take() else {
             return Task::none();

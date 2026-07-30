@@ -1,4 +1,20 @@
-//! Raindrop import mapping persistence.
+//! Raindrop.io import mapping persistence.
+//!
+//! Bridges remote Raindrop collections/items to local folders and entries so
+//! re-imports stay idempotent. Collection mappings create or update a
+//! [`crate::Folder`] and store the remote collection id in
+//! `raindrop_collections`; entry mappings link a Raindrop item id to an
+//! [`crate::EntryId`] in `raindrop_entries`.
+//!
+//! Parent collections should be upserted before children so local parent
+//! folders resolve correctly. Actual HTTP download and matching live in
+//! `pdf-folio-cloud`; this module only persists what that crate discovers.
+//!
+//! # See also
+//!
+//! - [`crate::RaindropCollectionMapping`], [`crate::RaindropEntryMapping`].
+//! - [`crate::Db::upsert_import_source`] for the parent import-source row.
+//! - [`super::organization`] for general folder APIs used after mapping.
 
 use anyhow::{Context, Result};
 use chrono::Utc;

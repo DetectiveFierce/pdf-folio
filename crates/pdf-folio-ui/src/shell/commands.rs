@@ -1,7 +1,26 @@
-//! Shared command registry for library-facing actions.
+//! Shared command registry for command palette, menus, and context actions.
+//!
+//! Commands are a higher-level intent layer on top of [`super::messages::Message`].
+//! A [`CommandId`] is a stable identifier used by the palette and menus;
+//! resolution helpers decide whether a command is visible/enabled in the
+//! current app state and which message to emit when it runs.
+//!
+//! # Key types
+//!
+//! - [`CommandId`] — stable id for palette / menu entries.
+//! - [`CommandSpec`] — static label, category, surface, and danger metadata.
+//! - [`ResolvedCommand`] — runtime-resolved enablement and target message.
+//! - [`CommandSurface`] — which UI surface exposes the command.
+//!
+//! # Related modules
+//!
+//! - [`super::messages`] — messages produced when a command runs.
+//! - [`crate::components::shared::command_palette`] — palette UI.
+//! - [`super::shortcuts`] — some shortcuts map to the same intents.
 
 use crate::*;
 
+/// Stable identifier for a command-palette / menu command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandId {
     OpenFile,
@@ -86,6 +105,7 @@ pub enum CommandId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Grouping category for command palette sections.
 pub enum CommandCategory {
     Library,
     Import,
@@ -102,6 +122,7 @@ pub enum CommandCategory {
 }
 
 impl CommandCategory {
+    /// Returns the user-facing label.
     pub fn label(self) -> &'static str {
         match self {
             Self::Library => "Library",
@@ -121,6 +142,7 @@ impl CommandCategory {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What kind of target a command operates on (entry, folder, …).
 pub enum CommandTargetKind {
     None,
     Library,
@@ -134,6 +156,7 @@ pub enum CommandTargetKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Danger level used to style destructive commands.
 pub enum CommandDanger {
     Safe,
     Destructive,
@@ -141,6 +164,7 @@ pub enum CommandDanger {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which UI surface exposes a command (library, viewer, global).
 pub enum CommandSurface {
     HeaderMore,
     ImportMenu,
@@ -149,6 +173,7 @@ pub enum CommandSurface {
 }
 
 #[derive(Debug, Clone, Copy)]
+/// Static specification of a command (id, label, category, surface).
 pub struct CommandSpec {
     pub id: CommandId,
     pub label: &'static str,
@@ -161,6 +186,7 @@ pub struct CommandSpec {
 }
 
 #[derive(Debug, Clone, Copy)]
+/// A command after context resolution (enabled/visible/message).
 pub struct ResolvedCommand {
     pub spec: CommandSpec,
     pub enabled: bool,
@@ -902,6 +928,7 @@ const fn spec(
     }
 }
 
+/// Commands available on the library surface.
 pub fn library_commands(app: &PDFolioApp) -> Vec<ResolvedCommand> {
     COMMAND_SPECS
         .iter()
@@ -914,6 +941,7 @@ pub fn library_commands(app: &PDFolioApp) -> Vec<ResolvedCommand> {
         .collect()
 }
 
+/// Whether a command is enabled in the current app state.
 pub fn command_enabled(app: &PDFolioApp, id: CommandId) -> bool {
     if is_shared_command(id) {
         return true;
@@ -1025,6 +1053,7 @@ pub fn command_enabled(app: &PDFolioApp, id: CommandId) -> bool {
     }
 }
 
+/// Whether a command should appear in the current context.
 pub fn command_visible(app: &PDFolioApp, id: CommandId, surface: CommandSurface) -> bool {
     match surface {
         CommandSurface::ImportMenu => {
@@ -1099,6 +1128,7 @@ fn is_viewer_command(id: CommandId) -> bool {
     )
 }
 
+/// Message emitted when the command is invoked.
 pub fn command_message(app: &PDFolioApp, id: CommandId) -> Option<Message> {
     Some(match id {
         CommandId::OpenFile => Message::OpenFileDialog,
@@ -1209,6 +1239,7 @@ pub fn command_message(app: &PDFolioApp, id: CommandId) -> Option<Message> {
     })
 }
 
+/// Whether a command matches the palette query string.
 pub fn command_matches(spec: CommandSpec, query: &str) -> bool {
     let query = query.trim().to_lowercase();
     if query.is_empty() {

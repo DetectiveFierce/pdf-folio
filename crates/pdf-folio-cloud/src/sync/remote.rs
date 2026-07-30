@@ -1,3 +1,23 @@
+//! Turso/libSQL HTTP (Hrana) client for remote sync metadata.
+//!
+//! After the control plane returns credentials ([`TursoClient::token`]), the
+//! desktop talks **directly** to Turso using SQL-over-HTTP (`/v2/pipeline`).
+//! This module is the low-level transport; CRDT upsert/select SQL lives in
+//! [`super::crdt`].
+//!
+//! # Key types
+//!
+//! - [`TursoClient`] — authenticated requests to `GET /token/turso` on the control plane
+//! - [`TursoToken`] — database URL + auth token returned by the server
+//! - [`TursoRemote`] — execute/query/batch against Turso with those credentials
+//! - [`TursoValue`] — Hrana-tagged SQL cell values
+//!
+//! # Related
+//!
+//! - Control-plane route: server handlers `/token/turso`
+//! - Schema application: `TursoRemote::execute_batch` / `ensure-turso-schema` binary
+//! - Op log traffic: [`super::crdt`]
+
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use reqwest::header::AUTHORIZATION;
@@ -6,10 +26,14 @@ use serde_json::Value;
 
 use super::session::Session;
 
-/// Short-lived Turso access details returned by the sync server.
+/// Turso access details returned by the sync control plane.
+///
+/// For the single-user deploy the server currently reuses its long-lived Turso
+/// token and advertises a session-aligned `expires_at`. Clients should still
+/// treat the token as secret and re-fetch after session refresh.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct TursoToken {
-    /// libSQL database URL.
+    /// libSQL database URL (`libsql://…` or `https://…`).
     pub database_url: String,
     /// Auth token for the database.
     pub auth_token: String,
@@ -93,7 +117,11 @@ impl TursoValue {
     }
 }
 
-/// A remote Turso database connection over SQL-over-HTTP.
+/// A remote Turso database connection over SQL-over-HTTP (Hrana pipeline).
+///
+/// Prefer constructing via [`TursoClient::remote`] so credentials come from the
+/// control plane. [`TursoRemote::from_token`] is used by maintenance binaries
+/// that inject env credentials directly.
 #[derive(Debug, Clone)]
 pub struct TursoRemote {
     http: reqwest::Client,
@@ -102,7 +130,7 @@ pub struct TursoRemote {
 }
 
 impl TursoRemote {
-    /// Creates a remote from already-resolved credentials.
+    /// Creates a remote from already-resolved credentials (no control-plane call).
     pub fn from_token(token: TursoToken) -> Self {
         Self {
             http: reqwest::Client::new(),
@@ -185,7 +213,10 @@ impl TursoRemote {
     }
 }
 
-/// Client for asking the sync server for Turso credentials.
+/// Client for asking the sync control plane for Turso credentials.
+///
+/// Does not cache tokens beyond a single call; each [`TursoClient::token`] /
+/// [`TursoClient::remote`] hits `GET /token/turso` with the session bearer JWT.
 #[derive(Debug, Clone)]
 pub struct TursoClient {
     http: reqwest::Client,
@@ -193,7 +224,7 @@ pub struct TursoClient {
 }
 
 impl TursoClient {
-    /// Creates a Turso credential client from a cached session.
+    /// Creates a Turso credential client from a session.
     pub fn new(session: Session) -> Self {
         Self {
             http: reqwest::Client::new(),

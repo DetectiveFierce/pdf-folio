@@ -1,6 +1,11 @@
+//! # Find-in-document bar
+//!
+//! Search field and next/previous controls for in-document text find.
+
 use crate::*;
 use iced::widget::{row, Svg};
 
+/// Anchor/layout helper for positioning the find bar relative to the viewer.
 pub(crate) fn viewer_find_anchor(
     app: &PDFolioApp,
     tokens: ThemeTokens,

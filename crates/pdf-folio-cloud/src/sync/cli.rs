@@ -1,3 +1,31 @@
+//! `pdf-folio sync` subcommands: auth, plan, push/pull, blobs, sync-once.
+//!
+//! CLI surface for the sync **client** product. Wired from `pdf-folio-main` as
+//! the `sync` subcommand group. Subcommands map onto [`super::auth`],
+//! [`super::client::SyncClient`] methods in [`super::crdt`], and local
+//! library-registry files under the XDG data dir (`libraries.json`).
+//!
+//! # Subcommands (overview)
+//!
+//! | Command | Role |
+//! | --- | --- |
+//! | `health` | `GET /health` on the control plane |
+//! | `auth` | Google PKCE; cache session |
+//! | `status` | Print cached session validity |
+//! | `ensure-schema` | Apply embedded Turso schema via session credentials |
+//! | `seed` / `plan` | Local sync metadata prep / push plan |
+//! | `push` / `pull` | Relational metadata tables (checkpoint-based) |
+//! | `upload-blobs` / `download-blobs` | R2 transfer via session |
+//! | `sync-once` | Upload blobs + CRDT metadata + hydration |
+//!
+//! Global flags: `--server` (`PDF_FOLIO_SYNC_SERVER`), optional `--library-id`,
+//! `--device-id`, `--db`.
+//!
+//! # Related
+//!
+//! - Automatic UI path: [`super::run::SyncClient::sync_library_if_needed`]
+//! - Control plane: [`crate::server`]
+
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,6 +40,7 @@ use crate::sync::{
     SyncLibraryRow,
 };
 
+/// CLI arguments for `pdf-folio sync`, including server URL and library targeting.
 #[derive(Debug, Parser)]
 pub struct SyncArgs {
     /// Sync command to run.
@@ -64,6 +93,12 @@ enum SyncCommand {
     /// Run the current manual sync sequence: seed, upload blobs, push, pull, download blobs.
     SyncOnce,
 }
+/// Dispatches a `pdf-folio sync <subcommand>` invocation.
+///
+/// # Errors
+///
+/// Returns an error when auth, network, local DB, or remote sync operations fail.
+/// Missing sessions typically suggest running `pdf-folio sync auth` first.
 pub async fn run_sync_command(args: SyncArgs) -> Result<()> {
     match args.command {
         SyncCommand::Health => {

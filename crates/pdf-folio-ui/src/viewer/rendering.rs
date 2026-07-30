@@ -1,4 +1,13 @@
 //! Viewer zoom presets and page-relative rendering math.
+//!
+//! Converts between percent labels, logical page widths, and viewport-fit
+//! presets used by the toolbar zoom control. Dimension-dependent presets
+//! (`Automatic`, `PageFit`, `PageWidth`) recompute when the viewer canvas size
+//! changes; percent and actual-size presets are absolute.
+//!
+//! Related: [`super::navigation::PDFolioApp::zoom_to_width`] applies a width,
+//! [`ZoomRenderPolicy`] chooses immediate vs debounced re-render,
+//! [`crate::components::viewer::zoom`] renders the control UI.
 
 use std::fmt;
 
@@ -6,14 +15,18 @@ use crate::style::Spacing;
 use crate::viewer::state::ViewerSpreadMode;
 use crate::PDFolioApp;
 
+/// iced widget id for the editable zoom percent field.
 pub(crate) const ZOOM_INPUT_ID: &str = "viewer-zoom-input";
 
 const ACTUAL_SIZE_WIDTH: u16 = 800;
+/// Minimum allowed zoom page width in logical pixels.
 pub(crate) const MIN_ZOOM_WIDTH: u16 = 240;
+/// Maximum allowed zoom page width in logical pixels.
 pub(crate) const MAX_ZOOM_WIDTH: u16 = 3200;
 const READING_WIDTH_FILL: f32 = 0.86;
 const READING_HEIGHT_MULTIPLIER: f32 = 1.75;
 
+/// Named zoom presets offered by the viewer zoom menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZoomPreset {
     Automatic,
@@ -24,6 +37,7 @@ pub enum ZoomPreset {
 }
 
 impl ZoomPreset {
+    /// All presets in menu order (named modes, then common percents).
     pub(crate) const ALL: [Self; 12] = [
         Self::Automatic,
         Self::ActualSize,
@@ -39,6 +53,7 @@ impl ZoomPreset {
         Self::Percent(400),
     ];
 
+    /// Resolves this preset to a clamped page width for the current viewport/doc.
     pub(crate) fn width_for(self, app: &PDFolioApp) -> u16 {
         match self {
             Self::Automatic => automatic_zoom_width(app),
@@ -50,6 +65,7 @@ impl ZoomPreset {
         .clamp(MIN_ZOOM_WIDTH, MAX_ZOOM_WIDTH)
     }
 
+    /// Returns whether dimension dependent.
     pub(crate) fn is_dimension_dependent(self) -> bool {
         matches!(self, Self::Automatic | Self::PageFit | Self::PageWidth)
     }
@@ -67,14 +83,17 @@ impl fmt::Display for ZoomPreset {
     }
 }
 
+/// Formats `width` as a percent string relative to actual-size (800px).
 pub(crate) fn zoom_percent_label(width: u16) -> String {
     format!("{}%", zoom_percent(width))
 }
 
+/// Converts a page width to a rounded percent of actual size.
 pub(crate) fn zoom_percent(width: u16) -> u16 {
     ((f32::from(width) / f32::from(ACTUAL_SIZE_WIDTH)) * 100.0).round() as u16
 }
 
+/// Parses a user-typed percent (optional `%` suffix) into a clamped page width.
 pub(crate) fn width_from_percent_input(input: &str) -> Option<u16> {
     let normalized = input.trim().trim_end_matches('%').trim();
     if normalized.is_empty() {
@@ -200,8 +219,11 @@ fn available_page_height(app: &PDFolioApp) -> f32 {
     (app.viewer.viewer_viewport_height - Spacing::PAGE_GUTTER * 2.0).max(f32::from(MIN_ZOOM_WIDTH))
 }
 
+/// When to schedule page re-renders after a zoom width change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ZoomRenderPolicy {
+    /// Request tiles immediately (toolbar buttons, presets, shortcuts).
     Immediate,
+    /// Wait for wheel gesture idle before re-rasterizing (smooth live zoom).
     Debounced,
 }

@@ -1,3 +1,9 @@
+//! Viewer-oriented styled widgets: TOC rows and annotation surfaces.
+//!
+//! These helpers wrap content with the correct viewer class styles (and optional
+//! side borders). Page canvas painting uses
+//! [`crate::classes::viewer_primitives`] instead of widgets from this module.
+
 use iced::widget::{button, container};
 use iced::{Element, Length};
 

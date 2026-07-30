@@ -1,3 +1,20 @@
+//! R2 blob client and local content-addressed [`BlobCache`] for managed PDFs.
+//!
+//! PDF bytes never pass through the control plane. [`R2Client`] requests a
+//! short-lived presigned URL from the server, then PUT/GET directly against
+//! Cloudflare R2. Object keys are content-addressed: `blobs/<blake3>.pdf`,
+//! where the hash is also the library entry id for managed PDFs.
+//!
+//! [`BlobCache`] is the local side of that contract: files live under
+//! `…/sync/blobs/<2-hex-prefix>/<hash>.pdf` so uploads and hydration always
+//! read a stable path rather than an arbitrary user file location.
+//!
+//! # Related
+//!
+//! - Server presign: control-plane `/token/r2/*` and storage helpers
+//! - Upload orchestration: [`SyncClient::upload_local_blobs`](super::crdt)
+//! - Hydration downloads: [`SyncClient::hydrate_remote_library`](super::crdt)
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -9,10 +26,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::session::Session;
 
-/// Upload URL returned by the sync server.
+/// Upload URL payload returned by the sync control plane.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct R2UploadResponse {
-    /// Whether the blob already exists in R2.
+    /// Whether the blob already exists in R2 (server may still return a URL).
     pub exists: bool,
     /// Presigned PUT URL when an upload is needed.
     pub upload_url: Option<String>,
@@ -20,7 +37,7 @@ pub struct R2UploadResponse {
     pub expires_at: DateTime<Utc>,
 }
 
-/// Download URL returned by the sync server.
+/// Download URL payload returned by the sync control plane.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct R2DownloadResponse {
     /// Presigned GET URL.
@@ -30,6 +47,9 @@ pub struct R2DownloadResponse {
 }
 
 /// Client for direct PDF blob transfers through R2 presigned URLs.
+///
+/// Uses the session JWT only to mint URLs; the PDF body is sent/received on
+/// the presigned URL without the control plane in the path.
 #[derive(Debug, Clone)]
 pub struct R2Client {
     http: reqwest::Client,
@@ -37,7 +57,7 @@ pub struct R2Client {
 }
 
 impl R2Client {
-    /// Creates an R2 client from a cached session.
+    /// Creates an R2 client from a session.
     pub fn new(session: Session) -> Self {
         Self {
             http: reqwest::Client::new(),
@@ -156,7 +176,10 @@ struct R2UploadRequest<'a> {
     hash: &'a str,
 }
 
-/// Content-addressed local PDF blob cache.
+/// Content-addressed local PDF blob cache (`…/sync/blobs`).
+///
+/// Layout: `{root}/{hash[0..2]}/{hash}.pdf`. Entry ids that are 64-char hex
+/// digests map 1:1 onto these paths after managed import/sync.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobCache {
     root: PathBuf,

@@ -1,4 +1,21 @@
-//! Library view rendering.
+//! # Library view composition
+//!
+//! Iced view builders for library mode. Submodules split the large surface:
+//!
+//! - [`root`] — top-level library pane (header, sidebars, scroll content)
+//! - [`entries`] — PDF cards/rows and selection chrome
+//! - [`folders`] — folder cards, drag previews, masonry helpers
+//! - [`sidebar`] — navigation tree, tags, selection details panels
+//!
+//! ## Ownership
+//!
+//! Domain composition: these functions take `&PDFolioApp` and emit
+//! `Element<Message>`. Reusable pure widgets (scrollable shell, density
+//! pickers, dialogs) are re-exported from `components::library` so domain
+//! views stay thin wrappers over app-aware layout.
+//!
+//! Shared toolbar pieces in this file (breadcrumbs, search, filter chips)
+//! are used by the root and selection toolbars.
 
 use crate::components::library::cards::{
     document_preview_lines, flush_media_style, ghost_tags_row,
@@ -298,6 +315,7 @@ fn library_header_button<'a>(
     .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
 }
 
+/// Folder path breadcrumbs plus reorder/filter context for the library toolbar.
 pub(crate) fn view_library_breadcrumb_row<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -391,6 +409,7 @@ pub(crate) fn view_library_breadcrumb_row<'a>(
     .into()
 }
 
+/// Search field with clear control wired to library search messages.
 pub(crate) fn library_search_input<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -457,6 +476,7 @@ pub(crate) fn library_search_input<'a>(
     search.into()
 }
 
+/// Width budget for toolbar packing (compact vs full control sets).
 pub(crate) fn library_toolbar_available_width(app: &PDFolioApp) -> f32 {
     let sidebar_width = if app.library.library_tag_sidebar_open {
         app.library.library_tag_sidebar_width + app.layout().sidebar_resize_handle_width
@@ -476,6 +496,7 @@ pub(crate) fn library_toolbar_available_width(app: &PDFolioApp) -> f32 {
         .max(1.0)
 }
 
+/// Toolbar control that opens the create-folder dialog.
 pub(crate) fn library_new_folder_button<'a>(
     tokens: ThemeTokens,
     compact: bool,
@@ -495,6 +516,7 @@ pub(crate) fn library_new_folder_button<'a>(
     .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
 }
 
+/// Undo or redo icon button reflecting library organization history.
 pub(crate) fn library_history_icon_button<'a>(
     layout: &crate::style::AppLayoutTokens,
     icon: &'static [u8],
@@ -543,6 +565,7 @@ pub(crate) fn library_history_icon_button<'a>(
     .into()
 }
 
+/// Reading / recent / missing smart-filter chip row.
 pub(crate) fn library_quick_filter_chips<'a>(
     _app: &'a PDFolioApp,
     _tokens: ThemeTokens,
@@ -550,6 +573,7 @@ pub(crate) fn library_quick_filter_chips<'a>(
     container("").width(Length::Shrink).into()
 }
 
+/// Compact label describing active search and smart filters.
 pub(crate) fn library_filter_summary<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
@@ -608,6 +632,7 @@ pub(crate) fn library_filter_summary<'a>(
     row.into()
 }
 
+/// Single breadcrumb segment that navigates to a folder (or root).
 pub(crate) fn breadcrumb_button<'a>(
     label: String,
     folder_id: Option<FolderId>,
@@ -645,6 +670,7 @@ pub(crate) fn breadcrumb_button<'a>(
     .into()
 }
 
+/// App-wired scrollable for the main library list with viewport reporting.
 pub(crate) fn library_scrollable<'a>(
     content: iced::widget::Column<'a, Message>,
     tokens: ThemeTokens,

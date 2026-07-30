@@ -1,3 +1,9 @@
+//! Reusable shell chrome widgets: buttons, inputs, tags, empty states, banners.
+//!
+//! Builders apply the matching [`Class`](crate::Class) stylesheet and layout
+//! tokens (padding, text size/weight) so View menu / toolbar / sidebar chrome
+//! stays consistent across library and viewer modes.
+
 use iced::widget::{button, container, progress_bar as iced_progress_bar, text, text_input};
 use iced::{Element, Length};
 
@@ -198,6 +204,7 @@ pub fn error_banner<'a, Message: 'a>(
     with_normal_side_border(content, tokens, Class::ErrorBanner)
 }
 
+/// with normal side border.
 pub(crate) fn with_normal_side_border<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
     tokens: ThemeTokens,

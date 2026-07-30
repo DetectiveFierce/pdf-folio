@@ -1,4 +1,7 @@
-//! Right-click context menu rendering and action routing.
+//! # Context menus
+//!
+//! Capture layer and dropdown rendering for right-click menus opened from
+//! library or viewer surfaces.
 
 use crate::*;
 use iced::widget::{column, row, stack};
@@ -12,6 +15,7 @@ struct ContextMenuItemSpec {
 }
 
 impl PDFolioApp {
+    /// open context menu.
     pub(crate) fn open_context_menu(&mut self, target: ContextMenuTarget) {
         self.viewer.zoom_menu_open = false;
 
@@ -38,6 +42,7 @@ impl PDFolioApp {
         });
     }
 
+    /// context menu action message.
     pub(crate) fn context_menu_action_message(&self, action: ContextMenuAction) -> Option<Message> {
         let target = &self.chrome.open_context_menu.as_ref()?.target;
         match action {
@@ -173,6 +178,7 @@ impl PDFolioApp {
     }
 }
 
+/// Transparent layer that closes the open context menu on outside click.
 pub(crate) fn context_menu_capture_layer<'a>(_app: &PDFolioApp) -> Element<'a, Message> {
     pin(
         mouse_area(container("").width(Length::Fill).height(Length::Fill))
@@ -184,6 +190,7 @@ pub(crate) fn context_menu_capture_layer<'a>(_app: &PDFolioApp) -> Element<'a, M
     .into()
 }
 
+/// Positioned context menu with the items for the current menu model.
 pub(crate) fn view_context_menu_dropdown(
     app: &PDFolioApp,
     tokens: ThemeTokens,

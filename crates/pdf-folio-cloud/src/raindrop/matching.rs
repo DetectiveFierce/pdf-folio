@@ -1,4 +1,25 @@
 //! ZIP export matching for Raindrop PDF imports.
+//!
+//! When many selected raindrops are **uploaded files**, downloading them one
+//! API call at a time is slow. Raindrop’s bulk export ZIP is preferred once the
+//! uploaded-file count reaches [`super::ZIP_IMPORT_THRESHOLD`]. This module
+//! chooses the strategy and maps ZIP members back onto raindrop ids.
+//!
+//! # Matching priority ([`ZipMatchIndex::match_entry`])
+//!
+//! 1. Exact normalized name + size (unique remaining candidate)
+//! 2. Exact name alone
+//! 3. Exact size alone
+//! 4. File stem match
+//! 5. Suffix match on name or stem
+//!
+//! Ambiguous matches return `None` so a PDF is never attached to the wrong item.
+//!
+//! # Related
+//!
+//! - Threshold/progress constants: [`super`]
+//! - ZIP download: [`super::client::RaindropClient::download_pdf_export_zip`]
+//! - Orchestration: [`super::import`]
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -16,12 +37,16 @@ use super::{
     ZIP_IMPORT_THRESHOLD,
 };
 
+/// How to fetch PDF bytes for a selected import set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RaindropImportStrategy {
+    /// One guarded download per raindrop.
     IndividualFiles,
+    /// Single Raindrop export ZIP + local matching.
     ZipExport,
 }
 
+/// Prefers ZIP export when enough selected items are uploaded Raindrop files.
 pub(crate) fn choose_import_strategy(raindrops: &[Raindrop]) -> RaindropImportStrategy {
     if raindrops
         .iter()
@@ -35,6 +60,14 @@ pub(crate) fn choose_import_strategy(raindrops: &[Raindrop]) -> RaindropImportSt
     }
 }
 
+/// Extracts PDFs from a Raindrop export ZIP into `storage_dir`, keyed by raindrop id.
+///
+/// Only entries that uniquely match a remaining selected raindrop are written.
+/// Reports extract progress via the optional callback.
+///
+/// # Errors
+///
+/// Returns an error when the archive is invalid or a matched file cannot be written.
 pub(crate) fn extract_selected_pdfs_from_zip(
     storage_dir: &Path,
     archive: &[u8],
@@ -139,6 +172,7 @@ pub(crate) fn extract_selected_pdfs_from_zip(
     Ok(extracted)
 }
 
+/// Indexes selected raindrops by normalized name, stem, and size for ZIP matching.
 pub(crate) struct ZipMatchIndex {
     names: HashMap<String, Vec<usize>>,
     stems: HashMap<String, Vec<usize>>,
@@ -149,6 +183,7 @@ pub(crate) struct ZipMatchIndex {
 }
 
 impl ZipMatchIndex {
+    /// Builds lookup tables from the selected raindrop list (indices into that slice).
     pub(crate) fn new(raindrops: &[Raindrop]) -> Self {
         let mut names: HashMap<String, Vec<usize>> = HashMap::new();
         let mut stems: HashMap<String, Vec<usize>> = HashMap::new();
@@ -187,6 +222,7 @@ impl ZipMatchIndex {
         }
     }
 
+    /// Finds a unique remaining raindrop index for a ZIP member, if any.
     pub(crate) fn match_entry(
         &self,
         remaining: &HashSet<usize>,
@@ -256,6 +292,7 @@ impl ZipMatchIndex {
     }
 }
 
+/// Returns the sole remaining index from `indexes`, or `None` if zero or many match.
 pub(crate) fn unique_remaining_match(
     indexes: Option<&Vec<usize>>,
     remaining: &HashSet<usize>,
@@ -273,10 +310,12 @@ pub(crate) fn unique_remaining_match(
     matched
 }
 
+/// Lowercased, path-safe file name for ZIP matching.
 pub(crate) fn normalized_zip_file_name(name: &str) -> String {
     safe_pdf_file_name(name).to_lowercase()
 }
 
+/// Normalized name with a trailing `.pdf` stripped.
 pub(crate) fn normalized_zip_file_stem(name: &str) -> String {
     normalized_zip_file_name(name)
         .trim_end_matches(".pdf")

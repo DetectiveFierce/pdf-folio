@@ -1,6 +1,15 @@
+//! # Library entry cards and rows
+//!
+//! Builds individual PDF tiles for grid (card) and list (row) layouts,
+//! including selection chrome, drag ghost styling, and thumbnail media.
+//!
+//! Domain-aware: uses app selection, drag state, and thumbnail cache.
+//! Low-level drop-zone and tag row widgets come from `components::library::cards`.
+
 use super::*;
 use iced::widget::column;
 
+/// Grid-mode card for one library entry (thumbnail, title, meta, selection).
 pub(crate) fn library_entry_card<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -161,6 +170,7 @@ pub(crate) fn library_entry_card<'a>(
     }
 }
 
+/// Compact list-mode row for one library entry.
 pub(crate) fn library_entry_row<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -338,6 +348,7 @@ fn compact_tags_row<'a>(
         .into()
 }
 
+/// Container style for selected/hover/drag states on an entry tile.
 pub(crate) fn library_entry_container_style(
     tokens: ThemeTokens,
     class: Class,
@@ -432,6 +443,7 @@ fn interpolate_shadow(
     })
 }
 
+/// Opacity for entry content while dragging (ghost vs solid).
 pub(crate) fn library_entry_content_alpha(app: &PDFolioApp, mode: LibraryEntryRenderMode) -> f32 {
     if mode == LibraryEntryRenderMode::Placeholder {
         app.layout().library_drag_placeholder_content_alpha
@@ -440,6 +452,7 @@ pub(crate) fn library_entry_content_alpha(app: &PDFolioApp, mode: LibraryEntryRe
     }
 }
 
+/// Thumbnail image region for a grid card, with placeholder when missing.
 pub(crate) fn card_thumbnail_media<'a>(
     app: &'a PDFolioApp,
     entry_id: &EntryId,
@@ -477,6 +490,7 @@ pub(crate) fn card_thumbnail_media<'a>(
     }
 }
 
+/// Iced image element from a cached `ThumbnailView`, scaled to the target size.
 pub(crate) fn thumbnail_element<'a>(
     app: &'a PDFolioApp,
     entry_id: &EntryId,

@@ -1,40 +1,64 @@
+//! Shared library types: IDs, rows, preferences, snapshots, and sync DTOs.
+//!
+//! This module is pure data — no SQLite or I/O. Every row type mirrors a table
+//! (or join) used by [`crate::Db`]. Callers in the UI and cloud crates depend
+//! on these shapes for library lists, organization undo, Raindrop import, and
+//! CRDT sync without opening the database themselves.
+//!
+//! # Groups
+//!
+//! - **IDs** — [`EntryId`] (usually a BLAKE3 content hash), [`FolderId`].
+//! - **Library rows** — [`LibraryEntry`], [`Folder`], [`NewLibraryEntry`],
+//!   tags and folder memberships.
+//! - **Preferences** — [`LibraryPreferences`], [`LibraryLayoutMode`],
+//!   [`LibrarySortMode`].
+//! - **Organization undo** — [`LibraryOrganizationSnapshot`] and related
+//!   snapshot row types for reversible bulk edits.
+//! - **Integrations** — [`ImportSource`], Raindrop mappings, and sync/CRDT
+//!   DTOs ([`SyncEntryRow`], [`SyncCrdtOperation`], …).
+//!
+//! # See also
+//!
+//! - [`crate::db::library`] / [`crate::db::organization`] for mutating these types.
+//! - [`crate::db::sync`] for writing and querying the sync-side DTOs.
+
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 
-/// Stable library entry identifier.
+/// Stable library entry identifier (typically a BLAKE3 content hash hex string).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EntryId(String);
 
 impl EntryId {
-    /// Creates an entry identifier.
+    /// Wraps an existing identifier string without validating format.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 
-    /// Returns the identifier as a string slice.
+    /// Borrows the underlying identifier string (used as the SQLite primary key).
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-/// Stable library folder identifier.
+/// Stable library folder identifier (generated when the folder is created).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FolderId(String);
 
 impl FolderId {
-    /// Creates a folder identifier.
+    /// Wraps an existing folder identifier string without validating format.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 
-    /// Returns the identifier as a string slice.
+    /// Borrows the underlying identifier string (used as the SQLite primary key).
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-/// User-managed PDF folder.
+/// User-managed PDF folder in the library tree (not a filesystem path).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Folder {
     /// Stable folder identifier.
@@ -51,12 +75,12 @@ pub struct Folder {
     pub updated_at: DateTime<Utc>,
 }
 
-/// External service whose items have been imported into the local library.
+/// External service account whose items have been imported into the local library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportSource {
     /// Stable source identifier, e.g. `raindrop:123`.
     pub id: String,
-    /// Source provider kind.
+    /// Provider kind string (e.g. `"raindrop"`).
     pub kind: String,
     /// Provider account identifier, when known.
     pub account_id: Option<String>,
@@ -106,17 +130,17 @@ pub struct RaindropEntryMapping {
     pub file_size: Option<u64>,
 }
 
-/// Library layout preference.
+/// How the library main pane lays out entry cards (persisted in preferences).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryLayoutMode {
-    /// Grid of PDF cards.
+    /// Masonry/grid of PDF cards (default).
     Grid,
-    /// Dense list of PDF rows.
+    /// Dense list of PDF rows with metadata columns.
     List,
 }
 
 impl LibraryLayoutMode {
-    /// Returns the stable string stored in SQLite.
+    /// Stable wire/storage string (`"grid"` / `"list"`) written to SQLite preferences.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Grid => "grid",
@@ -137,33 +161,33 @@ impl std::str::FromStr for LibraryLayoutMode {
     }
 }
 
-/// Library sort preference.
+/// Sort mode for library entry lists (persisted and applied by `Db::get_entries_sorted`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibrarySortMode {
-    /// User-managed ordering.
+    /// User-managed root/folder order via `manual_order` columns.
     Manual,
-    /// Title, ascending.
+    /// Title A→Z (uses sort/display/title fallbacks).
     TitleAsc,
-    /// Title, descending.
+    /// Title Z→A.
     TitleDesc,
-    /// Author, ascending.
+    /// Author A→Z.
     AuthorAsc,
-    /// Author, descending.
+    /// Author Z→A.
     AuthorDesc,
-    /// Recently added PDFs first.
+    /// Most recently imported first.
     RecentlyAdded,
-    /// Recently opened PDFs first.
+    /// Most recently opened first (`opened_at` nulls last).
     RecentlyOpened,
-    /// Most progress first.
+    /// Highest reading progress ratio first.
     ReadingProgress,
-    /// Page count, descending.
+    /// Highest page count first.
     PageCount,
-    /// Missing files first.
+    /// Entries whose source file is missing first.
     MissingFiles,
 }
 
 impl LibrarySortMode {
-    /// Returns the stable string stored in SQLite.
+    /// Stable wire/storage key written to SQLite preferences (snake_case).
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Manual => "manual",
@@ -222,7 +246,7 @@ impl std::str::FromStr for LibrarySortMode {
     }
 }
 
-/// Persisted library view preferences.
+/// Persisted library view preferences (sort, layout, sidebar, grid zoom, tree state).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LibraryPreferences {
     /// Active sort mode.
@@ -262,7 +286,12 @@ impl Default for LibraryPreferences {
     }
 }
 
-/// A PDF entry stored in the local library.
+/// A PDF entry stored in the local library, including tags and folder memberships.
+///
+/// `title` / `author` hold extracted or import-time values; `display_*` are
+/// optional user overrides. When `metadata_locked` is true, re-import should
+/// not overwrite display fields. `id` is content-derived and stable across
+/// path changes after a relink.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryEntry {
     /// Stable content-derived identifier.
@@ -466,6 +495,10 @@ pub struct SyncCrdtPrepareSummary {
 }
 
 /// Reversible snapshot of library organization and user-editable entry state.
+///
+/// Captured before bulk folder/tag/trash edits so the UI can restore a prior
+/// tree without touching PDF files on disk. Diff helpers compare search- and
+/// trash-relevant fields to decide which indexes need refreshing after restore.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryOrganizationSnapshot {
     /// All user folders, including trashed folders.
@@ -540,7 +573,10 @@ impl LibraryOrganizationSnapshot {
     }
 }
 
-/// Input data for creating a library entry.
+/// Input data for inserting or upserting a library entry via [`crate::Db::insert_entry`].
+///
+/// Prefer content-hash [`EntryId`] values from [`crate::hash_file`] so the same
+/// PDF at a new path merges onto the existing row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewLibraryEntry {
     /// Stable content-derived identifier.

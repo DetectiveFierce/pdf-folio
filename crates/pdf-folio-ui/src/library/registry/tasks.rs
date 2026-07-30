@@ -1,3 +1,12 @@
+//! # Registry sync helpers
+//!
+//! Merge cloud `SyncLibraryRow` lists into the local multi-library registry
+//! and project local profiles into rows for upload. Used by the shell sync
+//! pipeline rather than the library view directly.
+//!
+//! Creates missing local SQLite files for remote libraries, removes storage
+//! for remotely deleted ids, and refreshes switcher previews after mutation.
+
 use crate::library::registry::preview::load_library_previews;
 use crate::library::registry::session::{
     app_data_dir, current_unix_timestamp, file_modified_unix_timestamp, library_db_path,
@@ -8,6 +17,7 @@ use crate::*;
 use anyhow::Context;
 use pdf_folio_cloud::sync::SyncLibraryRow;
 
+/// Apply remote library rows (add/rename/delete) to the local registry and return new ids.
 pub(crate) fn sync_library_registry_profiles(
     registry: LibraryRegistryRuntime,
     remote_libraries: Vec<SyncLibraryRow>,
@@ -81,6 +91,7 @@ pub(crate) fn sync_library_registry_profiles(
     Ok((registry, added_library_ids))
 }
 
+/// Project local profiles and deleted tombstones into cloud sync rows.
 pub(crate) fn sync_library_rows_for_registry(
     registry: &LibraryRegistryRuntime,
 ) -> Vec<SyncLibraryRow> {

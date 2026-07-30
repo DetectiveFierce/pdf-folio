@@ -1,9 +1,18 @@
+//! # Library switcher previews
+//!
+//! Loads a small set of cover thumbnails and entry counts for each vault so
+//! the library switcher can show visual cards without opening full UI state.
+//!
+//! Opens each profile's SQLite read-only for listing, prefers cached small
+//! thumbnails, and falls back to rendering page 0 when needed.
+
 use crate::library::registry::state::{
     LibraryPreview, LibraryPreviewThumbnail, LIBRARY_SWITCHER_PREVIEW_LIMIT,
 };
 use crate::*;
 use pdf_folio_core::thumbnail_path;
 
+/// Build entry count + up to `LIBRARY_SWITCHER_PREVIEW_LIMIT` covers for one profile.
 pub(crate) fn load_library_preview(profile: &LibraryProfile) -> LibraryPreview {
     Db::open(profile.db_path.clone())
         .and_then(|db| db.get_entries_sorted(LibrarySortMode::RecentlyAdded))
@@ -18,6 +27,7 @@ pub(crate) fn load_library_preview(profile: &LibraryProfile) -> LibraryPreview {
         .unwrap_or_default()
 }
 
+/// Load previews for every profile into a map keyed by library id.
 pub(super) fn load_library_previews(
     profiles: &[LibraryProfile],
 ) -> HashMap<String, LibraryPreview> {
@@ -38,6 +48,7 @@ fn library_preview_title(entry: &LibraryEntry) -> String {
         .to_owned()
 }
 
+/// Load or render a small cover handle for one entry in a switcher preview strip.
 pub(super) fn library_preview_thumbnail(entry: &LibraryEntry) -> Option<LibraryPreviewThumbnail> {
     let width = ThumbnailSize::Small.width_px();
     let path = small_thumbnail_path(&entry.id).ok()?;

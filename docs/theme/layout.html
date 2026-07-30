@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{title}} · PDF-Folio Docs</title>
+  <meta name="description" content="{{description}}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{root}}assets/site.css">
+  <script defer src="{{root}}assets/site.js"></script>
+</head>
+<body>
+  <button class="menu-btn" id="menuBtn" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰ Menu</button>
+  <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="Documentation">
+      <div class="sidebar-top">
+        <a class="brand" href="{{root}}index.html">
+          <div class="mark">
+            <div class="tiles" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+            <div class="name">PDF‑Folio</div>
+          </div>
+          <div class="tagline">{{site_tagline}}</div>
+        </a>
+
+        <button class="search-trigger" id="searchTrigger" type="button" aria-haspopup="dialog" aria-controls="searchModal">
+          <span class="search-trigger-icon" aria-hidden="true">⌕</span>
+          <span class="search-trigger-label">Search docs…</span>
+          <kbd class="search-kbd">/</kbd>
+        </button>
+      </div>
+
+      <nav class="toc" id="sidebarNav">
+        {{sidebar}}
+      </nav>
+
+      <div class="sidebar-foot">
+        <a class="legacy-link" href="{{root}}../docs.html">Legacy single-page guide</a>
+      </div>
+    </aside>
+
+    <div class="main-wrap">
+      <main class="main" id="main">
+        <header class="doc-header">
+          {{#eyebrow}}<div class="eyebrow">{{eyebrow}}</div>{{/eyebrow}}
+          <h1>{{title}}</h1>
+          {{#lede}}<p class="lede">{{lede}}</p>{{/lede}}
+        </header>
+
+        <article class="content" id="content">
+          {{content}}
+        </article>
+
+        <nav class="page-nav" aria-label="Page">
+          {{#prev}}
+          <a class="page-nav-link prev" href="{{href}}">
+            <span class="page-nav-dir">Previous</span>
+            <span class="page-nav-title">{{title}}</span>
+          </a>
+          {{/prev}}
+          {{^prev}}<span></span>{{/prev}}
+          {{#next}}
+          <a class="page-nav-link next" href="{{href}}">
+            <span class="page-nav-dir">Next</span>
+            <span class="page-nav-title">{{title}}</span>
+          </a>
+          {{/next}}
+        </nav>
+      </main>
+
+      {{#page_toc}}
+      <aside class="page-toc" aria-label="On this page">
+        <div class="page-toc-label">On this page</div>
+        {{page_toc}}
+      </aside>
+      {{/page_toc}}
+    </div>
+  </div>
+
+  <div class="search-modal" id="searchModal" role="dialog" aria-modal="true" aria-labelledby="searchTitle" hidden>
+    <div class="search-panel">
+      <div class="search-bar">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input
+          type="search"
+          id="searchInput"
+          class="search-input"
+          placeholder="Search documentation…"
+          autocomplete="off"
+          spellcheck="false"
+          aria-labelledby="searchTitle"
+        >
+        <kbd class="search-kbd">esc</kbd>
+      </div>
+      <div id="searchTitle" class="visually-hidden">Search documentation</div>
+      <div class="search-results" id="searchResults" role="listbox" aria-label="Search results"></div>
+      <div class="search-empty" id="searchEmpty" hidden>No matches. Try a different term.</div>
+      <div class="search-hint" id="searchHint">Type to search across all pages. Use ↑↓ to move, Enter to open.</div>
+    </div>
+  </div>
+</body>
+</html>

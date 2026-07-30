@@ -1,4 +1,7 @@
-//! Library entry metadata display and formatting helpers.
+//! # Entry metadata formatting
+//!
+//! Pure display helpers: title/author resolution, file size labels, reading
+//! progress, and density-aware card/row meta strings. No database access.
 
 use std::path::Path;
 
@@ -6,6 +9,7 @@ use pdf_folio_core::LibraryEntry;
 
 use super::state::LibraryMetadataDensity;
 
+/// Display title for a library entry (override or extracted).
 pub fn entry_title(entry: &LibraryEntry) -> String {
     entry
         .display_title
@@ -21,6 +25,7 @@ pub fn entry_title(entry: &LibraryEntry) -> String {
         })
 }
 
+/// Display author for a library entry (override or extracted).
 pub fn entry_author(entry: &LibraryEntry) -> String {
     entry
         .display_author
@@ -29,6 +34,7 @@ pub fn entry_author(entry: &LibraryEntry) -> String {
         .unwrap_or_else(|| String::from("Unknown author"))
 }
 
+/// Trims and normalizes user metadata input text.
 pub fn clean_metadata_input(value: &str) -> Option<String> {
     let value = value.trim();
     if value.is_empty() {
@@ -38,6 +44,7 @@ pub fn clean_metadata_input(value: &str) -> Option<String> {
     }
 }
 
+/// Formats a display label for page count.
 pub fn page_count_label(entry: &LibraryEntry) -> String {
     entry.page_count.map_or_else(
         || String::from("Unknown pages"),
@@ -51,6 +58,7 @@ pub fn page_count_label(entry: &LibraryEntry) -> String {
     )
 }
 
+/// Formats a display label for last opened.
 pub fn last_opened_label(entry: &LibraryEntry) -> String {
     entry.opened_at.map_or_else(
         || String::from("Never opened"),
@@ -58,12 +66,14 @@ pub fn last_opened_label(entry: &LibraryEntry) -> String {
     )
 }
 
+/// Formats a display label for file size.
 pub fn file_size_label(entry: &LibraryEntry) -> String {
     entry
         .file_size
         .map_or_else(|| String::from("Unknown size"), format_file_size)
 }
 
+/// Formats a display label for total file size.
 pub fn total_file_size_label(entries: &[LibraryEntry]) -> String {
     let mut total = 0_u64;
     let mut unknown = 0_usize;
@@ -82,6 +92,7 @@ pub fn total_file_size_label(entries: &[LibraryEntry]) -> String {
     }
 }
 
+/// Formats a display label for library card metadata.
 pub fn library_card_metadata_label(
     density: LibraryMetadataDensity,
     entry: &LibraryEntry,
@@ -97,6 +108,7 @@ pub fn library_card_metadata_label(
     }
 }
 
+/// Formats a display label for library row metadata.
 pub fn library_row_metadata_label(density: LibraryMetadataDensity, entry: &LibraryEntry) -> String {
     match density {
         LibraryMetadataDensity::Minimal => entry_author(entry),
@@ -118,6 +130,7 @@ pub fn library_row_metadata_label(density: LibraryMetadataDensity, entry: &Libra
     }
 }
 
+/// Formats a display label for library card page count.
 pub fn library_card_page_count_label(entry: &LibraryEntry) -> String {
     entry.page_count.map_or_else(
         || String::from("Unknown pages"),
@@ -131,6 +144,7 @@ pub fn library_card_page_count_label(entry: &LibraryEntry) -> String {
     )
 }
 
+/// Formats file size for display.
 pub fn format_file_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -150,10 +164,12 @@ pub fn format_file_size(bytes: u64) -> String {
     }
 }
 
+/// File size.
 pub fn file_size(path: &Path) -> Option<u64> {
     std::fs::metadata(path).ok().map(|metadata| metadata.len())
 }
 
+/// Progress fraction.
 pub fn progress_fraction(entry: &LibraryEntry) -> f32 {
     if entry.missing {
         return 0.0;

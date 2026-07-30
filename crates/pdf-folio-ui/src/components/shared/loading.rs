@@ -1,9 +1,12 @@
-//! Blocking loading overlays for shell-level transitions.
+//! # Loading overlays
+//!
+//! Full-surface spinners for startup, document open, and history restore.
 
 use crate::components::viewer::canvas::HistoryRestoreSpinner;
 use crate::*;
 use iced::widget::{canvas, column};
 
+/// Overlay shown while organization history is being restored.
 pub(crate) fn history_restore_spinner_layer(
     app: &PDFolioApp,
     tokens: ThemeTokens,
@@ -36,6 +39,7 @@ pub(crate) fn history_restore_spinner_layer(
     .into()
 }
 
+/// Overlay shown while a PDF document is opening in the viewer.
 pub(crate) fn document_loading_layer(
     app: &PDFolioApp,
     tokens: ThemeTokens,
@@ -64,6 +68,7 @@ pub(crate) fn document_loading_layer(
     .into()
 }
 
+/// Overlay shown while the initial library load is in progress.
 pub(crate) fn startup_library_loading_layer(
     app: &PDFolioApp,
     tokens: ThemeTokens,

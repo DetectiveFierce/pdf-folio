@@ -1,4 +1,17 @@
-//! Thumbnail cache types and async thumbnail tasks for the library UI.
+//! # Library cover thumbnails
+//!
+//! Types and I/O for on-disk RGBA cover caches at multiple resolution tiers
+//! ([`ThumbnailSize`]), plus iced-ready [`ThumbnailView`] handles.
+//!
+//! ## Ownership
+//!
+//! Mostly pure filesystem + PDF render helpers. The in-memory map of
+//! [`ThumbnailCacheKey`] → view lives on `app.library`; this module does
+//! not own that map. Domain code (`data::request_visible_thumbnails`)
+//! decides *what* to load; here we load/render bytes.
+//!
+//! Bulk rebuild goes through [`bulk_thumbnail_task`] for menu actions;
+//! import paths call [`cache_thumbnail_variants`] after opening a PDF.
 
 use std::path::PathBuf;
 
@@ -42,6 +55,7 @@ pub enum ThumbnailSize {
 }
 
 impl ThumbnailSize {
+    /// Target render width in pixels for this tier.
     pub(crate) fn width_px(self) -> u16 {
         match self {
             Self::Small => 96,
@@ -59,6 +73,7 @@ impl ThumbnailSize {
     }
 }
 
+/// Load a cached RGBA thumbnail or render page 0 and write the cache file.
 pub(crate) async fn load_or_render_thumbnail(
     entry: LibraryEntry,
     size: ThumbnailSize,
@@ -89,6 +104,7 @@ pub(crate) async fn load_or_render_thumbnail(
     .await?
 }
 
+/// Synchronously load a cached thumbnail into an iced image handle, if present.
 pub(crate) fn load_cached_thumbnail(
     entry_id: &EntryId,
     size: ThumbnailSize,
@@ -108,6 +124,7 @@ pub(crate) fn load_cached_thumbnail(
     }))
 }
 
+/// Rebuild Small/Default/Large cover variants for many entries (bulk operation UI).
 pub(crate) fn bulk_thumbnail_task(entries: Vec<LibraryEntry>) -> Task<Message> {
     Task::perform(
         async move {
@@ -140,6 +157,7 @@ fn rebuild_entry_thumbnail(entry: &LibraryEntry) -> anyhow::Result<()> {
     cache_thumbnail_variants(&entry.id, &doc)
 }
 
+/// Render and write all thumbnail size tiers for one entry from an open `PdfDoc`.
 pub(crate) fn cache_thumbnail_variants(entry_id: &EntryId, doc: &PdfDoc) -> anyhow::Result<()> {
     for size in [
         ThumbnailSize::Small,

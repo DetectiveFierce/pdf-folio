@@ -1,5 +1,25 @@
+//! Resolves bundled and user style file paths for the style book.
+//!
+//! Style sources come from three layers (later overrides earlier when the same
+//! path is re-read from disk):
+//!
+//! 1. **Embedded** — [`BUNDLED_STYLE_FILES`] (`include_str!` of each KDL file).
+//! 2. **Checkout disk** — `crates/pdf-folio-style/styles/` when the crate is
+//!    built from a source tree; on-disk content replaces the embedded string
+//!    for the same relative path so hot reload works without recompiling.
+//! 3. **User XDG** — `$XDG_CONFIG_HOME/pdf-folio/styles/**/*.kdl` (or
+//!    `~/.config/pdf-folio/styles/`), applied after bundled sources.
+//!
+//! File walk order within a directory is themes → components → application →
+//! other, so themes are available before component states reference them.
+
 use std::path::{Path, PathBuf};
 
+/// Embedded `(relative_path, kdl_source)` pairs for every shipped style file.
+///
+/// Paths are rooted at `styles/` and match the on-disk layout under this crate.
+/// Order matches load priority groups (themes first, then components, then
+/// application).
 pub(crate) const BUNDLED_STYLE_FILES: [(&str, &str); 7] = [
     (
         "styles/themes/espresso.kdl",
@@ -31,6 +51,7 @@ pub(crate) const BUNDLED_STYLE_FILES: [(&str, &str); 7] = [
     ),
 ];
 
+/// User override directory: `$XDG_CONFIG_HOME/pdf-folio/styles` (or `~/.config/…`).
 pub(crate) fn user_style_dir() -> Option<PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -38,10 +59,14 @@ pub(crate) fn user_style_dir() -> Option<PathBuf> {
         .map(|config| config.join("pdf-folio").join("styles"))
 }
 
+/// Absolute path to this crate's `styles/` directory (checkout only).
 pub(super) fn bundled_style_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("styles")
 }
 
+/// Directories that currently exist and should be watched for hot reload.
+///
+/// Includes the checkout `styles/` tree and the user XDG styles dir when present.
 pub(crate) fn style_source_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     let bundled = bundled_style_dir();
@@ -56,6 +81,11 @@ pub(crate) fn style_source_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Builds the bundled source list, preferring on-disk files over embedded text.
+///
+/// Extra `.kdl` files found under the checkout `styles/` tree (not in
+/// [`BUNDLED_STYLE_FILES`]) are appended so local experiments can load without
+/// editing the constant table.
 pub(crate) fn bundled_style_sources() -> Result<Vec<(String, String)>, String> {
     let bundled_dir = bundled_style_dir();
     let disk_files = style_files_in_dir(&bundled_dir);
@@ -90,10 +120,12 @@ pub(crate) fn bundled_style_sources() -> Result<Vec<(String, String)>, String> {
     Ok(sources)
 }
 
+/// Recursively lists all `.kdl` files under the user styles directory.
 pub(crate) fn user_style_files(dir: &Path) -> Vec<PathBuf> {
     style_files_in_dir(dir)
 }
 
+/// Recursively lists `.kdl` files under `dir`, sorted by load-order group.
 pub(super) fn style_files_in_dir(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_kdl_files(dir, &mut files);
