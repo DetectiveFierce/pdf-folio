@@ -1,7 +1,10 @@
 //! Viewer state, rendering, outline, and task modules.
 
-pub(crate) mod canvas;
-pub(crate) mod outline;
-pub(crate) use pdf_folio_viewer::state;
+pub(crate) mod document;
+pub(crate) mod layout;
+pub(crate) mod navigation;
+pub(crate) mod rendering;
+pub(crate) mod state;
 pub(crate) mod tasks;
-pub(crate) mod zoom;
+pub(crate) mod update;
+pub(crate) mod view;

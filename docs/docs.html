@@ -566,7 +566,7 @@
       <h2>The Library Database</h2>
       <p class="lede">Every named library is its own SQLite file, and every PDF's identity comes from its bytes, not its path.</p>
 
-      <p><code>pdf-folio-db::Db</code> wraps a single bundled <code>rusqlite</code> connection —
+      <p><code>pdf-folio-core::Db</code> wraps a single bundled <code>rusqlite</code> connection —
       there's no system SQLite dependency, and no shared server. Each named library the user
       creates gets its own SQLite file; switching libraries in the app swaps which
       <code>Arc&lt;Db&gt;</code> and search index the rest of the UI talks to. This is what makes
@@ -636,7 +636,7 @@
         <tr><td><code>tags</code></td><td class="desc">A plain <code>(entry_id, tag)</code> join table — tags belong to entries, not to any folder.</td></tr>
         <tr><td><code>folders</code></td><td class="desc">Self-referential via <code>parent_id</code> for nesting. Trashing uses a <code>trashed_at</code> <em>timestamp</em>, not a boolean — see below.</td></tr>
         <tr><td><code>entry_folders</code></td><td class="desc">Many-to-many membership between entries and folders, with its own <code>manual_order</code> for per-folder manual sort.</td></tr>
-        <tr><td><code>bookmarks</code> / <code>annotations</code></td><td class="desc">Per-entry, per-page rows. Annotations store an opaque <code>data</code> JSON blob keyed by <code>kind</code>, so new annotation types (highlight, note, drawing) don't need a schema migration to add.</td></tr>
+        <tr><td><code>bookmarks</code></td><td class="desc">Per-entry, per-page bookmark rows for local reading landmarks.</td></tr>
         <tr><td><code>library_preferences</code></td><td class="desc">A generic <code>key -&gt; value</code> table for sort mode, layout mode, sidebar width — UI persistence that doesn't warrant its own typed table.</td></tr>
         <tr><td><code>import_sources</code>, <code>raindrop_collections</code>, <code>raindrop_entries</code></td><td class="desc">Provenance for PDFs pulled from Raindrop.io — see §3.5.</td></tr>
         <tr><td><code>sync_*</code> tables</td><td class="desc">The CRDT operation log and materialized sync state — the subject of all of §6.</td></tr>
@@ -694,7 +694,7 @@
 
       <h3 id="database-import"><span class="idx">3.5</span>Import &amp; provenance</h3>
       <p>Not every PDF enters the library through a folder scan. The Raindrop.io integration
-      (<code>pdf-folio-raindrop</code>) imports selected bookmarks, and the schema tracks where they
+      (<code>pdf-folio-cloud::raindrop</code>) imports selected bookmarks, and the schema tracks where they
       came from: <code>import_sources</code> identifies the remote account/source,
       <code>raindrop_collections</code> mirrors a Raindrop collection onto a local folder (with
       cascading delete back to that folder), and <code>raindrop_entries</code> links a local entry
@@ -709,7 +709,7 @@
       <h2>Search &amp; Filesystem Watching</h2>
       <p class="lede">Full-text search is indexed per page, and disk changes flow in as ordinary messages.</p>
 
-      <p><code>pdf-folio-db::SearchIndex</code> wraps Tantivy with a small, fixed schema — and
+      <p><code>pdf-folio-core::SearchIndex</code> wraps Tantivy with a small, fixed schema — and
       critically, indexes <strong>per page</strong>, not per document:</p>
 
       <pre><code>schema_builder.add_text_field(<span class="s">"id"</span>,     STRING | STORED);  <span class="c">// entry id, not tokenized</span>
@@ -724,7 +724,7 @@ schema_builder.add_u64_field(<span class="s">"page"</span>,    STORED);</code></
       for ranked matching but deliberately not stored, since page text is always cheaply
       re-derivable from the PDF itself through Pdfium if reindexing is ever needed.</p>
 
-      <p>Filesystem changes flow through <code>pdf-folio-db::LibraryWatcher</code>, a thin wrapper
+      <p>Filesystem changes flow through <code>pdf-folio-core::LibraryWatcher</code>, a thin wrapper
       around the <code>notify</code> crate that filters raw OS events down to two variants:</p>
 
       <pre><code><span class="k">pub enum</span> LibraryWatchEvent {
@@ -983,7 +983,7 @@ cargo run -p pdf-folio-main --bin pdf-folio -- sync sync-once       <span class=
         (shift-click for ranges, ctrl-click to toggle) — handled synchronously in
         <code>update()</code>, no async needed for selection itself.</li>
         <li>Dropping onto a folder card resolves through the drag state machine in
-        <code>pdf-folio-ui-components</code>, which is pure geometry and hit-testing and knows
+        <code>pdf-folio-ui::components::library</code>, which is pure geometry and hit-testing and knows
         nothing about the database.</li>
         <li><code>update()</code> captures a <code>LibraryOrganizationSnapshot</code>
         (§3.4), performs the <code>entry_folders</code> upserts on the blocking pool the same way

@@ -2,13 +2,8 @@
 members = [
     "crates/iced-widget-patch",
     "crates/pdf-folio-core",
-    "crates/pdf-folio-db",
-    "crates/pdf-folio-raindrop",
-    "crates/pdf-folio-sync",
-    "crates/pdf-folio-sync-server",
+    "crates/pdf-folio-cloud",
     "crates/pdf-folio-style",
-    "crates/pdf-folio-viewer",
-    "crates/pdf-folio-ui-components",
     "crates/pdf-folio-ui",
     "crates/pdf-folio-main",
 ]

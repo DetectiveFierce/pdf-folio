@@ -15,20 +15,21 @@
 //! - [`messages`] — the [`Message`] enum and related menu/shortcut types
 //!   that drive the update loop.
 //!
-//! Internal modules are organized into `app/` (state, update, view, layout),
-//! `library/` (thumbnails, tasks, filtering, drag-and-drop), `viewer/`
-//! (canvas rendering, zoom, outline, text search), and `views/` (top-level
-//! view composition).
+//! Internal modules are organized into `shell/` (state, update, subscriptions,
+//! and platform integration), `components/` (shared, library, and viewer UI
+//! widgets), `library/` (state, actions, tasks, filtering, layout, registry,
+//! and view composition), and `viewer/` (document runtime, navigation,
+//! rendering, text search, tasks, and view composition).
 //!
 //! [`iced`]: https://docs.rs/iced
 
 pub use pdf_folio_style as style;
 pub use pdf_folio_style::theme;
 
-mod app;
+mod components;
 mod library;
+mod shell;
 mod viewer;
-pub mod views;
 
 use std::collections::{HashMap, HashSet};
 #[cfg(test)]
@@ -47,17 +48,17 @@ use iced::{animation, font, keyboard, Animation, Color, ContentFit, Element, Fon
 use iced::{clipboard, mouse};
 use iced::{Rectangle, Size};
 use iced::{Task, Theme};
-use pdf_folio_core::{Annotation, OutlineNode, PageTextLayer, PdfDoc, TileCache, TileKey};
-#[cfg(test)]
-use pdf_folio_db::NewLibraryEntry;
-use pdf_folio_db::{
-    Db, EntryId, Folder, FolderId, ImportedEntry, LibraryEntry, LibraryLayoutMode,
-    LibraryOrganizationSnapshot, LibraryPreferences, LibrarySortMode, LibraryWatchEvent,
-};
-use pdf_folio_raindrop::{
+use pdf_folio_cloud::raindrop::{
     RaindropImportDestination, RaindropImportPhase, RaindropImportPreview, RaindropImportProgress,
     RaindropPdfCandidate,
 };
+#[cfg(test)]
+use pdf_folio_core::NewLibraryEntry;
+use pdf_folio_core::{
+    Db, EntryId, Folder, FolderId, ImportedEntry, LibraryEntry, LibraryLayoutMode,
+    LibraryOrganizationSnapshot, LibraryPreferences, LibrarySortMode, LibraryWatchEvent,
+};
+use pdf_folio_core::{OutlineNode, PageTextLayer, PdfDoc, TileCache, TileKey};
 
 use crate::library::drag::{
     active_folder_drop_target, can_drag_reorder_library as can_drag_reorder_library_for_state,
@@ -93,13 +94,18 @@ use crate::library::tasks::{
     add_entries_to_folder_task, apply_watch_event, attribute_pending_metadata_task,
     bulk_delete_metadata_task, bulk_operation_task, bulk_permanently_delete_entries_task,
     bulk_refresh_metadata_task, bulk_reindex_task, bulk_reset_metadata_task,
-    bulk_restore_trash_items_task, create_folder_task, delete_folder_task, delete_tag_task,
-    edit_metadata_task, export_library_entries_task, import_folder_with_index,
-    import_pdf_with_index, move_entries_to_folder_task, move_folder_task,
-    paste_library_clipboard_task, permanently_delete_folder_from_trash_task,
-    persist_manual_entry_order_task, persist_manual_folder_entry_order_task,
-    persist_manual_folder_order_task, relink_entry_task, rename_folder_task, rename_tag_task,
-    reset_metadata_task, restore_library_history_snapshot_task, search_library_task,
+    bulk_restore_trash_items_task, clear_pending_raindrop_rollback, create_folder_task,
+    delete_folder_task, delete_tag_task, edit_metadata_task, export_entries_for_source,
+    export_library_entries_task, import_folder_with_index, import_pdf_with_index,
+    import_review_from_summary, load_pending_raindrop_rollback, move_entries_to_folder_task,
+    move_folder_task, paste_library_clipboard_task, pending_raindrop_rollback_check_task,
+    permanently_delete_folder_from_trash_task, persist_manual_entry_order_task,
+    persist_manual_folder_entry_order_task, persist_manual_folder_order_task,
+    raindrop_import_destination, raindrop_import_preserves_structure, raindrop_import_root_folder,
+    raindrop_import_task, raindrop_thumbnail_task, relink_entry_task, rename_folder_task,
+    rename_tag_task, reset_metadata_task, restore_library_history_snapshot_task,
+    rollback_pending_raindrop_import_task, save_pending_raindrop_rollback, search_library_task,
+    PendingRaindropRollback,
 };
 #[cfg(test)]
 use crate::library::tasks::{clean_import_title, title_from_path};
@@ -116,22 +122,22 @@ use crate::library::view::{
     folder_cards_per_row, folder_cards_section_height, format_count, masonry_target_index,
     parent_directory_drop_box_height, scroll_library_to_offset_task, shortest_column_index,
 };
-pub(crate) use app::constants::*;
-pub(crate) use app::icons::*;
-pub use app::messages;
+pub(crate) use components::shared::icons::*;
+pub(crate) use shell::constants::*;
+pub use shell::messages;
 #[cfg(test)]
-pub(crate) use app::viewer_layout::*;
+pub(crate) use viewer::layout::*;
 
-use crate::app::messages::{
-    ConfirmationAction, ContextMenuAction, ContextMenuTarget, LibrarySidebarTab, Message, Shortcut,
+use crate::shell::messages::{
+    ConfirmationAction, ContextMenuAction, ContextMenuTarget, LibrarySidebarTab, Message,
     ViewerSidebarTab,
 };
-use crate::app::platform::file_manager_commands;
+use crate::shell::platform::file_manager_commands;
 #[cfg(test)]
-use crate::app::platform::{file_manager_command, file_uri};
+use crate::shell::platform::{file_manager_command, file_uri};
 #[cfg(test)]
-use crate::app::subscriptions::style_watch_event_should_reload;
-use crate::app::subscriptions::subscription;
+use crate::shell::subscriptions::style_watch_event_should_reload;
+use crate::shell::subscriptions::subscription;
 use crate::style::{
     button_style, container_style, display_font, empty_state, icon_button, master_checkbox,
     mix_color, progress_bar, scrollable_style, search_input_with_class, section_heading,
@@ -141,31 +147,32 @@ use crate::style::{
     UI_FONT_FAMILY,
 };
 use crate::theme::AppTheme;
-use crate::viewer::canvas::ZoomRenderPolicy;
-use crate::viewer::state::{
-    RenderedPageView, ViewerFindMatch, ViewerFindState, ViewerScrollMode, ViewerSpreadMode,
-    ViewerTextAnchor, ViewerTextSelection,
-};
-use crate::viewer::tasks::{
-    open_document_task, open_library_document_task, render_page, schedule_zoom_render,
-};
-use crate::viewer::zoom::{
+use crate::viewer::rendering::ZoomRenderPolicy;
+use crate::viewer::rendering::{
     width_from_percent_input, zoom_percent_label, ZoomPreset, MAX_ZOOM_WIDTH, MIN_ZOOM_WIDTH,
     ZOOM_INPUT_ID,
+};
+use crate::viewer::state::{
+    RenderedPageView, ViewerFindState, ViewerScrollMode, ViewerSpreadMode, ViewerTextSelection,
+};
+use crate::viewer::tasks::{
+    mark_entry_opened_task, open_document_task, open_library_document_task, render_page,
+    schedule_zoom_render,
 };
 #[cfg(test)]
 use notify::EventKind;
 
-use app::libraries::{
+use crate::components::library::view::with_alpha;
+use components::shared::root_surface::view;
+use library::registry::{
     load_library_registry, LibraryNameDialog, LibraryProfile, LibraryRegistryRuntime,
 };
-use app::session::{load_app_session, save_app_session, AppSession};
-use app::sync_auth::{SyncAuthRuntime, SyncAuthState};
-use app::update::{pending_raindrop_rollback_check_task, update};
-use app::view::view;
-use pdf_folio_ui_components::library::view::with_alpha;
+use shell::session::{load_app_session, save_app_session, AppSession};
+use shell::session::{SyncAuthRuntime, SyncAuthState};
+use shell::update::update;
 
-pub use app::state::*;
+pub use shell::app::*;
+pub use viewer::document::ViewerRuntime;
 
 /// Launches the PDF-Folio UI.
 ///
@@ -294,7 +301,7 @@ fn initial_window_size() -> [f32; 2] {
         .window_size()
 }
 
-fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
+pub(crate) fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
     let session = app.snapshot_session();
     Task::perform(
         async move {
@@ -308,7 +315,7 @@ fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
     )
 }
 
-fn with_session_save(task: Task<Message>, app: &PDFolioApp) -> Task<Message> {
+pub(crate) fn with_session_save(task: Task<Message>, app: &PDFolioApp) -> Task<Message> {
     Task::batch([task, save_app_session_task(app)])
 }
 
@@ -427,7 +434,7 @@ fn relink_file_dialog_task(entry_id: EntryId) -> Task<Message> {
     )
 }
 
-fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
+pub(crate) fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
     let db = Arc::clone(&app.db);
     let preferences = LibraryPreferences {
         sort_mode: app.library.library_sort_mode,
@@ -559,7 +566,7 @@ fn truncate_for_width_with_font(
     truncated
 }
 
-fn schedule_search(query: String) -> Task<Message> {
+pub(crate) fn schedule_search(query: String) -> Task<Message> {
     Task::perform(
         async move {
             tokio::time::sleep(Duration::from_millis(200)).await;

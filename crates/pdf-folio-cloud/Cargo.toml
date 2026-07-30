@@ -1,0 +1,30 @@
+[package]
+name = "pdf-folio-cloud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+base64.workspace = true
+blake3.workspace = true
+chrono.workspace = true
+clap.workspace = true
+directories.workspace = true
+hex.workspace = true
+hmac.workspace = true
+jsonwebtoken.workspace = true
+pdf-folio-core = { path = "../pdf-folio-core" }
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+webbrowser.workspace = true
+zip.workspace = true
