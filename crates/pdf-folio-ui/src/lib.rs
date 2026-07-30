@@ -15,10 +15,11 @@
 //! - [`messages`] — the [`Message`] enum and related menu/shortcut types
 //!   that drive the update loop.
 //!
-//! Internal modules are organized into `app/` (state, update, view, layout),
-//! `library/` (thumbnails, tasks, filtering, drag-and-drop), `viewer/`
-//! (canvas rendering, zoom, outline, text search), and `views/` (top-level
-//! view composition).
+//! Internal modules are organized into `shell/` (state, update, subscriptions,
+//! and platform integration), `components/` (shared, library, and viewer UI
+//! widgets), `library/` (state, actions, tasks, filtering, layout, registry,
+//! and view composition), and `viewer/` (document runtime, navigation,
+//! rendering, text search, tasks, and view composition).
 //!
 //! [`iced`]: https://docs.rs/iced
 
@@ -171,6 +172,7 @@ use shell::session::{SyncAuthRuntime, SyncAuthState};
 use shell::update::update;
 
 pub use shell::app::*;
+pub use viewer::document::ViewerRuntime;
 
 /// Launches the PDF-Folio UI.
 ///

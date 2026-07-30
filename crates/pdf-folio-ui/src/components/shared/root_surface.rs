@@ -1,9 +1,16 @@
 //! App shell and viewer-surface rendering.
 
+use crate::components::shared::command_palette::{
+    command_palette_capture_layer, view_command_palette,
+};
 use crate::components::shared::context_menu::{
     context_menu_capture_layer, view_context_menu_dropdown,
 };
-use crate::components::viewer::canvas::HistoryRestoreSpinner;
+use crate::components::shared::error_banner::dismissible_error_banner;
+use crate::components::shared::loading::{
+    document_loading_layer, history_restore_spinner_layer, startup_library_loading_layer,
+};
+use crate::components::shared::menus::view_library_switcher;
 use crate::components::viewer::toolbar::{view_zoom_menu_dropdown, zoom_menu_capture_layer};
 use crate::library::view::{
     floating_folder_drag_preview, floating_library_drag_preview, view_confirmation_dialog,
@@ -12,16 +19,12 @@ use crate::library::view::{
     view_raindrop_connect_dialog, view_raindrop_import_dialog,
     view_raindrop_import_progress_dialog, view_tag_manager_dialog,
 };
-use crate::shell::commands::{command_matches, library_commands, CommandDanger};
 use crate::*;
-use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
-use iced::widget::{canvas, column, row, stack};
+use iced::widget::{column, row, stack};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 static VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
-
-use crate::components::shared::library_switcher::view_library_switcher;
 
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     let probe_started_at = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").map(|_| Instant::now());
@@ -188,165 +191,6 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
     element
 }
 
-fn command_palette_capture_layer<'a>() -> Element<'a, Message> {
-    pin(
-        mouse_area(container("").width(Length::Fill).height(Length::Fill))
-            .on_press(Message::CloseCommandPalette),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
-}
-
-fn view_command_palette(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
-    let panel_width = app
-        .layout()
-        .metric("CommandPalette", "width", 520.0)
-        .min((app.viewer.viewport_width - Spacing::XL * 2.0).max(320.0));
-    let list_height = app
-        .layout()
-        .metric("CommandPalette", "list_height", 420.0)
-        .min((app.viewer.viewport_height - Spacing::XL * 2.0 - 148.0).max(180.0));
-    let commands = library_commands(app)
-        .into_iter()
-        .filter(|command| command.visible && command.enabled)
-        .filter(|command| command_matches(command.spec, &app.chrome.command_palette_query))
-        .collect::<Vec<_>>();
-
-    let input = text_input("Search commands", &app.chrome.command_palette_query)
-        .on_input(Message::CommandPaletteQueryChanged)
-        .on_submit(Message::CommandPaletteRunSelected)
-        .padding([Spacing::SM, Spacing::MD])
-        .size(FontSize::MD)
-        .font(ui_font(FontWeight::REGULAR))
-        .style(move |_, status| text_input_style(tokens, Class::LibrarySearchInput, status))
-        .width(Length::Fill);
-
-    let mut list = column![].spacing(Spacing::XS).width(Length::Fill);
-    for (index, command) in commands.iter().enumerate() {
-        let selected = index == app.chrome.command_palette_selected_index;
-        let text_color = if selected {
-            tokens.text_primary
-        } else if command.spec.danger == CommandDanger::Destructive {
-            tokens.error
-        } else {
-            tokens.text_secondary
-        };
-        let shortcut = command.spec.shortcut.unwrap_or("");
-        let target_label = match command.spec.target {
-            crate::shell::commands::CommandTargetKind::None => "",
-            crate::shell::commands::CommandTargetKind::Library => "Library",
-            crate::shell::commands::CommandTargetKind::Folder => "Folder",
-            crate::shell::commands::CommandTargetKind::Tag => "Tag",
-            crate::shell::commands::CommandTargetKind::SinglePdf => "PDF",
-            crate::shell::commands::CommandTargetKind::MultiplePdfs => "Selection",
-            crate::shell::commands::CommandTargetKind::SearchResult => "Visible",
-            crate::shell::commands::CommandTargetKind::Viewer => "Viewer",
-            crate::shell::commands::CommandTargetKind::Document => "Document",
-        };
-        let icon_slot = if command.spec.icon.is_some() {
-            "•"
-        } else {
-            ""
-        };
-        let row_content = row![
-            text(icon_slot)
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::MEDIUM))
-                .color(tokens.text_secondary)
-                .width(Length::Fixed(app.layout().metric(
-                    "CommandPalette",
-                    "icon_slot_width",
-                    12.0,
-                ))),
-            column![
-                text(command.spec.label)
-                    .size(FontSize::MD)
-                    .font(ui_font(FontWeight::MEDIUM))
-                    .color(text_color)
-                    .wrapping(Wrapping::None),
-                text(
-                    format!("{} {}", command.spec.category.label(), target_label)
-                        .trim()
-                        .to_owned()
-                )
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::REGULAR))
-                .color(tokens.text_secondary)
-                .wrapping(Wrapping::None),
-            ]
-            .spacing(
-                app.layout()
-                    .metric("CommandPalette", "metadata_spacing", 1.0,)
-            )
-            .width(Length::Fill),
-            text(shortcut)
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::REGULAR))
-                .color(tokens.text_secondary)
-                .wrapping(Wrapping::None),
-        ]
-        .spacing(Spacing::SM)
-        .align_y(iced::Alignment::Center);
-        list = list.push(
-            button(row_content)
-                .padding([Spacing::SM, Spacing::MD])
-                .width(Length::Fill)
-                .on_press(Message::CommandPaletteRun(command.spec.id))
-                .style(move |_, status| {
-                    let class = if selected {
-                        Class::MenuButton
-                    } else {
-                        Class::MenuItem
-                    };
-                    button_style(tokens, class, status)
-                }),
-        );
-    }
-    if commands.is_empty() {
-        list = list.push(
-            container(
-                text("No commands found")
-                    .size(FontSize::MD)
-                    .font(ui_font(FontWeight::REGULAR))
-                    .color(tokens.text_secondary),
-            )
-            .padding(Spacing::MD),
-        );
-    }
-
-    let list_scroll = scrollable(list)
-        .direction(Direction::Vertical(
-            Scrollbar::new()
-                .width(tokens.primitives.scrollbar_width)
-                .scroller_width(tokens.primitives.scrollbar_scroller_width)
-                .anchor(Anchor::End),
-        ))
-        .height(list_height)
-        .width(Length::Fill)
-        .style(move |_, status| scrollable_style(tokens, Class::MenuPanel, status));
-
-    let panel = column![
-        text("Command Palette")
-            .size(FontSize::HEADING)
-            .font(display_font(FontWeight::MEDIUM))
-            .color(tokens.text_primary),
-        input,
-        list_scroll,
-    ]
-    .spacing(Spacing::MD)
-    .padding(Spacing::LG)
-    .width(panel_width);
-
-    pin(container(
-        container(panel)
-            .width(panel_width)
-            .style(move |_| container_style(tokens, Class::MenuPanel)),
-    )
-    .center(Length::Fill))
-    .into()
-}
-
 fn view_signed_out(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let signing_in = matches!(app.sync_auth.state, SyncAuthState::SigningIn);
     let button_label = if signing_in {
@@ -449,120 +293,5 @@ fn view_library_name_dialog(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_
     .height(Length::Fill)
     .center(Length::Fill)
     .style(move |_| container_style(tokens, Class::PresentationOverlay))
-    .into()
-}
-
-fn history_restore_spinner_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
-    let Some(started_at) = app.library.library_history_restore_started_at else {
-        return container("").into();
-    };
-    let spinner_size = app.layout().metric("HistoryRestoreSpinner", "size", 48.0);
-    let spinner = canvas(HistoryRestoreSpinner {
-        started_at,
-        now: app.library.animation_now,
-        color: tokens.text_primary,
-    })
-    .width(Length::Fixed(spinner_size))
-    .height(Length::Fixed(spinner_size));
-    let mut background = tokens.background;
-    background.a = 0.54;
-
-    mouse_area(
-        container(spinner)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center(Length::Fill)
-            .style(move |_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(background)),
-                ..iced::widget::container::Style::default()
-            }),
-    )
-    .interaction(mouse::Interaction::Progress)
-    .into()
-}
-
-fn document_loading_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
-    let started_at = app
-        .viewer
-        .document_open_started_at
-        .unwrap_or(app.library.animation_now);
-    let spinner_size = app.layout().metric("DocumentLoadingSpinner", "size", 48.0);
-    let spinner = canvas(HistoryRestoreSpinner {
-        started_at,
-        now: app.library.animation_now,
-        color: tokens.text_primary,
-    })
-    .width(Length::Fixed(spinner_size))
-    .height(Length::Fixed(spinner_size));
-
-    mouse_area(
-        container(spinner)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center(Length::Fill)
-            .style(move |_| container_style(tokens, Class::PresentationOverlay)),
-    )
-    .interaction(mouse::Interaction::Progress)
-    .into()
-}
-
-fn startup_library_loading_layer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
-    let status = app
-        .library
-        .raindrop_rollback_recovery_status
-        .as_deref()
-        .unwrap_or("Preparing library...");
-    mouse_area(
-        container(
-            container(
-                column![
-                    text("Restoring library")
-                        .size(FontSize::HEADING)
-                        .font(display_font(FontWeight::MEDIUM))
-                        .color(tokens.text_primary),
-                    text(status).size(FontSize::MD).color(tokens.text_secondary),
-                    container(progress_bar(0.42, tokens)).width(Length::Fill),
-                ]
-                .spacing(Spacing::MD)
-                .padding(Spacing::LG),
-            )
-            .width(app.layout().metric("StartupLoadingDialog", "width", 460.0))
-            .style(move |_| container_style(tokens, Class::JumpOverlay)),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center(Length::Fill)
-        .style(move |_| container_style(tokens, Class::PresentationOverlay)),
-    )
-    .interaction(mouse::Interaction::Progress)
-    .into()
-}
-
-pub(crate) fn dismissible_error_banner<'a>(
-    message: &'a str,
-    tokens: ThemeTokens,
-    layout: &crate::style::AppLayoutTokens,
-    dismiss_message: Message,
-) -> Element<'a, Message> {
-    container(
-        row![
-            text(message)
-                .size(FontSize::MD)
-                .color(tokens.text_primary)
-                .width(Length::Fill),
-            icon_button("x", tokens)
-                .on_press(dismiss_message)
-                .width(Length::Fixed(layout.metric(
-                    "ErrorBannerAction",
-                    "action_width",
-                    32.0
-                ))),
-        ]
-        .spacing(Spacing::MD)
-        .align_y(iced::Alignment::Center),
-    )
-    .padding(Spacing::MD)
-    .width(Length::Fill)
-    .style(move |_| container_style(tokens, Class::ErrorBanner))
     .into()
 }

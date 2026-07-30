@@ -1,6 +1,6 @@
+use crate::components::shared::sidebar::chevron_button;
 use crate::components::viewer::page_controls::viewer_page_control;
 use crate::components::viewer::zoom::{zoom_control, zoom_menu};
-use crate::library::view::chevron_button;
 use crate::*;
 use iced::widget::{pin, row, Svg};
 

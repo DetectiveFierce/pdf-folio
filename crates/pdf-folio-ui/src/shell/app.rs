@@ -69,54 +69,6 @@ pub struct PDFolioApp {
     pub(crate) pending_session_restore: Option<AppSession>,
 }
 
-/// Runtime state owned by the PDF viewer surface.
-#[derive(Debug, Clone)]
-pub struct ViewerRuntime {
-    pub doc: Option<Arc<PdfDoc>>,
-    pub current_entry_id: Option<EntryId>,
-    pub current_document_path: Option<PathBuf>,
-    pub rendered_pages: HashMap<TileKey, RenderedPageView>,
-    pub page_aspect_ratios: Vec<f32>,
-    pub viewport_height: f32,
-    pub viewport_width: f32,
-    pub viewer_viewport_height: f32,
-    pub viewer_viewport_width: f32,
-    pub document_error: Option<String>,
-    pub pending_document_open: bool,
-    pub document_open_started_at: Option<Instant>,
-    pub dismissed_document_errors: HashSet<String>,
-    pub cache: TileCache,
-    pub page_scroll_page: u16,
-    pub scroll_offset: f32,
-    pub horizontal_offset: f32,
-    pub viewer_scroll_mode: ViewerScrollMode,
-    pub viewer_spread_mode: ViewerSpreadMode,
-    pub zoom_width: u16,
-    pub active_zoom_preset: Option<ZoomPreset>,
-    pub zoom_editing: bool,
-    pub zoom_input: String,
-    pub zoom_menu_open: bool,
-    pub zoom_preview_width_px: Option<u16>,
-    pub zoom_generation: u64,
-    pub last_scroll_offset: f32,
-    pub scale_factor: f32,
-    pub modifiers: keyboard::Modifiers,
-    pub viewer_text_selection: Option<ViewerTextSelection>,
-    pub viewer_text_layers: HashMap<u16, Arc<PageTextLayer>>,
-    pub pending_text_layers: HashSet<u16>,
-    pub viewer_copy_pending: bool,
-    pub viewer_find: ViewerFindState,
-    pub pending_renders: HashMap<TileKey, Option<u64>>,
-    pub page_fade_started: HashMap<TileKey, Instant>,
-    pub toc_open: bool,
-    pub viewer_sidebar_tab: ViewerSidebarTab,
-    pub outline: Vec<OutlineNode>,
-    pub expanded_outline_paths: HashSet<Vec<usize>>,
-    pub jump_dialog_open: bool,
-    pub page_input_editing: bool,
-    pub jump_input: String,
-}
-
 /// Runtime state owned by the library surface.
 #[derive(Debug, Clone)]
 pub struct LibraryRuntime {

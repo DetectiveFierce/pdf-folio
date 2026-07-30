@@ -1,4 +1,4 @@
-use crate::components::shared::root_surface::dismissible_error_banner;
+use crate::components::shared::error_banner::dismissible_error_banner;
 use crate::components::viewer::page_controls::view_jump_dialog;
 use crate::components::viewer::sidebar::view_sidebar;
 use crate::components::viewer::toolbar::view_viewer_toolbar;

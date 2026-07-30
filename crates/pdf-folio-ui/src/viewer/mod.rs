@@ -1,5 +1,6 @@
 //! Viewer state, rendering, outline, and task modules.
 
+pub(crate) mod document;
 pub(crate) mod layout;
 pub(crate) mod navigation;
 pub(crate) mod rendering;

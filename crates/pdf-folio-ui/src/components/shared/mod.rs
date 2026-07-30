@@ -1,4 +1,8 @@
+pub(crate) mod command_palette;
 pub(crate) mod context_menu;
+pub(crate) mod error_banner;
 pub(crate) mod icons;
-pub(crate) mod library_switcher;
+pub(crate) mod loading;
+pub(crate) mod menus;
 pub(crate) mod root_surface;
+pub(crate) mod sidebar;

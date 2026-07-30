@@ -12,7 +12,8 @@ use crate::components::library::view::{
     library_scrollable as component_library_scrollable,
     library_sort_picker as component_library_sort_picker, with_alpha,
 };
-use crate::components::shared::root_surface::dismissible_error_banner;
+use crate::components::shared::error_banner::dismissible_error_banner;
+pub(crate) use crate::components::shared::sidebar::*;
 use crate::components::viewer::canvas::HistoryRestoreSpinner;
 use crate::shell::commands::{command_message, command_visible, CommandId, CommandSurface};
 use crate::*;
