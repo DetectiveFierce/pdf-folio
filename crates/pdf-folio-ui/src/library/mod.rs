@@ -8,4 +8,5 @@ pub mod registry;
 pub(crate) mod state;
 pub(crate) mod tasks;
 pub(crate) mod thumbnails;
+pub(crate) mod update;
 pub(crate) mod view;

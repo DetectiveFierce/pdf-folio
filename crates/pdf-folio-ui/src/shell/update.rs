@@ -8,6 +8,9 @@ pub(crate) use tasks::pending_raindrop_rollback_check_task;
 use tasks::*;
 
 pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
+    if let Some(task) = crate::library::update::update(app, &message) {
+        return task;
+    }
     if let Some(task) = crate::viewer::update::update(app, &message) {
         return task;
     }
@@ -450,40 +453,6 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.library.library_status = Some(format!("Style reload failed: {error}"));
             }
         },
-        Message::ToggleViewMode => {
-            app.library.compact_view_mode = !app.library.compact_view_mode;
-            return Task::batch([
-                save_library_preferences_task(app),
-                save_app_session_task(app),
-            ]);
-        }
-        Message::LibrarySortChanged(sort_mode) => {
-            app.library.library_sort_mode = sort_mode;
-            app.library.library_scroll_offset = 0.0;
-            app.library.library_drag = None;
-            return Task::batch([
-                save_library_preferences_task(app),
-                save_app_session_task(app),
-                app.refresh_library(),
-            ]);
-        }
-        Message::LibraryGridZoomChanged(zoom) => {
-            app.library.library_grid_zoom =
-                zoom.clamp(app.library_grid_zoom_min(), app.library_grid_zoom_limit());
-            app.library.library_scroll_offset = app
-                .library
-                .library_scroll_offset
-                .min(app.max_library_scroll_offset());
-            app.update_library_drag_target_from_cursor();
-            return Task::batch([save_app_session_task(app), app.request_visible_thumbnails()]);
-        }
-        Message::LibraryMetadataDensityChanged(density) => {
-            app.library.library_metadata_density = density;
-            return Task::batch([
-                save_library_preferences_task(app),
-                save_app_session_task(app),
-            ]);
-        }
         Message::LibraryLoaded {
             entries,
             trash_entries,
@@ -1638,100 +1607,6 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
                 app.refresh_library(),
                 scroll_library_to_offset_task(app.library.library_scroll_offset),
                 start_auto_sync_now(app),
-            ]);
-        }
-        Message::SearchQueryChanged(query) => {
-            app.library.renaming_tag = None;
-            app.library.tag_rename_input.clear();
-            app.library.search_query = query;
-            app.library.library_drag = None;
-            app.library.search_generation = app.library.search_generation.wrapping_add(1);
-            let query = app.library.search_query.clone();
-            if query.trim().is_empty() {
-                app.library.search_results = None;
-                app.library.search_hit_pages.clear();
-                return with_session_save(app.request_visible_thumbnails(), app);
-            }
-            return with_session_save(schedule_search(query), app);
-        }
-        Message::SearchDebounced(query) => {
-            if query == app.library.search_query {
-                let db = Arc::clone(&app.db);
-                let sort_mode = app.library.library_sort_mode;
-                let trash_view_active = app.library.trash_view_active;
-                return Task::perform(
-                    search_library_task(db, query, sort_mode, trash_view_active),
-                    |result| match result {
-                        Ok((entries, hit_pages)) => Message::SearchResults { entries, hit_pages },
-                        Err(error) => Message::LibraryError(error.to_string()),
-                    },
-                );
-            }
-        }
-        Message::SearchResults { entries, hit_pages } => {
-            app.library.search_results = Some(entries);
-            app.library.search_hit_pages = hit_pages;
-            let visible_entries = app.visible_library_entries();
-            app.prune_selection_to_visible_entries(&visible_entries);
-            return with_session_save(app.request_visible_thumbnails(), app);
-        }
-        Message::LibraryScrolled {
-            offset_y,
-            viewport_x,
-            viewport_y,
-            viewport_width,
-            viewport_height,
-        } => {
-            app.library.library_scroll_offset = offset_y.max(0.0);
-            app.library.library_viewport_x = viewport_x;
-            app.library.library_viewport_y = viewport_y;
-            app.library.library_viewport_width = viewport_width.max(1.0);
-            app.library.library_viewport_height = viewport_height.max(1.0);
-            app.update_library_drag_target_from_cursor();
-            return with_session_save(app.request_visible_thumbnails(), app);
-        }
-        Message::CollapseLibrarySidebar => {
-            let columns = app.library_entries_per_row();
-            app.library.library_tag_sidebar_open = false;
-            app.library.resizing_library_tag_sidebar = false;
-            app.recalculate_library_viewport_width();
-            app.fit_library_grid_zoom_to_columns(columns);
-            return with_session_save(app.request_visible_thumbnails(), app);
-        }
-        Message::ExpandLibrarySidebar => {
-            let columns = app.library_entries_per_row();
-            app.library.library_tag_sidebar_open = true;
-            app.recalculate_library_viewport_width();
-            app.fit_library_grid_zoom_to_columns(columns);
-            return with_session_save(app.request_visible_thumbnails(), app);
-        }
-        Message::ToggleLibrarySidebar => {
-            if app.mode == AppMode::Library {
-                let columns = app.library_entries_per_row();
-                app.library.library_tag_sidebar_open = !app.library.library_tag_sidebar_open;
-                app.library.resizing_library_tag_sidebar = false;
-                app.recalculate_library_viewport_width();
-                app.fit_library_grid_zoom_to_columns(columns);
-                return with_session_save(app.request_visible_thumbnails(), app);
-            }
-        }
-        Message::BeginTagSidebarResize => {
-            app.library.resizing_library_tag_sidebar = true;
-        }
-        Message::TagSidebarResizeDragged(width) => {
-            if app.library.resizing_library_tag_sidebar {
-                app.library.library_tag_sidebar_width = width.clamp(
-                    app.layout().library_sidebar_min_width,
-                    app.layout().library_sidebar_max_width,
-                );
-                app.recalculate_library_viewport_width();
-            }
-        }
-        Message::EndTagSidebarResize => {
-            app.library.resizing_library_tag_sidebar = false;
-            return Task::batch([
-                save_library_preferences_task(app),
-                save_app_session_task(app),
             ]);
         }
         Message::ToggleLibraryInspector => {

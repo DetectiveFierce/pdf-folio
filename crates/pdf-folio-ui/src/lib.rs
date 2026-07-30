@@ -426,7 +426,7 @@ fn relink_file_dialog_task(entry_id: EntryId) -> Task<Message> {
     )
 }
 
-fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
+pub(crate) fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
     let db = Arc::clone(&app.db);
     let preferences = LibraryPreferences {
         sort_mode: app.library.library_sort_mode,
@@ -558,7 +558,7 @@ fn truncate_for_width_with_font(
     truncated
 }
 
-fn schedule_search(query: String) -> Task<Message> {
+pub(crate) fn schedule_search(query: String) -> Task<Message> {
     Task::perform(
         async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
