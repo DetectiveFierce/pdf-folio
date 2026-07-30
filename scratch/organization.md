@@ -25,14 +25,16 @@ Judgment calls intentionally left as-is for Phase 7:
 - `components/viewer/controls.rs` was not created because the plan explicitly called it optional and the real viewer controls are already split across `toolbar.rs`, `page_controls.rs`, `zoom.rs`, and `find_bar.rs`.
 - `library/view/sidebar.rs` still owns library-mode sidebar composition. Reusable sidebar chrome moved to `components/shared/sidebar.rs`, and folder tree/inspector/dialog/import-status UI lives under `components/library/`; the remaining code is library-mode composition and can reasonably stay.
 
-Next agent should start at **Phase 7**:
+Phase 7 validation status:
 
-1. Confirm stale crate-name searches across `crates`, `docs`, `packaging`, root manifests, and lockfile.
-2. Confirm the root workspace members are exactly the six target crates.
-3. Inspect packaging files for standalone old-crate references.
-4. Inspect docs for old crate-layout descriptions.
-5. Run final gates, in this order unless failures require focused repair: `cargo fmt --check`, `cargo check --workspace`, `cargo clippy --workspace --all-targets`, `cargo test --workspace`.
-6. Only mark the persistent goal complete after the Phase 7 audit proves every checklist item or documented judgment call above is satisfied.
+1. Root workspace members were confirmed to be exactly the six target crates.
+2. Active stale crate-name searches across `crates`, `docs`, `packaging`, root manifests, and `Cargo.lock` found no old split-crate references. The remaining `pdf-folio-sync-server` matches the intentionally preserved binary/image/service name, not a crate member.
+3. Packaging was inspected and still builds the sync server from `pdf-folio-cloud` with `-p pdf-folio-cloud --bin pdf-folio-sync-server`.
+4. Active docs under `docs/` do not describe the old crate layout. Historical scratch notes still mention the original layout and should remain as migration context.
+5. `Cargo.lock` was regenerated for the consolidated workspace. The refresh caused compatible transitive version movement and added expected transitives such as the newer `windows-*` target set, but it did not reintroduce removed workspace crates.
+6. Final gates passed on the consolidated workspace: `cargo fmt --check`, `cargo check --workspace`, `cargo clippy --workspace --all-targets`, and one full `cargo test --workspace`.
+
+The reorganization is complete enough to hand off for normal follow-up work. Remaining non-blocking cleanup is warning debt only: existing Clippy/UI dead-code warnings, a future-incompatibility warning from `num-bigint-dig v0.8.4`, and optional future subdivision of `pdf-folio-cloud/src/sync/crdt.rs` if that file becomes painful to maintain.
 
 ## 0. Current vs. target shape, in one picture
 
