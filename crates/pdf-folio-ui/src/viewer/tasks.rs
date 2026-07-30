@@ -9,6 +9,7 @@ use pdf_folio_core::{PdfDoc, RenderedPage, TileKey};
 use pdf_folio_db::EntryId;
 
 use crate::messages::Message;
+use crate::PDFolioApp;
 
 pub(crate) async fn render_page(
     doc: Arc<PdfDoc>,
@@ -48,6 +49,24 @@ pub(crate) fn open_library_document_task(entry_id: EntryId, path: PathBuf) -> Ta
         },
     )
 }
+
+pub(crate) fn mark_entry_opened_task(app: &PDFolioApp) -> Task<Message> {
+    let Some(entry_id) = app.viewer.current_entry_id.clone() else {
+        return Task::none();
+    };
+    let db = Arc::clone(&app.db);
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || db.mark_entry_opened(&entry_id)).await??;
+            Ok::<_, anyhow::Error>(())
+        },
+        |result| match result {
+            Ok(()) => Message::ProgressSaved,
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
 pub(crate) fn schedule_zoom_render(generation: u64) -> Task<Message> {
     Task::perform(
         async move {

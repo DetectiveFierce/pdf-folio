@@ -97,12 +97,12 @@ use crate::library::tasks::{
     delete_folder_task, delete_tag_task, edit_metadata_task, export_entries_for_source,
     export_library_entries_task, import_folder_with_index, import_pdf_with_index,
     import_review_from_summary, load_pending_raindrop_rollback, move_entries_to_folder_task,
-    move_folder_task, paste_library_clipboard_task, permanently_delete_folder_from_trash_task,
-    persist_manual_entry_order_task, persist_manual_folder_entry_order_task,
-    persist_manual_folder_order_task, raindrop_import_destination,
-    raindrop_import_preserves_structure, raindrop_import_root_folder, raindrop_import_task,
-    raindrop_thumbnail_task, relink_entry_task, rename_folder_task, rename_tag_task,
-    reset_metadata_task, restore_library_history_snapshot_task,
+    move_folder_task, paste_library_clipboard_task, pending_raindrop_rollback_check_task,
+    permanently_delete_folder_from_trash_task, persist_manual_entry_order_task,
+    persist_manual_folder_entry_order_task, persist_manual_folder_order_task,
+    raindrop_import_destination, raindrop_import_preserves_structure, raindrop_import_root_folder,
+    raindrop_import_task, raindrop_thumbnail_task, relink_entry_task, rename_folder_task,
+    rename_tag_task, reset_metadata_task, restore_library_history_snapshot_task,
     rollback_pending_raindrop_import_task, save_pending_raindrop_rollback, search_library_task,
     PendingRaindropRollback,
 };
@@ -155,7 +155,8 @@ use crate::viewer::state::{
     RenderedPageView, ViewerFindState, ViewerScrollMode, ViewerSpreadMode, ViewerTextSelection,
 };
 use crate::viewer::tasks::{
-    open_document_task, open_library_document_task, render_page, schedule_zoom_render,
+    mark_entry_opened_task, open_document_task, open_library_document_task, render_page,
+    schedule_zoom_render,
 };
 #[cfg(test)]
 use notify::EventKind;
@@ -167,7 +168,7 @@ use library::registry::{
 };
 use shell::session::{load_app_session, save_app_session, AppSession};
 use shell::session::{SyncAuthRuntime, SyncAuthState};
-use shell::update::{pending_raindrop_rollback_check_task, update};
+use shell::update::update;
 
 pub use shell::app::*;
 

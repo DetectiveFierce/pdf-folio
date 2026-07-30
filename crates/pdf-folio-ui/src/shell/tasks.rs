@@ -5,23 +5,6 @@ use crate::library::registry::{
 use crate::*;
 use anyhow::Context;
 
-pub(crate) fn mark_entry_opened_task(app: &PDFolioApp) -> Task<Message> {
-    let Some(entry_id) = app.viewer.current_entry_id.clone() else {
-        return Task::none();
-    };
-    let db = Arc::clone(&app.db);
-    Task::perform(
-        async move {
-            tokio::task::spawn_blocking(move || db.mark_entry_opened(&entry_id)).await??;
-            Ok::<_, anyhow::Error>(())
-        },
-        |result| match result {
-            Ok(()) => Message::ProgressSaved,
-            Err(error) => Message::LibraryError(error.to_string()),
-        },
-    )
-}
-
 pub(crate) fn sync_library_registry_task(
     registry: LibraryRegistryRuntime,
     db_path: PathBuf,
@@ -70,26 +53,6 @@ pub(crate) fn sync_library_registry_for_app_task(
             )
         })
         .unwrap_or_else(Task::none)
-}
-
-pub(crate) fn pending_raindrop_rollback_check_task() -> Task<Message> {
-    Task::perform(
-        async {
-            tokio::task::spawn_blocking(move || {
-                load_pending_raindrop_rollback().map(|rollback| {
-                    rollback.map(|_| {
-                        String::from("Finishing cleanup from an interrupted Raindrop import...")
-                    })
-                })
-            })
-            .await
-        },
-        |result| match result {
-            Ok(Ok(status)) => Message::PendingRaindropRollbackChecked(status),
-            Ok(Err(error)) => Message::LibraryError(error.to_string()),
-            Err(error) => Message::LibraryError(error.to_string()),
-        },
-    )
 }
 
 pub(crate) fn auto_sync_task(library: LibraryProfile) -> Task<Message> {

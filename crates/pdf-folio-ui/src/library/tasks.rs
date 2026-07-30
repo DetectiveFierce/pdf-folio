@@ -454,6 +454,26 @@ pub(crate) fn rollback_pending_raindrop_import_task(
     )
 }
 
+pub(crate) fn pending_raindrop_rollback_check_task() -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::task::spawn_blocking(move || {
+                load_pending_raindrop_rollback().map(|rollback| {
+                    rollback.map(|_| {
+                        String::from("Finishing cleanup from an interrupted Raindrop import...")
+                    })
+                })
+            })
+            .await
+        },
+        |result| match result {
+            Ok(Ok(status)) => Message::PendingRaindropRollbackChecked(status),
+            Ok(Err(error)) => Message::LibraryError(error.to_string()),
+            Err(error) => Message::LibraryError(error.to_string()),
+        },
+    )
+}
+
 pub(crate) fn persist_manual_folder_entry_order_task(
     db: Arc<Db>,
     folder_id: FolderId,

@@ -4,7 +4,6 @@ use crate::library::registry::{
 use crate::shell::{shortcuts, tasks};
 use crate::*;
 
-pub(crate) use tasks::pending_raindrop_rollback_check_task;
 use tasks::*;
 
 pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
