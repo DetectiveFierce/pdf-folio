@@ -29,7 +29,9 @@ use super::{shortcuts, AppMode, PDFolioApp, LIBRARY_CARD_HOVER_TICK_MS, VIEWER_A
 use crate::library::drag::LIBRARY_DRAG_AUTOSCROLL_TICK_MS;
 use crate::messages::Message;
 
+/// How often signed-in clients emit [`Message::AutoSyncTick`] when idle.
 const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(10);
+/// Polling interval for remote CRDT head sequence checks (live sync streams).
 const LIVE_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Composes the full iced subscription set for the current app state.
@@ -209,19 +211,27 @@ pub(crate) fn subscription(app: &PDFolioApp) -> Subscription<Message> {
     ])
 }
 
+/// Identity for a per-library live remote-sync subscription key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct LiveSyncWatch {
+    /// SQLite database path for the library profile being watched.
     db_path: PathBuf,
+    /// Registry library id whose remote CRDT head is polled.
     library_id: String,
+    /// Local device id used to read the stored remote cursor.
     device_id: String,
 }
 
+/// Identity for the multi-library registry live remote-sync subscription.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RegistryLiveSyncWatch {
+    /// Active library DB path used to read the registry remote cursor.
     db_path: PathBuf,
+    /// Local device id used to read the stored remote cursor.
     device_id: String,
 }
 
+/// Polls the registry remote CRDT head and emits when it advances past the local cursor.
 fn registry_live_sync_stream(
     watch: &RegistryLiveSyncWatch,
 ) -> impl iced::futures::Stream<Item = Message> {
@@ -263,6 +273,7 @@ fn registry_live_sync_stream(
     })
 }
 
+/// Polls one library's remote CRDT head and emits [`Message::RemoteSyncAvailable`] when ahead.
 fn live_sync_stream(watch: &LiveSyncWatch) -> impl iced::futures::Stream<Item = Message> {
     let watch = watch.clone();
     stream::channel(10, async move |mut output| {
@@ -298,6 +309,7 @@ fn live_sync_stream(watch: &LiveSyncWatch) -> impl iced::futures::Stream<Item = 
     })
 }
 
+/// Stable-ish device id for live sync (hostname, or `"local-device"` fallback).
 fn default_sync_device_id() -> String {
     std::fs::read_to_string("/etc/hostname")
         .ok()
@@ -306,7 +318,12 @@ fn default_sync_device_id() -> String {
         .unwrap_or_else(|| String::from("local-device"))
 }
 
-// iced::Subscription::run_with requires `fn(&D)`; D is `Vec<PathBuf>`, so take `&Vec`.
+/// Watches style directories for KDL changes and emits [`Message::ReloadStyles`].
+///
+/// Combines notify events with a periodic mtime/size snapshot so editor temp
+/// files and platforms without reliable watchers still trigger reloads.
+///
+/// Takes `&Vec<PathBuf>` because `Subscription::run_with` requires `fn(&D)`.
 #[allow(clippy::ptr_arg)]
 fn watch_style_directories_stream(
     paths: &Vec<PathBuf>,
@@ -399,6 +416,7 @@ pub(crate) fn style_watch_event_should_reload(event: &notify::Event) -> bool {
         })
 }
 
+/// Sorted unique list of KDL style files with mtime and size for change detection.
 fn style_files_snapshot(paths: &[PathBuf]) -> Vec<(PathBuf, Option<SystemTime>, u64)> {
     let mut files = Vec::new();
     for path in paths {
@@ -409,6 +427,7 @@ fn style_files_snapshot(paths: &[PathBuf]) -> Vec<(PathBuf, Option<SystemTime>, 
     files
 }
 
+/// Recursively appends KDL files under `path` into `files` with mtime and length.
 fn collect_style_files(
     path: &std::path::Path,
     files: &mut Vec<(PathBuf, Option<SystemTime>, u64)>,
@@ -439,7 +458,9 @@ fn collect_style_files(
     }
 }
 
-// iced::Subscription::run_with requires `fn(&D)`; D is `Vec<PathBuf>`, so take `&Vec`.
+/// Watches configured library folders and forwards events as [`Message::LibraryWatchEvent`].
+///
+/// Takes `&Vec<PathBuf>` because `Subscription::run_with` requires `fn(&D)`.
 #[allow(clippy::ptr_arg)]
 fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<Item = Message> {
     let paths = paths.clone();
@@ -495,6 +516,7 @@ fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<
     })
 }
 
+/// Flushes any buffered library watch events so bursts are not delayed a tick.
 async fn drain_pending_library_watch_events(
     receiver: &Arc<std::sync::Mutex<std::sync::mpsc::Receiver<pdf_folio_core::LibraryWatchEvent>>>,
     output: &mut iced::futures::channel::mpsc::Sender<Message>,

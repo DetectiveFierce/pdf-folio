@@ -1,6 +1,18 @@
 //! # Viewer zoom controls
 //!
-//! Zoom percentage control and preset menu used by the viewer toolbar.
+//! Zoom percentage readout and preset menu under `components::viewer::zoom`,
+//! used by the viewer toolbar. Supports inline percent edit, dropdown
+//! disclosure, and fit-width / percent presets from `ZoomPreset`.
+//!
+//! ## Ownership
+//!
+//! Presentation only: reads `app.viewer.zoom_*` fields and emits zoom edit /
+//! preset messages handled by viewer update. The capture layer and dropdown
+//! stacking live in [`super::toolbar`]. Percent math and preset definitions
+//! come from `crate::viewer::rendering`.
+//!
+//! Related: wheel zoom handling on [`super::canvas`]; page size readout is
+//! separate in [`super::page_controls`].
 
 use crate::components::shared::icons::CHEVRON_DOWN_SVG;
 use crate::style::menu_style_for_class;
@@ -10,7 +22,9 @@ use iced::widget::text::Wrapping;
 use iced::widget::{button, column, row, Svg};
 use iced::{alignment, Alignment};
 
-/// Compact zoom readout and buttons for the viewer toolbar.
+/// Compact percent readout (or inline editor) plus chevron to open the menu.
+///
+/// Double-click starts `zoom_editing`; the chevron toggles `zoom_menu_open`.
 pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element<'a, Message> {
     let value: Element<'a, Message> = if app.viewer.zoom_editing {
         text_input("", &app.viewer.zoom_input)
@@ -73,7 +87,7 @@ pub(crate) fn zoom_control<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Elem
     .into()
 }
 
-/// Expanded zoom menu with presets and fit-width options.
+/// Dropdown listing all [`ZoomPreset`] values with the active preset accented.
 pub(crate) fn zoom_menu<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element<'a, Message> {
     let mut options = column![].spacing(0).padding(app.layout().metric(
         "ViewerZoomControl",
@@ -106,6 +120,7 @@ pub(crate) fn zoom_menu<'a>(app: &'a PDFolioApp, tokens: ThemeTokens) -> Element
         .into()
 }
 
+/// Down-chevron button that discloses the zoom preset menu.
 fn zoom_chevron_button<'a>(
     layout: &crate::style::AppLayoutTokens,
     tokens: ThemeTokens,
@@ -122,6 +137,7 @@ fn zoom_chevron_button<'a>(
         .style(move |_, status| button_style(tokens, Class::ViewerToolbarButton, status))
 }
 
+/// One zoom preset row; accented when it matches the current zoom width.
 fn zoom_menu_row<'a>(
     preset: ZoomPreset,
     _striped: bool,
@@ -171,6 +187,7 @@ fn zoom_menu_row<'a>(
     .into()
 }
 
+/// Whether `preset` equals the viewer’s current zoom width (or percent).
 fn preset_matches_current(preset: ZoomPreset, app: &PDFolioApp) -> bool {
     match preset {
         ZoomPreset::Percent(percent) => zoom_percent(app.viewer.zoom_width) == percent,

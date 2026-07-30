@@ -19,8 +19,11 @@
 //!
 //! [`pdfium-render`]: https://docs.rs/pdfium-render
 
+/// Open PDFs, outlines, page text layers, metadata, and rendered bitmaps.
 pub mod document;
+/// Normalized page rectangles for text hit-testing and selection.
 pub mod geometry;
+/// On-demand page tile cache (`TileKey` / `TileCache`).
 pub mod renderer;
 
 pub use document::{OutlineNode, PageTextChar, PageTextLayer, PdfDoc, RenderedPage};

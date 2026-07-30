@@ -42,7 +42,9 @@ use super::storage::{presigned_r2_url, r2_blob_key, validate_hash, R2_URL_TTL_SE
 /// Shared axum state: outbound HTTP client (Google) + resolved [`Config`].
 #[derive(Debug)]
 pub(crate) struct AppState {
+    /// Shared `reqwest` client for Google token and userinfo calls.
     pub(crate) http: reqwest::Client,
+    /// Fully resolved server configuration (secrets, allow-list, Turso, R2).
     pub(crate) config: Config,
 }
 
@@ -63,10 +65,15 @@ pub(crate) fn router(config: Config) -> Router {
         }))
 }
 
+/// Liveness probe for the control-plane process (`GET /health`).
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { ok: true })
 }
 
+/// Exchanges a Google OAuth authorization code for a PDF-Folio session JWT.
+///
+/// Verifies the identity against the allow-list, then signs HS256 claims with
+/// the server session secret. Default redirect is the desktop PKCE loopback URL.
 async fn google_callback(
     State(state): State<Arc<AppState>>,
     Json(request): Json<GoogleCallbackRequest>,
@@ -101,6 +108,7 @@ async fn google_callback(
     }))
 }
 
+/// Returns Turso database URL + auth token for a valid session Bearer JWT.
 async fn turso_token(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -113,6 +121,9 @@ async fn turso_token(
     }))
 }
 
+/// Mints a short-lived R2 presigned PUT URL for `blobs/<hash>.pdf`.
+///
+/// `exists` is currently always `false` (clients upload via the presigned URL).
 async fn r2_upload_token(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -133,6 +144,7 @@ async fn r2_upload_token(
     }))
 }
 
+/// Mints a short-lived R2 presigned GET URL for `blobs/<hash>.pdf`.
 async fn r2_download_token(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -147,8 +159,10 @@ async fn r2_download_token(
     }))
 }
 
+/// Handler result type that maps any error into an HTTP 400 JSON body.
 type ApiResult<T> = std::result::Result<T, ApiError>;
 
+/// Axum error response wrapper: logs the chain and returns `{ "error": … }`.
 struct ApiError(anyhow::Error);
 
 impl<E> From<E> for ApiError
@@ -173,57 +187,85 @@ impl axum::response::IntoResponse for ApiError {
     }
 }
 
+/// Body for `POST /auth/google/callback` (authorization code + PKCE verifier).
 #[derive(Debug, Deserialize)]
 struct GoogleCallbackRequest {
+    /// Google OAuth authorization code from the browser redirect.
     code: String,
+    /// PKCE code verifier that pairs with the authorize-step challenge.
     code_verifier: String,
+    /// Redirect URI used at authorize time (defaults to desktop loopback).
     redirect_uri: Option<String>,
 }
 
+/// Body for `POST /token/r2/upload`.
 #[derive(Debug, Deserialize)]
 struct R2UploadRequest {
+    /// BLAKE3 hex content hash of the PDF to upload.
     hash: String,
 }
 
+/// Query for `GET /token/r2/download`.
 #[derive(Debug, Deserialize)]
 struct R2DownloadQuery {
+    /// BLAKE3 hex content hash of the PDF to download.
     hash: String,
 }
 
+/// Response for `GET /health`.
 #[derive(Debug, Serialize)]
 struct HealthResponse {
+    /// Always `true` when the process is serving requests.
     ok: bool,
 }
 
+/// Response after successful Google sign-in (session JWT + identity).
 #[derive(Debug, Serialize)]
 struct SessionResponse {
+    /// HS256 session JWT for subsequent `/token/*` calls.
     session_token: String,
+    /// When the session JWT expires.
     expires_at: DateTime<Utc>,
+    /// Google subject of the authorized account.
     google_sub: String,
+    /// Google email when present on userinfo.
     email: Option<String>,
 }
 
+/// Response for `GET /token/turso`.
 #[derive(Debug, Serialize)]
 struct TursoTokenResponse {
+    /// Turso / libSQL database URL clients should open over Hrana.
     database_url: String,
+    /// Turso auth token (server-held secret, handed to the session window).
     auth_token: String,
+    /// Advertised credential expiry (aligned with session TTL today).
     expires_at: DateTime<Utc>,
 }
 
+/// Response for `POST /token/r2/upload`.
 #[derive(Debug, Serialize)]
 struct R2UploadResponse {
+    /// Whether the object is already known remote (currently always `false`).
     exists: bool,
+    /// Presigned PUT URL when an upload is required.
     upload_url: Option<String>,
+    /// When the presigned URL expires.
     expires_at: DateTime<Utc>,
 }
 
+/// Response for `GET /token/r2/download`.
 #[derive(Debug, Serialize)]
 struct R2DownloadResponse {
+    /// Presigned GET URL for the content-addressed PDF object.
     download_url: String,
+    /// When the presigned URL expires.
     expires_at: DateTime<Utc>,
 }
 
+/// Uniform error body for failed control-plane requests.
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
+    /// Human-readable error message for the desktop client.
     error: String,
 }

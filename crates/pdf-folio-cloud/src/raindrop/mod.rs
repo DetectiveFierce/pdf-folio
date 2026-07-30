@@ -52,10 +52,15 @@ pub(crate) const ZIP_DOWNLOADED_PROGRESS_BASIS_POINTS: u16 = 3_750;
 /// Progress basis points when selected PDFs have been extracted from the ZIP.
 pub(crate) const ZIP_EXTRACTED_PROGRESS_BASIS_POINTS: u16 = 5_000;
 
+/// OAuth loopback, token cache, and env/bundled app credentials.
 mod auth;
+/// REST client, remote models, and SSRF-safe PDF/ZIP downloads.
 mod client;
+/// Preview/import orchestration and local PDF metadata import.
 mod import;
+/// ZIP vs individual strategy selection and archive entry matching.
 mod matching;
+/// Import-facing DTOs (preview, progress, destination, OAuth config).
 mod types;
 pub use auth::OAUTH_CALLBACK_URL;
 use auth::{bundled_or_env_oauth_config, cached_access_token};

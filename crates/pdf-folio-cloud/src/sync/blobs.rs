@@ -26,23 +26,23 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::session::Session;
 
-/// Upload URL payload returned by the sync control plane.
+/// Control-plane JSON from `POST /token/r2/upload` (presign or short-circuit).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct R2UploadResponse {
-    /// Whether the blob already exists in R2 (server may still return a URL).
+    /// `true` when R2 already has `blobs/<hash>.pdf` (client may skip PUT).
     pub exists: bool,
-    /// Presigned PUT URL when an upload is needed.
+    /// Presigned PUT URL when an upload is still required (`None` if fully present).
     pub upload_url: Option<String>,
-    /// URL expiration timestamp.
+    /// When the presigned URL (if any) stops being valid.
     pub expires_at: DateTime<Utc>,
 }
 
-/// Download URL payload returned by the sync control plane.
+/// Control-plane JSON from `GET /token/r2/download` for a content hash.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct R2DownloadResponse {
-    /// Presigned GET URL.
+    /// Presigned GET URL for the object at `blobs/<hash>.pdf`.
     pub download_url: String,
-    /// URL expiration timestamp.
+    /// When the presigned URL stops being valid.
     pub expires_at: DateTime<Utc>,
 }
 
@@ -52,12 +52,14 @@ pub struct R2DownloadResponse {
 /// the presigned URL without the control plane in the path.
 #[derive(Debug, Clone)]
 pub struct R2Client {
+    /// Shared HTTP client for control-plane and direct R2 requests.
     http: reqwest::Client,
+    /// Session JWT + server base URL used to mint presigned URLs.
     session: Session,
 }
 
 impl R2Client {
-    /// Creates an R2 client from a session.
+    /// Builds a client that mints R2 URLs with the given sync session JWT.
     pub fn new(session: Session) -> Self {
         Self {
             http: reqwest::Client::new(),
@@ -65,7 +67,10 @@ impl R2Client {
         }
     }
 
-    /// Requests an upload URL and uploads `path` if R2 does not already have the blob.
+    /// Presigns upload for `hash` and PUTs local `path` bytes when R2 is missing the object.
+    ///
+    /// `hash` is the BLAKE3 content id (entry id for managed PDFs). No-ops the body
+    /// transfer when the control plane reports the blob already exists.
     ///
     /// # Errors
     ///
@@ -95,7 +100,9 @@ impl R2Client {
         Ok(response)
     }
 
-    /// Downloads a PDF blob into `destination`.
+    /// Downloads `blobs/<hash>.pdf` via a presigned GET into `destination`.
+    ///
+    /// Creates parent directories as needed. Used by hydration to fill [`BlobCache`].
     ///
     /// # Errors
     ///
@@ -124,7 +131,7 @@ impl R2Client {
         Ok(())
     }
 
-    /// Requests a presigned upload URL.
+    /// Calls the control plane for a presigned upload URL (or `exists: true`).
     pub async fn upload_token(&self, hash: &str) -> Result<R2UploadResponse> {
         let url = format!(
             "{}/token/r2/upload",
@@ -147,7 +154,7 @@ impl R2Client {
             .context("Sync server returned an invalid R2 upload response.")
     }
 
-    /// Requests a presigned download URL.
+    /// Calls the control plane for a presigned download URL for `hash`.
     pub async fn download_token(&self, hash: &str) -> Result<R2DownloadResponse> {
         let url = format!(
             "{}/token/r2/download?hash={}",
@@ -171,8 +178,10 @@ impl R2Client {
     }
 }
 
+/// Body for `POST /token/r2/upload` on the control plane.
 #[derive(Debug, Serialize)]
 struct R2UploadRequest<'a> {
+    /// BLAKE3 hex content hash of the PDF to upload.
     hash: &'a str,
 }
 
@@ -182,11 +191,12 @@ struct R2UploadRequest<'a> {
 /// digests map 1:1 onto these paths after managed import/sync.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlobCache {
+    /// Root directory of the content-addressed blob tree.
     root: PathBuf,
 }
 
 impl BlobCache {
-    /// Opens the default blob cache under PDF-Folio's data directory.
+    /// Opens `…/pdf-folio/sync/blobs` under the platform data directory (XDG on Linux).
     ///
     /// # Errors
     ///
@@ -199,23 +209,23 @@ impl BlobCache {
         })
     }
 
-    /// Creates a blob cache rooted at `root`.
+    /// Creates a cache with an explicit root (tests and custom data dirs).
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
 
-    /// Returns the cache path for a BLAKE3 hash.
+    /// Content-addressed path `{root}/{hash[0..2]}/{hash}.pdf` (prefix `xx` if hash is short).
     pub fn path_for_hash(&self, hash: &str) -> PathBuf {
         let prefix = hash.get(0..2).unwrap_or("xx");
         self.root.join(prefix).join(format!("{hash}.pdf"))
     }
 
-    /// Returns true when the cache already has this blob.
+    /// `true` when a regular file already exists at [`Self::path_for_hash`].
     pub fn contains(&self, hash: &str) -> bool {
         self.path_for_hash(hash).is_file()
     }
 
-    /// Root directory for the cache.
+    /// Absolute root directory that holds the two-hex-prefix layout.
     pub fn root(&self) -> &Path {
         &self.root
     }

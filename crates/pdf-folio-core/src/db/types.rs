@@ -327,146 +327,160 @@ pub struct LibraryEntry {
     pub missing: bool,
 }
 
-/// One persisted PDF-folder membership row.
+/// One `entry_folders` row: a PDF’s membership and manual order inside a folder.
+///
+/// Restored as part of [`LibraryOrganizationSnapshot`] so undo can rebuild
+/// multi-folder placement without re-importing files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryFolderMembership {
-    /// Library entry id.
+    /// `entries.id` of the member PDF.
     pub entry_id: EntryId,
-    /// Folder id containing the entry.
+    /// `folders.id` containing the entry.
     pub folder_id: FolderId,
-    /// Stable manual order within the folder.
+    /// `entry_folders.manual_order` among siblings in that folder.
     pub manual_order: i64,
 }
 
-/// One persisted folder row with trash state.
+/// One `folders` row captured for organization undo (includes trash column).
+///
+/// Mirrors the live folder tree plus `trashed_at` so restore can put folders
+/// back into the Trash Can or the active tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryFolderSnapshot {
-    /// Stable folder identifier.
+    /// `folders.id` primary key.
     pub id: FolderId,
-    /// User-visible folder name.
+    /// `folders.name` user-visible label.
     pub name: String,
-    /// Optional parent folder.
+    /// `folders.parent_id` for nested trees (`None` = library root child).
     pub parent_id: Option<FolderId>,
-    /// Stable manual order among sibling folders.
+    /// `folders.manual_order` among siblings under the same parent.
     pub manual_order: i64,
-    /// Folder creation timestamp.
+    /// `folders.created_at`.
     pub created_at: DateTime<Utc>,
-    /// Folder update timestamp.
+    /// `folders.updated_at`.
     pub updated_at: DateTime<Utc>,
-    /// Trash timestamp, when the folder is in the Trash Can.
+    /// `folders.trashed_at` when the folder is soft-deleted.
     pub trashed_at: Option<DateTime<Utc>>,
 }
 
-/// One persisted entry trash-state row.
+/// Reversible subset of an `entries` row used by organization undo.
+///
+/// Captures display/sort overrides, root `manual_order`, and trash state so a
+/// bulk edit can be rolled back without restoring paths or content hashes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryTrashState {
-    /// Library entry id.
+    /// `entries.id` this snapshot describes.
     pub entry_id: EntryId,
-    /// User override for the displayed title.
+    /// `entries.display_title` user override (search-indexed when set).
     pub display_title: Option<String>,
-    /// User override for the displayed author.
+    /// `entries.display_author` user override (search-indexed when set).
     pub display_author: Option<String>,
-    /// Normalized value used for title sorting.
+    /// `entries.sort_title` normalized title key.
     pub sort_title: Option<String>,
-    /// Normalized value used for author sorting.
+    /// `entries.sort_author` normalized author key.
     pub sort_author: Option<String>,
-    /// True when extracted metadata should not overwrite display metadata.
+    /// `entries.metadata_locked` — blocks re-import from overwriting display fields.
     pub metadata_locked: bool,
-    /// Stable manual order in the root library.
+    /// `entries.manual_order` at the library root.
     pub manual_order: i64,
-    /// Trash timestamp, when the entry is in the Trash Can.
+    /// `entries.trashed_at` when the entry is soft-deleted.
     pub trashed_at: Option<DateTime<Utc>>,
 }
 
-/// One persisted entry tag row.
+/// One `entry_tags` row captured for organization undo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryTagSnapshot {
-    /// Library entry id.
+    /// `entry_tags.entry_id` owning the tag.
     pub entry_id: EntryId,
-    /// User-visible tag.
+    /// `entry_tags.tag` user-visible label (also search-indexed).
     pub tag: String,
 }
 
-/// Sync-visible metadata for an entry row.
+/// Row from the local/remote `sync_entries` metadata table (not the full library row).
+///
+/// Used by CRDT seed/push to mirror title/author/tombstones without PDF bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncEntryRow {
-    /// BLAKE3/content-addressed entry id.
+    /// Content-addressed entry id (`sync_entries.id`, BLAKE3 hex).
     pub id: EntryId,
-    /// Local library id used by the remote Turso schema.
+    /// Owning library partition (`sync_entries.library_id`) on Turso and local SQLite.
     pub library_id: String,
-    /// User-visible title, when known.
+    /// Mirrored display title for remote listing.
     pub title: Option<String>,
-    /// User-visible author, when known.
+    /// Mirrored display author for remote listing.
     pub author: Option<String>,
-    /// Last local update timestamp as a Unix timestamp.
+    /// Unix seconds of last local metadata write (`sync_entries.updated_at`).
     pub updated_at: i64,
-    /// Tombstone timestamp, when deleted.
+    /// Unix seconds tombstone when soft-deleted remotely (`sync_entries.deleted_at`).
     pub deleted_at: Option<i64>,
 }
 
-/// Sync-visible metadata for a folder row.
+/// Row from the local/remote `sync_folders` metadata table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncFolderRow {
-    /// Stable folder id.
+    /// Stable folder id (`sync_folders.id`).
     pub id: FolderId,
-    /// Local library id used by the remote Turso schema.
+    /// Owning library partition (`sync_folders.library_id`).
     pub library_id: String,
-    /// User-visible folder name.
+    /// User-visible folder name mirrored for remote clients.
     pub name: String,
-    /// Optional parent folder id.
+    /// Optional parent folder id for nested trees.
     pub parent_id: Option<FolderId>,
-    /// Last local update timestamp as a Unix timestamp.
+    /// Unix seconds of last local metadata write.
     pub updated_at: i64,
-    /// Tombstone timestamp, when deleted.
+    /// Unix seconds tombstone when soft-deleted remotely.
     pub deleted_at: Option<i64>,
 }
 
-/// Sync-visible metadata for an entry-folder membership row.
+/// Row from the local/remote `sync_entry_folders` membership metadata table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncEntryFolderRow {
-    /// Entry id.
+    /// Member entry id (`sync_entry_folders.entry_id`).
     pub entry_id: EntryId,
-    /// Folder id.
+    /// Containing folder id (`sync_entry_folders.folder_id`).
     pub folder_id: FolderId,
-    /// Last local update timestamp as a Unix timestamp.
+    /// Unix seconds of last local membership write.
     pub updated_at: i64,
-    /// Tombstone timestamp, when deleted.
+    /// Unix seconds tombstone when the membership was removed.
     pub deleted_at: Option<i64>,
 }
 
 /// Counts returned after seeding local library data into sync metadata tables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SyncSeedSummary {
-    /// Entry metadata rows written.
+    /// `sync_entries` rows written/upserted.
     pub entries: usize,
-    /// Folder metadata rows written.
+    /// `sync_folders` rows written/upserted.
     pub folders: usize,
-    /// Entry-folder membership rows written.
+    /// `sync_entry_folders` rows written/upserted.
     pub entry_folders: usize,
 }
 
-/// One immutable sync CRDT operation stored locally and mirrored remotely.
+/// One immutable row in the local `sync_crdt_ops` log (and its Turso mirror).
+///
+/// Append-only LWW operations: each op carries a full entity payload keyed by
+/// `(entity_kind, entity_id)` and ordered by `logical_time` for conflict resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncCrdtOperation {
-    /// Globally stable operation id.
+    /// Globally unique op id (`sync_crdt_ops.op_id`, usually ULID/UUID).
     pub op_id: String,
-    /// Library this operation belongs to.
+    /// Library partition this op mutates (`sync_crdt_ops.library_id`).
     pub library_id: String,
-    /// Device that originally created this operation.
+    /// Originating device id for multi-device debugging and filtering.
     pub device_id: String,
-    /// Hybrid logical timestamp used for deterministic LWW conflict resolution.
+    /// Hybrid logical clock value used for deterministic LWW merge.
     pub logical_time: i64,
-    /// CRDT entity kind, for example `entry`, `folder`, or `entry_folder`.
+    /// Entity table kind string: `entry`, `folder`, or `entry_folder`.
     pub entity_kind: String,
-    /// Stable entity id within the kind.
+    /// Primary key within `entity_kind` (entry/folder id or composite membership key).
     pub entity_id: String,
-    /// JSON payload for the entity state carried by this operation.
+    /// JSON blob of the entity state applied when this op wins LWW.
     pub payload: String,
-    /// Local creation timestamp as a Unix timestamp.
+    /// Local creation Unix seconds.
     pub created_at: i64,
-    /// Remote append-only sequence, once this op has been seen in Turso.
+    /// Monotonic remote sequence assigned by Turso once the op is acknowledged.
     pub remote_sequence: Option<i64>,
-    /// Local timestamp when this op was pushed, if it originated locally.
+    /// Local Unix seconds when a locally-originated op was successfully pushed.
     pub pushed_at: Option<i64>,
 }
 
@@ -584,6 +598,7 @@ pub struct NewLibraryEntry {
     pub cover_hash: Option<String>,
 }
 
+/// True when two id→`trashed_at` maps disagree on any entry's trash presence/time.
 fn trash_maps_differ(
     left: std::collections::HashMap<String, Option<DateTime<Utc>>>,
     right: std::collections::HashMap<String, Option<DateTime<Utc>>>,

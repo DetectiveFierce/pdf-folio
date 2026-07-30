@@ -429,6 +429,19 @@ a {
   font-size: 12.75px;
   color: var(--text-faint);
 }
+/* Nested API module tree (public + private): deepen indent by path depth */
+.nav-children.depth-2 > .nav-item > .nav-link.sub,
+.nav-children.depth-2 > .nav-link.sub {
+  padding-left: 40px;
+}
+.nav-children.depth-3 > .nav-item > .nav-link.sub,
+.nav-children.depth-3 > .nav-link.sub {
+  padding-left: 52px;
+}
+.nav-children.depth-4 > .nav-item > .nav-link.sub,
+.nav-children.depth-4 > .nav-link.sub {
+  padding-left: 64px;
+}
 .nav-link.sub:hover {
   color: var(--accent);
   background: rgba(255, 255, 255, 0.03);
@@ -442,7 +455,12 @@ a {
 .nav-children.is-collapsed {
   display: none;
 }
-.nav-item.is-active .nav-children {
+/* Expand in-page anchor children when the parent page is current */
+.nav-item.is-active > .nav-children {
+  display: block;
+}
+/* Keep ancestor branches open when a nested module page is current */
+.nav-item.has-active-desc > .nav-children {
   display: block;
 }
 

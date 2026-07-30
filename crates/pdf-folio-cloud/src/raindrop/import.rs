@@ -48,9 +48,11 @@ use super::matching::{
 };
 use super::*;
 
+/// Basis-point span reserved for the per-PDF import phase after ZIP extract (5_000 → 10_000).
 const ZIP_IMPORTING_PROGRESS_BASIS_POINTS: u16 = 5_000;
 /// Full progress scale (100.00%) expressed in basis points (1/100 of a percent).
 pub(crate) const PROGRESS_BASIS_POINTS_MAX: u16 = 10_000;
+/// Fine-grained progress units allotted to one PDF during ZIP-backed import (page extract + index).
 const IMPORT_PROGRESS_UNITS_PER_PDF: u32 = 1_000;
 
 /// Imports all PDFs from the authenticated Raindrop.io account.
@@ -189,6 +191,14 @@ pub async fn import_all_pdfs_with_auth(
     .await
 }
 
+/// Imports candidates from an existing preview without re-listing the account PDFs.
+///
+/// Resolves auth, optionally loads collections for folder mirroring, then runs
+/// [`import_prepared_raindrops`].
+///
+/// # Errors
+///
+/// Returns an error when auth, API, download, or local database work fails.
 async fn import_pdfs_with_preview(
     db: &Db,
     preview: RaindropImportPreview,
@@ -230,6 +240,13 @@ async fn import_pdfs_with_preview(
     Ok(import)
 }
 
+/// Shared import path: resolve token, list PDFs (optionally filtered), then import.
+///
+/// When `selected_ids` is set, each kept raindrop is re-fetched for fuller file metadata.
+///
+/// # Errors
+///
+/// Returns an error when auth, API, download, or local database work fails.
 async fn import_pdfs_with_auth(
     db: &Db,
     oauth_config: Option<RaindropOAuthConfig>,
@@ -277,6 +294,14 @@ async fn import_pdfs_with_auth(
     .await
 }
 
+/// Mirrors collections when needed, picks ZIP vs individual strategy, and imports the list.
+///
+/// ZIP failures for uploaded files degrade to error rows for those raindrops; linked PDFs
+/// still download individually after a partial ZIP pass.
+///
+/// # Errors
+///
+/// Returns an error when storage setup or a fatal strategy path fails.
 async fn import_prepared_raindrops(
     db: &Db,
     client: &RaindropClient,
@@ -408,6 +433,7 @@ async fn import_prepared_raindrops(
     })
 }
 
+/// Appends `source` entries/errors into `target`, deduping by entry id.
 fn merge_import_summary(target: &mut ImportSummary, source: ImportSummary) {
     let mut seen_entry_ids = target
         .entries
@@ -422,6 +448,7 @@ fn merge_import_summary(target: &mut ImportSummary, source: ImportSummary) {
     target.errors.extend(source.errors);
 }
 
+/// True when the destination should mirror Raindrop collection folders locally.
 fn destination_preserves_raindrop_folders(destination: &RaindropImportDestination) -> bool {
     matches!(
         destination,
@@ -443,6 +470,7 @@ pub(crate) fn zip_import_progress_basis_points(completed: usize, total: usize) -
     )
 }
 
+/// Maps completed import units into the post-extract basis-point range up to [`PROGRESS_BASIS_POINTS_MAX`].
 fn zip_import_progress_basis_points_for_units(completed_units: u32, total_units: u32) -> u16 {
     if total_units == 0 {
         return PROGRESS_BASIS_POINTS_MAX;
@@ -482,11 +510,17 @@ pub(crate) fn report_raindrop_progress(
     }
 }
 
+/// One successfully imported raindrop PDF plus search documents for indexing.
 struct ImportedRaindropPdf {
+    /// Local library entry produced by the import.
     entry: ImportedEntry,
+    /// Per-page search documents to commit into the search index.
     index_documents: Vec<IndexDocument>,
 }
 
+/// Downloads and imports each raindrop PDF one-by-one, reporting progress per item.
+///
+/// Individual failures become error strings; the function always returns a summary.
 async fn import_raindrop_pdfs_individually(
     db: &Db,
     client: &RaindropClient,
@@ -576,6 +610,13 @@ async fn import_raindrop_pdfs_individually(
     ImportSummary { entries, errors }
 }
 
+/// Downloads Raindrop’s bulk ZIP export, matches members to raindrops, and imports extracted PDFs.
+///
+/// Batches search-index writes after the import loop. Missing ZIP members become per-item errors.
+///
+/// # Errors
+///
+/// Returns an error when the ZIP download, extract, or search index open fails fatally.
 async fn import_raindrop_pdfs_from_zip(
     db: &Db,
     client: &RaindropClient,
@@ -793,6 +834,7 @@ async fn import_raindrop_pdfs_from_zip(
     Ok(ImportSummary { entries, errors })
 }
 
+/// Human-readable Raindrop account label (`fullName`, else `Raindrop user {id}`).
 fn account_label(user: &RaindropUser) -> String {
     user.full_name
         .clone()
@@ -869,6 +911,11 @@ pub(crate) fn mirror_collections(
     Ok(created_folders)
 }
 
+/// Downloads one raindrop PDF to `storage_dir` and imports it into the library.
+///
+/// # Errors
+///
+/// Returns an error when download, disk write, or library import fails.
 async fn import_raindrop_pdf(
     db: &Db,
     client: &RaindropClient,
@@ -902,6 +949,11 @@ async fn import_raindrop_pdf(
     import_downloaded_raindrop_pdf(db, source_id, &path, raindrop, destination, page_progress)
 }
 
+/// Imports an already-downloaded PDF: metadata, tags, destination folder, provenance mapping.
+///
+/// # Errors
+///
+/// Returns an error when PDF open, library insert, or mapping writes fail.
 fn import_downloaded_raindrop_pdf(
     db: &Db,
     source_id: &str,
@@ -950,10 +1002,22 @@ fn import_downloaded_raindrop_pdf(
     Ok(imported)
 }
 
+/// Adds an entry to a mirrored Raindrop collection folder (thin wrapper for folder membership).
+///
+/// # Errors
+///
+/// Returns an error when the membership write fails.
 fn add_entry_to_raindrop_folder(db: &Db, entry_id: &EntryId, folder_id: &FolderId) -> Result<()> {
     db.add_entry_to_folder(entry_id, folder_id)
 }
 
+/// Hashes, inserts, and extracts page text for a PDF at `path`, preferring `remote_title`.
+///
+/// Reports coarse page-progress units via `page_progress` (0–[`IMPORT_PROGRESS_UNITS_PER_PDF`]).
+///
+/// # Errors
+///
+/// Returns an error when hashing, PDF open, or database insert fails.
 fn import_pdf_with_metadata(
     db: &Db,
     path: &Path,
@@ -1009,6 +1073,7 @@ fn import_pdf_with_metadata(
     })
 }
 
+/// Cleaned PDF document-info title when present.
 fn attributed_title(doc: &PdfDoc) -> Option<String> {
     doc.metadata_title()
         .ok()
@@ -1016,6 +1081,7 @@ fn attributed_title(doc: &PdfDoc) -> Option<String> {
         .and_then(clean_import_title)
 }
 
+/// Cleaned PDF document-info author when present.
 fn attributed_author(doc: &PdfDoc) -> Option<String> {
     doc.metadata_author()
         .ok()
@@ -1023,10 +1089,16 @@ fn attributed_author(doc: &PdfDoc) -> Option<String> {
         .and_then(clean_import_title)
 }
 
+/// File size in bytes, or `None` when metadata cannot be read.
 fn file_size(path: &Path) -> Option<u64> {
     fs::metadata(path).ok().map(|metadata| metadata.len())
 }
 
+/// XDG data dir for Raindrop downloads: `…/raindrop/<source>/files`.
+///
+/// # Errors
+///
+/// Returns an error when the platform data directory cannot be resolved.
 fn raindrop_storage_dir(source_id: &str) -> Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "pdf-folio", "PDF-Folio")
         .context("Could not find a data directory for PDF-Folio.")?;
@@ -1046,6 +1118,7 @@ pub(crate) fn safe_pdf_file_name(name: &str) -> String {
     name
 }
 
+/// Path-safe single component: alphanumerics, `.`/`-`/`_`, max 180 chars (else `untitled`).
 fn safe_path_component(value: &str) -> String {
     let cleaned = value
         .chars()

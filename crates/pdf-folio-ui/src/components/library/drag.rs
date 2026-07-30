@@ -1,14 +1,21 @@
 //! # Library drag/drop pure helpers
 //!
-//! Constants, state structs, and geometry functions for manual reorder and
-//! folder assignment drags. Free of iced widgets and `Db` access.
+//! Constants, state structs, and geometry functions under
+//! `components::library::drag` for manual entry reorder and folder assignment
+//! or nesting drags. Free of iced widgets and `Db` access—callers supply
+//! points, rectangles, and clocks.
 //!
-//! Live drag state is stored on `app.library` (`LibraryDragState` /
-//! `FolderDragState`); domain methods in `crate::library::actions` mutate it
-//! using the hit-tests and reorder helpers defined here.
+//! ## Ownership
 //!
-//! Autoscroll uses edge-band velocity curves; folder drops require a dwell
-//! before activation to avoid accidental nesting while reordering.
+//! Live drag state lives on `app.library` as [`LibraryDragState`] /
+//! [`FolderDragState`]; domain methods in `crate::library::actions` mutate it
+//! using the hit-tests and reorder helpers defined here. Presentation modules
+//! ([`super::folder_tree`], [`super::cards`]) only read active targets for
+//! highlight styling.
+//!
+//! Autoscroll uses edge-band velocity curves ([`drag_auto_scroll_velocity`]);
+//! folder drops require a dwell ([`LIBRARY_FOLDER_DROP_DWELL_MS`]) before
+//! activation to avoid accidental nesting while reordering.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};

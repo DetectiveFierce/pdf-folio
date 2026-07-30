@@ -21,7 +21,9 @@
 //!
 //! [`pdfium-render`]: https://docs.rs/pdfium-render
 
+/// SQLite library database, search, import, and sync metadata.
 pub mod db;
+/// PDF loading, text extraction, rendering, and tile cache.
 pub mod pdf;
 
 pub use pdf::{

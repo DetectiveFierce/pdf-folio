@@ -46,9 +46,13 @@
 pub use pdf_folio_style as style;
 pub use pdf_folio_style::theme;
 
+/// Presentational widgets shared by library and viewer chrome.
 mod components;
+/// Library filtering, drag/selection, bulk tasks, registry, and views.
 mod library;
+/// Root app state, messages, update, session, shortcuts, and subscriptions.
 mod shell;
+/// Document open/render, zoom/scroll/find/outline, and viewer canvas.
 mod viewer;
 
 use std::collections::{HashMap, HashSet};
@@ -320,6 +324,7 @@ pub fn run(initial_file: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+/// Default logical window size from the style book layout, or bundled fallback.
 fn initial_window_size() -> [f32; 2] {
     StyleBook::load()
         .unwrap_or_else(|_| StyleBook::bundled())
@@ -354,6 +359,10 @@ pub(crate) fn with_session_save(task: Task<Message>, app: &PDFolioApp) -> Task<M
     Task::batch([task, save_app_session_task(app)])
 }
 
+/// Opens the OS file manager at `path`, optionally revealing the file itself.
+///
+/// Tries platform-specific candidates from [`file_manager_commands`] until one
+/// succeeds; emits status or error messages on completion.
 fn open_file_manager_task(path: PathBuf, reveal: bool) -> Task<Message> {
     Task::perform(
         async move {
@@ -394,6 +403,7 @@ fn open_file_manager_task(path: PathBuf, reveal: bool) -> Task<Message> {
     )
 }
 
+/// Native file picker for opening a PDF outside the library (viewer open).
 fn open_file_dialog_task() -> Task<Message> {
     Task::perform(
         async {
@@ -407,6 +417,7 @@ fn open_file_dialog_task() -> Task<Message> {
     )
 }
 
+/// Folder picker for bulk-importing every PDF under a directory tree.
 fn import_folder_dialog_task() -> Task<Message> {
     Task::perform(
         async {
@@ -419,6 +430,7 @@ fn import_folder_dialog_task() -> Task<Message> {
     )
 }
 
+/// Native file picker for importing one or more PDFs into the active library.
 fn import_pdf_dialog_task() -> Task<Message> {
     Task::perform(
         async {
@@ -432,6 +444,7 @@ fn import_pdf_dialog_task() -> Task<Message> {
     )
 }
 
+/// Folder picker for the destination when exporting selected library PDFs.
 fn export_destination_dialog_task() -> Task<Message> {
     Task::perform(
         async {
@@ -449,6 +462,7 @@ fn export_destination_dialog_task() -> Task<Message> {
     )
 }
 
+/// File picker that rebinds a missing library entry to a new on-disk PDF path.
 fn relink_file_dialog_task(entry_id: EntryId) -> Task<Message> {
     Task::perform(
         async {
@@ -509,6 +523,10 @@ pub(crate) fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
     )
 }
 
+/// Short label explaining why an entry matched the current library search.
+///
+/// Prefers full-text hit page numbers when available; otherwise falls back to
+/// title/author/path field match labels. Returns `None` when the query is empty.
 fn library_search_match_label(
     app: &PDFolioApp,
     entry: &LibraryEntry,
@@ -526,6 +544,7 @@ fn library_search_match_label(
         .or_else(|| search_match_source_label(entry, &query))
 }
 
+/// Single-line title that ellipsizes to `width` and shows a tooltip when cut.
 fn truncated_title<'a>(
     title: String,
     width: f32,
@@ -563,14 +582,17 @@ fn truncated_title<'a>(
     .into()
 }
 
+/// Ellipsizes `label` to fit `width` minus `reserved_width` at small UI font size.
 fn truncate_for_width(label: &str, width: f32, reserved_width: f32) -> String {
     truncate_for_width_with_font(label, width, reserved_width, FontSize::SM)
 }
 
+/// Folder/file tree row label truncated to the available sidebar width.
 fn file_tree_label(label: &str, width: f32, font_size: u32) -> String {
     truncate_for_width_with_font(label, width, 0.0, font_size)
 }
 
+/// UI font used for library file-tree labels at the given weight.
 fn file_tree_font(weight: iced::font::Weight) -> Font {
     Font {
         family: font::Family::Name(UI_FONT_FAMILY),
@@ -579,6 +601,10 @@ fn file_tree_font(weight: iced::font::Weight) -> Font {
     }
 }
 
+/// Approximates glyph width and ellipsizes `label` so it fits the available pixels.
+///
+/// Uses a fixed average character width derived from `font_size` rather than
+/// measuring glyphs, which is good enough for sidebar and card labels.
 fn truncate_for_width_with_font(
     label: &str,
     width: f32,
@@ -621,5 +647,6 @@ pub(crate) fn schedule_search(query: String) -> Task<Message> {
     )
 }
 
+/// Crate-root unit tests for launch helpers and shared UI utilities.
 #[cfg(test)]
 mod tests;

@@ -37,6 +37,7 @@ pub(super) fn load_library_previews(
         .collect()
 }
 
+/// Display title for a switcher preview tile (display title → title → path stem → `"PDF"`).
 fn library_preview_title(entry: &LibraryEntry) -> String {
     entry
         .display_title
@@ -74,10 +75,12 @@ pub(super) fn library_preview_thumbnail(entry: &LibraryEntry) -> Option<LibraryP
     })
 }
 
+/// Disk path for the small switcher-preview RGBA cache file for `entry_id`.
 fn small_thumbnail_path(entry_id: &EntryId) -> anyhow::Result<PathBuf> {
     Ok(thumbnail_path(entry_id)?.with_file_name(format!("{}.small.rgba", entry_id.as_str())))
 }
 
+/// Infer pixel height from raw RGBA byte length given `width` (4 bytes/pixel).
 fn thumbnail_height_from_rgba_len(len: usize, width: u16) -> Option<u16> {
     let stride = usize::from(width) * 4;
     if stride == 0 || len < stride {

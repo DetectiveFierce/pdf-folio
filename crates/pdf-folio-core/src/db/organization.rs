@@ -882,6 +882,7 @@ pub(super) fn row_to_folder(row: &rusqlite::Row<'_>) -> rusqlite::Result<Folder>
     })
 }
 
+/// Maps a folders-table SELECT that includes `trashed_at` into a snapshot DTO.
 fn row_to_folder_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryFolderSnapshot> {
     let created_at: i64 = row.get(4)?;
     let updated_at: i64 = row.get(5)?;
@@ -897,6 +898,7 @@ fn row_to_folder_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryFo
     })
 }
 
+/// Inserts `folder_id` and all descendant ids from a live [`Folder`] list into `folder_ids`.
 fn collect_folder_subtree_ids_from(
     folders: &[Folder],
     folder_id: &FolderId,
@@ -913,6 +915,7 @@ fn collect_folder_subtree_ids_from(
     }
 }
 
+/// Same as [`collect_folder_subtree_ids_from`] but for snapshot rows (includes trash).
 fn collect_folder_snapshot_subtree_ids_from(
     folders: &[LibraryFolderSnapshot],
     folder_id: &FolderId,
@@ -929,6 +932,7 @@ fn collect_folder_snapshot_subtree_ids_from(
     }
 }
 
+/// Parent-chain depth of `folder_id` in `folders` (0 = root).
 fn folder_depth(folders: &[Folder], folder_id: &FolderId) -> usize {
     let mut depth = 0;
     let mut current = folders

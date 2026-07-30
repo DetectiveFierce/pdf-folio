@@ -33,6 +33,7 @@
 //!
 //! [`clap`]: https://docs.rs/clap
 
+/// Re-export of cloud sync CLI args and runner for `pdf-folio sync …`.
 mod cli;
 
 use std::path::PathBuf;
@@ -67,6 +68,7 @@ enum Command {
     Sync(SyncArgs),
 }
 
+/// Process entry: install tracing, parse CLI, run UI or sync subcommand.
 fn main() -> Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();

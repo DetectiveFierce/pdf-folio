@@ -13,9 +13,15 @@ use iced::widget::{column, row};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
+/// Counts startup-probe view logs so `PDF_FOLIO_STARTUP_PROBE` only samples a few frames.
 static LIBRARY_VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 
 /// Compose the full library mode UI for the current app state.
+///
+/// Builds header or selection toolbar, breadcrumbs, virtualized folder/entry
+/// content, navigation sidebar, and optional inspector. Dialogs and drag
+/// previews are layered by the shell around this tree. Read-only — derives
+/// data via `visible_library_entries` and layout helpers.
 pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let probe_started_at = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").map(|_| Instant::now());
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);

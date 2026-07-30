@@ -1133,6 +1133,7 @@ impl Db {
     }
 }
 
+/// Maps a `sync_crdt_operations` SELECT row into a [`SyncCrdtOperation`].
 fn row_to_sync_crdt_operation(row: &rusqlite::Row<'_>) -> rusqlite::Result<SyncCrdtOperation> {
     Ok(SyncCrdtOperation {
         op_id: row.get(0)?,

@@ -64,6 +64,7 @@ pub struct SyncArgs {
     db: Option<PathBuf>,
 }
 
+/// Subcommands available under `pdf-folio sync`.
 #[derive(Debug, Subcommand)]
 enum SyncCommand {
     /// Check the sync server health endpoint.
@@ -314,6 +315,13 @@ pub async fn run_sync_command(args: SyncArgs) -> Result<()> {
     Ok(())
 }
 
+/// Downloads non-deleted sync entry PDFs from R2 into the local blob cache.
+///
+/// Returns `(downloaded, already_cached, skipped)` counts. Skips tombstoned rows and non-hash ids.
+///
+/// # Errors
+///
+/// Returns an error when local metadata cannot be read or an R2 download fails.
 async fn download_blobs(
     db: &Db,
     r2: &R2Client,
@@ -344,26 +352,44 @@ async fn download_blobs(
     Ok((downloaded, cached, skipped))
 }
 
+/// Builds a [`SyncClient`] from the cached session JWT (requires prior `sync auth`).
+///
+/// # Errors
+///
+/// Returns an error when no valid session is cached on disk.
 fn sync_client() -> Result<SyncClient> {
     let session = cached_session().context("No cached sync session. Run `pdf-folio sync auth`.")?;
     Ok(SyncClient::new(session))
 }
 
+/// On-disk multi-library registry (`libraries.json` under the XDG data dir).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct StoredLibraryRegistry {
+    /// Currently selected library id in the desktop app.
     active_library_id: String,
+    /// Known local library profiles (id, name, db path).
     libraries: Vec<SyncLibraryProfile>,
+    /// Library ids tombstoned remotely/locally so merge does not re-create them.
     #[serde(default)]
     deleted_library_ids: Vec<String>,
 }
 
+/// One local library entry in the app registry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SyncLibraryProfile {
+    /// Stable library id (stream key for CRDT and Turso).
     id: String,
+    /// User-visible library name.
     name: String,
+    /// Absolute path to the library SQLite database.
     db_path: PathBuf,
 }
 
+/// Resolves libraries for `sync-once`, seeding the registry from remote when none exist locally.
+///
+/// # Errors
+///
+/// Returns an error when local registry I/O or remote library pull fails.
 async fn sync_profiles_for_sync_once(
     explicit_db: Option<PathBuf>,
     library_id: Option<&str>,
@@ -379,6 +405,11 @@ async fn sync_profiles_for_sync_once(
     Ok(profiles)
 }
 
+/// Pulls remote library rows into `libraries.json` when the local registry is empty/absent.
+///
+/// # Errors
+///
+/// Returns an error when remote pull or registry merge/write fails.
 async fn sync_profiles_from_remote_if_needed(
     explicit_db: Option<PathBuf>,
     library_id: Option<&str>,
@@ -394,6 +425,13 @@ async fn sync_profiles_from_remote_if_needed(
     sync_profiles(None, library_id, true).await
 }
 
+/// Loads library profiles from `--db` / registry, optionally filtered by `library_id`.
+///
+/// When `create_missing` is true, ensures each profile’s SQLite file exists (opens/creates).
+///
+/// # Errors
+///
+/// Returns an error when the data dir, registry, or library database cannot be accessed.
 async fn sync_profiles(
     explicit_db: Option<PathBuf>,
     library_id: Option<&str>,
@@ -432,6 +470,11 @@ async fn sync_profiles(
         .collect())
 }
 
+/// Merges remote library rows into the local registry (add/update, apply deletions).
+///
+/// # Errors
+///
+/// Returns an error when registry load/save or local storage removal fails.
 fn merge_remote_libraries_into_registry(remote_libraries: &[SyncLibraryRow]) -> Result<()> {
     let data_dir = app_data_dir()?;
     let had_registry_file = registry_path()?.exists();
@@ -494,6 +537,11 @@ fn merge_remote_libraries_into_registry(remote_libraries: &[SyncLibraryRow]) -> 
     save_stored_library_registry(&registry)
 }
 
+/// Loads `libraries.json`, or synthesizes a default profile from a legacy `library.db`.
+///
+/// # Errors
+///
+/// Returns an error when the registry file cannot be read or parsed.
 fn load_stored_library_registry(data_dir: &Path) -> Result<StoredLibraryRegistry> {
     let path = data_dir.join("libraries.json");
     if path.exists() {
@@ -529,6 +577,11 @@ fn load_stored_library_registry(data_dir: &Path) -> Result<StoredLibraryRegistry
     })
 }
 
+/// Writes the registry JSON pretty-printed to the XDG data path.
+///
+/// # Errors
+///
+/// Returns an error when parent dirs cannot be created or the file cannot be written.
 fn save_stored_library_registry(registry: &StoredLibraryRegistry) -> Result<()> {
     let path = registry_path()?;
     if let Some(parent) = path.parent() {
@@ -540,6 +593,7 @@ fn save_stored_library_registry(registry: &StoredLibraryRegistry) -> Result<()> 
     Ok(())
 }
 
+/// Maps local profiles to relational [`SyncLibraryRow`] values for Turso library push.
 fn library_rows(profiles: &[SyncLibraryProfile]) -> Vec<SyncLibraryRow> {
     let registry_updated_at = registry_path()
         .ok()
@@ -557,6 +611,7 @@ fn library_rows(profiles: &[SyncLibraryProfile]) -> Vec<SyncLibraryRow> {
         .collect()
 }
 
+/// Current wall-clock Unix seconds (0 if the system clock is before the epoch).
 fn current_unix_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -564,6 +619,7 @@ fn current_unix_timestamp() -> i64 {
         .unwrap_or_default()
 }
 
+/// File mtime as Unix seconds, when available.
 fn file_modified_unix_timestamp(path: &Path) -> Option<i64> {
     std::fs::metadata(path)
         .ok()
@@ -572,16 +628,27 @@ fn file_modified_unix_timestamp(path: &Path) -> Option<i64> {
         .map(|duration| duration.as_secs() as i64)
 }
 
+/// XDG data directory for PDF-Folio (`…/PDF-Folio`).
+///
+/// # Errors
+///
+/// Returns an error when the platform project dirs cannot be resolved.
 fn app_data_dir() -> Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "pdf-folio", "PDF-Folio")
         .context("Could not find a data directory for PDF-Folio.")?;
     Ok(project_dirs.data_dir().to_path_buf())
 }
 
+/// Path to the multi-library registry JSON under the app data dir.
+///
+/// # Errors
+///
+/// Returns an error when the app data dir cannot be resolved.
 fn registry_path() -> Result<PathBuf> {
     Ok(app_data_dir()?.join("libraries.json"))
 }
 
+/// Canonical SQLite path for a library id (`library.db` for `default`, else `libraries/<id>/…`).
 fn local_library_db_path(data_dir: &Path, library_id: &str) -> PathBuf {
     if library_id == "default" {
         data_dir.join("library.db")
@@ -593,6 +660,11 @@ fn local_library_db_path(data_dir: &Path, library_id: &str) -> PathBuf {
     }
 }
 
+/// Removes a library database file and its empty parent directory after remote tombstone merge.
+///
+/// # Errors
+///
+/// Returns an error when deletion fails for a reason other than “not found” / non-empty dir.
 fn remove_library_storage(db_path: &Path) -> Result<()> {
     match std::fs::remove_file(db_path) {
         Ok(()) => {}
@@ -618,10 +690,12 @@ fn remove_library_storage(db_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// True when `value` is a 64-character hex string (BLAKE3 entry/blob id).
 fn is_blob_hash(value: &str) -> bool {
     value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
+/// Default sync device id from `/etc/hostname`, else `local-device`.
 fn default_device_id() -> String {
     std::fs::read_to_string("/etc/hostname")
         .ok()
@@ -630,6 +704,7 @@ fn default_device_id() -> String {
         .unwrap_or_else(|| String::from("local-device"))
 }
 
+/// Reads Google OAuth desktop `client_id` from a local `secrets/client_secret_*.json` if present.
 fn load_google_client_id_from_secrets() -> Option<String> {
     let secrets_dir = Path::new("secrets");
     let path = std::fs::read_dir(secrets_dir)

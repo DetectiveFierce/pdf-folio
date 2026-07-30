@@ -9,10 +9,15 @@
 use super::*;
 use iced::widget::column;
 
+/// Inline SVG for the multi-library switcher icon (three small shelves).
 const LIBRARIES_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="9" width="5" height="6" rx="1"/><rect x="9.5" y="9" width="5" height="6" rx="1"/><rect x="17.5" y="9" width="5" height="6" rx="1"/></svg>"##;
+/// Extra bottom padding (logical px) when the trash-can row is the active destination.
 const ACTIVE_TRASH_CAN_CONTENT_OFFSET: f32 = 4.0;
 
-/// Combined library sidebar shell (navigation + optional details) for tag/sidebar open state.
+/// Combined library sidebar shell: navigation body plus resize handle.
+///
+/// Width follows `library_tag_sidebar_width`. Includes the switcher button at
+/// the bottom and a horizontal resize handle that emits begin/end resize messages.
 pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let sidebar_width = app.library.library_tag_sidebar_width;
@@ -62,6 +67,7 @@ pub(crate) fn view_library_tag_sidebar(app: &PDFolioApp) -> Element<'_, Message>
     row![sidebar, resize_handle].height(Length::Fill).into()
 }
 
+/// Bottom-of-sidebar button that opens the multi-library switcher (shows active vault name).
 fn library_switcher_sidebar_button(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(LIBRARIES_SVG))
         .width(tokens.primitives.library_switcher_sidebar_icon_size)
@@ -120,7 +126,10 @@ fn library_switcher_sidebar_button(app: &PDFolioApp, tokens: ThemeTokens) -> Ele
     .into()
 }
 
-/// Primary left rail: library root, folder tree, tags, trash, filters.
+/// Primary left rail: Explorer heading, scrollable library/folder/tag sections.
+///
+/// `sidebar_width` (logical px) sizes tree row labels. Collapse control emits
+/// `CollapseLibrarySidebar`. Body content comes from the stacked navigation builder.
 pub(crate) fn view_library_navigation_sidebar<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -178,6 +187,7 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
     container(content).height(Length::Fill).into()
 }
 
+/// Stacked (non-tabbed) navigation body: folders, filters, tags, and trash sections.
 fn view_stacked_library_navigation_sidebar<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -310,6 +320,7 @@ fn view_stacked_library_navigation_sidebar<'a>(
         .into()
 }
 
+/// Padded section title used above folder/tag/filter blocks in the nav sidebar.
 fn sidebar_section_heading(label: &str, tokens: ThemeTokens) -> Element<'_, Message> {
     container(section_heading(label, tokens))
         .padding(iced::Padding {
@@ -321,6 +332,7 @@ fn sidebar_section_heading(label: &str, tokens: ThemeTokens) -> Element<'_, Mess
         .into()
 }
 
+/// Section title with a fold chevron that emits `toggle_message` when clicked.
 fn sidebar_section_heading_with_toggle(
     label: &str,
     expanded: bool,
@@ -344,7 +356,9 @@ fn sidebar_section_heading_with_toggle(
     .into()
 }
 
-/// Expandable folder tree section of the navigation sidebar.
+/// Expandable folder tree section of the navigation sidebar (root children, depth 0).
+///
+/// Delegates row construction to `folder_sidebar_rows` with no parent filter.
 pub(crate) fn view_file_tree_sidebar<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -353,7 +367,10 @@ pub(crate) fn view_file_tree_sidebar<'a>(
     folder_sidebar_rows(app, None, 0, sidebar_width, tokens)
 }
 
-/// Trash Can row with counts and active-state styling.
+/// Trash Can row with trashed entry+folder counts and active-state styling.
+///
+/// Pressing opens trash view (`OpenTrashCan`). Active state uses FileTree Active
+/// chrome and a small content offset for the selection indicator.
 pub(crate) fn trash_can_sidebar_row<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -455,7 +472,10 @@ pub(crate) fn trash_can_sidebar_row<'a>(
     }
 }
 
-/// Action buttons for the folder currently focused in details.
+/// Action buttons for the folder currently focused in details (rename, trash, reorder).
+///
+/// `None` in trash view or when no folder is selected. Wire inputs to
+/// `folder_rename_input` / sibling-order messages. Nested under folder details.
 pub(crate) fn selected_folder_actions_panel<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -543,7 +563,10 @@ pub(crate) fn selected_folder_actions_panel<'a>(
     )
 }
 
-/// Details panel when a folder is selected for inspection.
+/// Details panel when a folder is selected for inspection (counts, export, actions).
+///
+/// Shows smart PDF counts, child-folder count, and open/export controls. Appends
+/// [`selected_folder_actions_panel`] when available.
 pub(crate) fn view_selected_folder_sidebar<'a>(
     app: &'a PDFolioApp,
     folder: Folder,
@@ -616,6 +639,9 @@ pub(crate) fn view_selected_folder_sidebar<'a>(
 }
 
 /// Tag list / tag filter section of the navigation sidebar.
+///
+/// One row per library tag with PDF counts; active filter highlighting; inline
+/// rename when `renaming_tag` matches. Right-click opens the tag context menu.
 pub(crate) fn view_tag_tree_sidebar<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -658,6 +684,7 @@ pub(crate) fn view_tag_tree_sidebar<'a>(
     tags.into()
 }
 
+/// Inline text field row for renaming the active tag (shown while rename is in progress).
 fn tag_rename_row<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -701,7 +728,11 @@ fn tag_rename_row<'a>(
         .into()
 }
 
-/// Details panel for a single selected PDF (metadata, path, actions).
+/// Details panel for a single selected PDF (metadata editors, path, bulk-capable actions).
+///
+/// Binds title/author inputs to details draft fields, lists status/progress/size,
+/// and exposes open/export/reveal/trash actions. Relink control appears when
+/// the file is missing outside trash view.
 pub(crate) fn view_selected_pdf_sidebar<'a>(
     app: &'a PDFolioApp,
     entry: LibraryEntry,
@@ -839,6 +870,9 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
 }
 
 /// Details panel summarizing a multi-PDF selection and bulk actions.
+///
+/// Aggregates page counts, missing files, and total size across the selection;
+/// shares move/export/metadata/reindex/trash actions with the selection toolbar.
 pub(crate) fn view_multi_selection_sidebar<'a>(
     app: &'a PDFolioApp,
     sidebar_width: f32,
@@ -913,6 +947,7 @@ pub(crate) fn view_multi_selection_sidebar<'a>(
         .into()
 }
 
+/// Tag chip editor for a single entry or the intersection of multi-selected entries.
 fn inspector_tag_editor<'a>(
     app: &'a PDFolioApp,
     entry: Option<LibraryEntry>,
@@ -1017,6 +1052,7 @@ fn inspector_tag_editor<'a>(
         .into()
 }
 
+/// Tags present on every entry in `entries` (sorted); empty when the selection is empty.
 fn common_tags(entries: &[LibraryEntry]) -> Vec<String> {
     let Some((first, rest)) = entries.split_first() else {
         return Vec::new();

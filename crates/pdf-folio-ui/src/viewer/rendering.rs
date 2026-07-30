@@ -18,21 +18,35 @@ use crate::PDFolioApp;
 /// iced widget id for the editable zoom percent field.
 pub(crate) const ZOOM_INPUT_ID: &str = "viewer-zoom-input";
 
+/// Logical page width (px) treated as 100% / “actual size” for percent math.
 const ACTUAL_SIZE_WIDTH: u16 = 800;
 /// Minimum allowed zoom page width in logical pixels.
 pub(crate) const MIN_ZOOM_WIDTH: u16 = 240;
 /// Maximum allowed zoom page width in logical pixels.
 pub(crate) const MAX_ZOOM_WIDTH: u16 = 3200;
+/// Fraction of available canvas width used by [`ZoomPreset::Automatic`] (~comfortable reading).
 const READING_WIDTH_FILL: f32 = 0.86;
+/// Multiplier on available canvas height when height-capping automatic zoom.
 const READING_HEIGHT_MULTIPLIER: f32 = 1.75;
 
 /// Named zoom presets offered by the viewer zoom menu.
+///
+/// Dimension-dependent variants ([`Self::Automatic`], [`Self::PageFit`],
+/// [`Self::PageWidth`]) recompute via [`Self::width_for`] when the viewer
+/// canvas resizes; [`Self::ActualSize`] and [`Self::Percent`] are absolute
+/// widths relative to the 800px “actual size” baseline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZoomPreset {
+    /// Comfortable reading width (~86% of canvas width, height-capped).
+    /// Default when a document first opens.
     Automatic,
+    /// Fixed 800 logical-pixel page width (100% / “actual size”).
     ActualSize,
+    /// Fit the current page/spread entirely inside the canvas (width and height).
     PageFit,
+    /// Stretch the current page/spread to the full available canvas width.
     PageWidth,
+    /// Absolute zoom as a percent of actual size (e.g. `Percent(150)` → 150%).
     Percent(u16),
 }
 
@@ -53,7 +67,9 @@ impl ZoomPreset {
         Self::Percent(400),
     ];
 
-    /// Resolves this preset to a clamped page width for the current viewport/doc.
+    /// Resolves this preset to a clamped page width (logical px) for the current viewport/doc.
+    ///
+    /// Result is always within [`MIN_ZOOM_WIDTH`]..=[`MAX_ZOOM_WIDTH`].
     pub(crate) fn width_for(self, app: &PDFolioApp) -> u16 {
         match self {
             Self::Automatic => automatic_zoom_width(app),
@@ -65,7 +81,11 @@ impl ZoomPreset {
         .clamp(MIN_ZOOM_WIDTH, MAX_ZOOM_WIDTH)
     }
 
-    /// Returns whether dimension dependent.
+    /// Whether this preset must recompute when the viewer canvas size changes.
+    ///
+    /// True for [`Self::Automatic`], [`Self::PageFit`], and [`Self::PageWidth`];
+    /// false for absolute [`Self::ActualSize`] / [`Self::Percent`]. Callers
+    /// (e.g. `apply_active_dimension_zoom`) skip work when this returns false.
     pub(crate) fn is_dimension_dependent(self) -> bool {
         matches!(self, Self::Automatic | Self::PageFit | Self::PageWidth)
     }
@@ -106,6 +126,7 @@ pub(crate) fn width_from_percent_input(input: &str) -> Option<u16> {
         .map(|width| width.clamp(f32::from(MIN_ZOOM_WIDTH), f32::from(MAX_ZOOM_WIDTH)) as u16)
 }
 
+/// Page width for automatic zoom: min of reading-width fill and height-capped fit.
 fn automatic_zoom_width(app: &PDFolioApp) -> u16 {
     let metrics = current_spread_metrics(app);
     let width_target = page_width_for_group(
@@ -118,6 +139,7 @@ fn automatic_zoom_width(app: &PDFolioApp) -> u16 {
     width_target.min(height_target).round() as u16
 }
 
+/// Page width that fills available canvas width for the current spread's page count.
 fn page_width_zoom(app: &PDFolioApp) -> u16 {
     page_width_for_group(
         available_page_width(app),
@@ -126,6 +148,7 @@ fn page_width_zoom(app: &PDFolioApp) -> u16 {
     .round() as u16
 }
 
+/// Page width that fits the current spread entirely inside the canvas (width and height).
 fn page_fit_width(app: &PDFolioApp) -> u16 {
     let metrics = current_spread_metrics(app);
     let available_width = available_page_width(app);
@@ -135,16 +158,21 @@ fn page_fit_width(app: &PDFolioApp) -> u16 {
         .round() as u16
 }
 
+/// Convert a percent-of-actual-size value to a logical page width in pixels.
 fn percent_width(percent: u16) -> u16 {
     ((f32::from(ACTUAL_SIZE_WIDTH) * f32::from(percent)) / 100.0).round() as u16
 }
 
+/// Geometry of the current page/spread used when resolving dimension-dependent zoom.
 #[derive(Debug, Clone, Copy)]
 struct SpreadZoomMetrics {
+    /// Number of pages in the current spread group (at least 1).
     page_count: usize,
+    /// Smallest width/height aspect among spread pages (defaults to letter if unknown).
     min_aspect_ratio: f32,
 }
 
+/// Build [`SpreadZoomMetrics`] for the pages currently shown under the active spread mode.
 fn current_spread_metrics(app: &PDFolioApp) -> SpreadZoomMetrics {
     let pages = current_spread_pages(app);
     let min_aspect_ratio = pages
@@ -167,6 +195,7 @@ fn current_spread_metrics(app: &PDFolioApp) -> SpreadZoomMetrics {
     }
 }
 
+/// Zero-based page indices for the spread containing the current page (odd/even/none).
 fn current_spread_pages(app: &PDFolioApp) -> Vec<u16> {
     let page_count = app
         .viewer
@@ -205,16 +234,19 @@ fn current_spread_pages(app: &PDFolioApp) -> Vec<u16> {
     }
 }
 
+/// Per-page width after dividing `total_width` across `page_count` pages with inter-page gaps.
 fn page_width_for_group(total_width: f32, page_count: usize) -> f32 {
     let page_count = page_count.max(1);
     let gaps = Spacing::PAGE_GAP * page_count.saturating_sub(1) as f32;
     ((total_width - gaps) / page_count as f32).max(1.0)
 }
 
+/// Usable canvas width for pages (viewport minus left/right gutters), floored at min zoom.
 fn available_page_width(app: &PDFolioApp) -> f32 {
     (app.viewer.viewer_viewport_width - Spacing::PAGE_GUTTER * 2.0).max(f32::from(MIN_ZOOM_WIDTH))
 }
 
+/// Usable canvas height for pages (viewport minus top/bottom gutters), floored at min zoom.
 fn available_page_height(app: &PDFolioApp) -> f32 {
     (app.viewer.viewer_viewport_height - Spacing::PAGE_GUTTER * 2.0).max(f32::from(MIN_ZOOM_WIDTH))
 }

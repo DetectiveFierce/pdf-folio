@@ -1,7 +1,12 @@
 //! # Library filter and search matching
 //!
-//! Pure predicates for free-text field matching, reading-progress buckets,
-//! and folder-scope visibility. Used by layout/search tasks without app state.
+//! Pure predicates under `components::library::filters` for free-text field
+//! matching, reading-progress buckets, and folder-scope visibility. Layout and
+//! search tasks call these without holding iced or `Db` state.
+//!
+//! Title/author strings come from [`super::metadata`]; reading buckets pair
+//! with [`super::state::LibraryReadingFilter`]. Search-hit field labels feed
+//! badges on filtered result rows.
 
 use pdf_folio_core::{FolderId, LibraryEntry};
 
@@ -86,12 +91,12 @@ pub fn entry_search_fields_match<'a>(
             .any(|folder| folder.to_lowercase().contains(normalized_query))
 }
 
-/// Reading progress classification for an entry.
+/// Map an entry to a [`LibraryReadingFilter`] bucket from saved progress.
 pub fn library_entry_reading_state(entry: &LibraryEntry) -> LibraryReadingFilter {
     library_reading_state(entry.last_page, entry.page_count)
 }
 
-/// Whether an entry is visible under the selected folder scope.
+/// Whether an entry appears under the selected folder (or unfiled when `None`).
 pub fn entry_visible_in_folder_scope(
     entry: &LibraryEntry,
     selected_folder: Option<&FolderId>,
@@ -102,7 +107,10 @@ pub fn entry_visible_in_folder_scope(
     }
 }
 
-/// Reading progress classification helper.
+/// Classify progress from raw page fields without a full [`LibraryEntry`].
+///
+/// Finished when `last_page + 1 >= page_count`; reading when `last_page > 0`;
+/// otherwise unread.
 pub fn library_reading_state(last_page: u16, page_count: Option<u16>) -> LibraryReadingFilter {
     if page_count.is_some_and(|count| count > 0 && last_page.saturating_add(1) >= count) {
         LibraryReadingFilter::Finished

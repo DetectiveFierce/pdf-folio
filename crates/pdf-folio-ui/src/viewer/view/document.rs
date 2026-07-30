@@ -16,6 +16,10 @@ use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{canvas, stack};
 
 /// Builds the scrollable document canvas stack (pages, selection, find bar).
+///
+/// Layers raster canvas + selection overlay inside a bidirectional scrollable
+/// that reports `ViewportChanged`, then optionally pins the find bar and
+/// floating sidebar toggle when the TOC is closed.
 pub(crate) fn view_viewer_document(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let content_size = app.viewer_content_size(app.viewer.viewer_viewport_width);
     let viewer = canvas(ViewerCanvas { app })

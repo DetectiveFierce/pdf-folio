@@ -162,6 +162,7 @@ pub(super) fn save_library_registry(registry: &LibraryRegistryRuntime) -> anyhow
     Ok(())
 }
 
+/// Fresh on-disk registry with only the default library profile under `data_dir`.
 fn default_registry(data_dir: &Path) -> StoredLibraryRegistry {
     StoredLibraryRegistry {
         active_library_id: DEFAULT_LIBRARY_ID.to_owned(),
@@ -170,6 +171,7 @@ fn default_registry(data_dir: &Path) -> StoredLibraryRegistry {
     }
 }
 
+/// Built-in default vault profile (`DEFAULT_LIBRARY_ID` / `DEFAULT_LIBRARY_NAME`).
 fn default_profile(data_dir: &Path) -> LibraryProfile {
     LibraryProfile {
         id: DEFAULT_LIBRARY_ID.to_owned(),
@@ -219,6 +221,7 @@ pub(super) fn registry_path() -> anyhow::Result<PathBuf> {
     Ok(app_data_dir()?.join("libraries.json"))
 }
 
+/// Trim, strip controls, and cap a library display name at 80 characters (errors if empty).
 fn clean_library_name(name: &str) -> anyhow::Result<String> {
     let name = name
         .chars()
@@ -232,6 +235,7 @@ fn clean_library_name(name: &str) -> anyhow::Result<String> {
     Ok(name.chars().take(80).collect())
 }
 
+/// Generate a unique `library-{millis}` id not already present in `registry.profiles`.
 fn unique_library_id(registry: &LibraryRegistryRuntime) -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)

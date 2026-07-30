@@ -11,107 +11,116 @@
 
 use pdf_folio_core::{FolderId, ImportSummary, ImportedEntry};
 
-/// Summary returned after importing PDFs from Raindrop.io.
+/// Aggregate result after a Raindrop import run finishes (UI toast / history).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RaindropImportSummary {
-    /// Underlying PDF import/index summary.
+    /// Local library upsert outcomes from hashing/indexing downloaded PDFs.
     pub import: ImportSummary,
-    /// Number of remote PDF raindrops discovered.
+    /// How many remote PDF raindrops were considered (selected or discovered).
     pub remote_pdf_count: usize,
-    /// Number of remote collections mirrored locally.
+    /// How many Raindrop collections were mirrored into local folders (when preserving structure).
     pub collection_count: usize,
-    /// User-visible account/source name.
+    /// Display name for the Raindrop account / import source row.
     pub account_label: String,
 }
 
-/// Progress reported while importing selected PDFs from Raindrop.io.
+/// Incremental progress event pushed to the UI during Raindrop import.
+///
+/// Phases are non-linear: ZIP download uses [`Self::progress_basis_points`] so the
+/// bar can spend more time in download than in per-file import.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RaindropImportProgress {
-    /// Number of PDF import attempts completed.
+    /// Number of PDF import attempts finished in the current phase.
     pub completed: usize,
-    /// Total number of PDFs selected for import.
+    /// Total PDFs selected for this run (denominator for simple progress).
     pub total: usize,
-    /// Title or fallback label of the most recently processed PDF.
+    /// Title or fallback label of the PDF just processed (status line).
     pub current_title: String,
-    /// Current high-level import phase.
+    /// High-level phase driving copy and basis-point interpretation.
     pub phase: RaindropImportPhase,
-    /// Optional display progress for non-linear import strategies, in 1/100ths of a percent.
+    /// Optional 0–10_000 display progress for ZIP/non-linear strategies (`None` = use completed/total).
     pub progress_basis_points: Option<u16>,
-    /// Whether the most recently processed PDF failed to import.
+    /// `true` when the PDF named by [`Self::current_title`] failed this step.
     pub failed: bool,
-    /// Imported entry details when the most recent PDF imported successfully.
+    /// Local entry produced when the latest PDF imported successfully.
     pub entry: Option<ImportedEntry>,
-    /// Local folders newly created while preparing this import.
+    /// Folders created while preparing collection mirrors for this run (for undo/cleanup).
     pub created_folders: Vec<FolderId>,
 }
 
-/// High-level phase for Raindrop import progress.
+/// High-level phase for Raindrop import progress (drives status copy and basis points).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RaindropImportPhase {
-    /// Preparing metadata, destination folders, and the import plan.
+    /// Fetching user/collections, planning destinations, and creating local folders.
     PreparingImports,
-    /// Downloading PDFs or a Raindrop ZIP export.
+    /// Fetching PDF bytes or the bulk ZIP export from Raindrop.
     DownloadingImportFiles,
-    /// Importing already-downloaded files into the local library.
+    /// Hashing downloaded files into the local library via `pdf_folio_core` import.
     ImportingDownloadedFiles,
 }
 
-/// Destination chosen for a Raindrop import.
+/// Where imported Raindrop PDFs land in the local library folder tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RaindropImportDestination {
-    /// Mirror the source Raindrop folder/collection structure.
+    /// Recreate Raindrop collection nesting as local folders under the library root.
     PreserveRaindropFolders,
-    /// Mirror the source Raindrop folder/collection structure under a local root folder.
+    /// Same as [`Self::PreserveRaindropFolders`], rooted under an existing local folder
+    /// (`None` means library root — equivalent to preserve-at-root).
     PreserveRaindropFoldersUnder(Option<FolderId>),
-    /// Import PDFs without assigning them to a local folder.
+    /// Import every PDF with no folder membership (library root only).
     LibraryRoot,
-    /// Import every selected PDF into one existing local folder.
+    /// Force every selected PDF into one existing local folder.
     LocalFolder(FolderId),
 }
 
-/// A PDF available for import from Raindrop.io.
+/// UI-facing PDF candidate discovered from Raindrop (preview list / selection).
+///
+/// Built from private wire DTOs in [`super::client`]; safe to pass across the
+/// public cloud crate boundary without Raindrop HTTP types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RaindropPdfCandidate {
-    /// Raindrop item id.
+    /// Raindrop item `_id`.
     pub id: i64,
-    /// User-visible title or fallback label.
+    /// User-visible title or `Raindrop {id}` fallback.
     pub title: String,
-    /// Remote filename, when supplied.
+    /// Remote filename when Raindrop supplied file metadata.
     pub file_name: Option<String>,
-    /// Remote file size, when supplied.
+    /// Declared remote size in bytes when known.
     pub file_size: Option<u64>,
-    /// Remote thumbnail/cover URL, when supplied by Raindrop.
+    /// Cover/thumbnail URL for the import picker.
     pub thumbnail_url: Option<String>,
-    /// Remote download link or Raindrop file link.
+    /// Preferred download URL (file link or bookmark link; uploads may still use cache API).
     pub download_link: String,
-    /// Whether this PDF is an uploaded Raindrop file rather than an external PDF link.
+    /// `true` when the PDF is a Raindrop-hosted upload (authenticated cache download).
     pub uploaded_file: bool,
-    /// Raindrop tags.
+    /// Raindrop tags to copy onto the local entry after import.
     pub tags: Vec<String>,
-    /// Raindrop collection id.
+    /// Owning Raindrop collection id when assigned.
     pub collection_id: Option<i64>,
-    /// Raindrop collection title.
+    /// Resolved collection title for folder mirroring labels.
     pub collection_title: Option<String>,
-    /// Raindrop last update timestamp.
+    /// Raindrop `lastUpdate` timestamp string for staleness display/mapping.
     pub remote_updated_at: Option<String>,
 }
 
-/// Data shown before importing PDFs from Raindrop.io.
+/// Snapshot shown in the import dialog before the user confirms a Raindrop import.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RaindropImportPreview {
-    /// Raindrop account id used for import source identity.
+    /// Stable account id string used as the local `ImportSource` identity key.
     pub account_id: String,
-    /// User-visible account/source name.
+    /// User-visible Raindrop account name for dialog chrome.
     pub account_label: String,
-    /// Remote PDFs available to import.
+    /// Remote PDFs available to multi-select for import.
     pub pdfs: Vec<RaindropPdfCandidate>,
 }
 
-/// OAuth app credentials used to start browser sign-in.
+/// Raindrop OAuth application credentials for browser-based sign-in.
+///
+/// Loaded from env/config; never logged. Used only to start the OAuth code flow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RaindropOAuthConfig {
-    /// Raindrop application client id.
+    /// Raindrop developer application client id.
     pub client_id: String,
-    /// Raindrop application client secret.
+    /// Raindrop developer application client secret.
     pub client_secret: String,
 }

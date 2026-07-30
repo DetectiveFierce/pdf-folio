@@ -1,8 +1,13 @@
 //! # Selection and reorder helpers
 //!
-//! Pure functions for multi-select ranges, master-checkbox state, and
-//! drag-reorder list splicing. Domain code in `crate::library::actions`
-//! owns the live `HashSet` of selected ids and calls these helpers.
+//! Pure functions under `components::library::selection` for multi-select
+//! ranges, master-checkbox tri-state derivation, and drag-reorder list
+//! splicing. Domain code in `crate::library::actions` owns the live
+//! `HashSet` of selected entry ids and calls these helpers on pointer and
+//! keyboard events.
+//!
+//! Works with [`super::drag`] for multi-entry drag payloads: selection size
+//! determines how many placeholder slots appear in the visible list.
 
 use std::collections::HashSet;
 

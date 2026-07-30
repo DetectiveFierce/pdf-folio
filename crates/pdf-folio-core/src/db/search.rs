@@ -59,12 +59,18 @@ pub struct SearchHit {
     pub score: f32,
 }
 
+/// Cached Tantivy field handles for the fixed PDF-Folio search schema.
 #[derive(Debug, Clone, Copy)]
 struct SearchFields {
+    /// Exact-match entry id (`STRING`).
     id: Field,
+    /// Tokenized title.
     title: Field,
+    /// Tokenized author.
     author: Field,
+    /// Tokenized page body.
     body: Field,
+    /// Stored zero-based page index.
     page: Field,
 }
 
@@ -301,6 +307,7 @@ impl SearchFields {
     }
 }
 
+/// True when `path` looks like an existing Tantivy index (meta file or lock present).
 fn has_tantivy_meta(path: &Path) -> bool {
     path.join("meta.json").exists()
         || path.join(".tantivy-meta.lock").exists()

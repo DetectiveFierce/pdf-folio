@@ -27,8 +27,11 @@ pub fn side_border<'a, Message: 'a>(
     })
 }
 
+/// Private widget that draws a [`VisualBorder`] over an arbitrary child element.
 struct SideBorder<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
+    /// Wrapped child content (layout size is unchanged by the border overlay).
     content: Element<'a, Message, Theme, Renderer>,
+    /// Per-side stroke widths and colors painted after the child.
     border: VisualBorder,
 }
 
@@ -164,6 +167,7 @@ where
     }
 }
 
+/// Fills each visible side of `border` inside `bounds` via the iced renderer.
 fn draw_side_border<Renderer>(renderer: &mut Renderer, bounds: Rectangle, border: VisualBorder)
 where
     Renderer: iced::advanced::Renderer,
@@ -173,6 +177,7 @@ where
     }
 }
 
+/// Maps each [`BorderSide`] to its strip rectangle (top/right/bottom/left order).
 fn side_border_rects(bounds: Rectangle, border: VisualBorder) -> [(BorderSide, Rectangle); 4] {
     let top_width = border.top.width.unwrap_or(0.0).max(0.0);
     let right_width = border.right.width.unwrap_or(0.0).max(0.0);
@@ -213,6 +218,7 @@ fn side_border_rects(bounds: Rectangle, border: VisualBorder) -> [(BorderSide, R
     ]
 }
 
+/// Fills `bounds` with `side.color` when width and alpha are positive.
 fn draw_side<Renderer>(renderer: &mut Renderer, side: BorderSide, bounds: Rectangle)
 where
     Renderer: iced::advanced::Renderer,

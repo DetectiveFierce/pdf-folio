@@ -506,6 +506,7 @@ impl PDFolioApp {
     }
 }
 
+/// Accumulate smart-count totals for one `(trash, folder_id)` bucket in the sidebar cache.
 fn add_folder_smart_count(
     cache: &mut HashMap<(bool, Option<FolderId>), FolderSmartCounts>,
     trash: bool,
@@ -740,6 +741,7 @@ impl PDFolioApp {
     }
 }
 
+/// Squared distance from point `(px, py)` to the closest point on axis-aligned rect `(x,y,w,h)`.
 fn rect_distance_squared(px: f32, py: f32, x: f32, y: f32, width: f32, height: f32) -> f32 {
     let closest_x = px.clamp(x, x + width.max(0.0));
     let closest_y = py.clamp(y, y + height.max(0.0));

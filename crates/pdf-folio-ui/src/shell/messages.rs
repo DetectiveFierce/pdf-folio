@@ -87,46 +87,87 @@ pub enum ContextMenuTarget {
 /// Actions launched from right-click contextual menus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextMenuAction {
+    /// Open the clicked library entry in the viewer.
     Open,
+    /// Replace the multi-selection with only the clicked entry.
     SelectOnly,
+    /// Add the clicked entry to the existing multi-selection.
     AddToSelection,
+    /// Clear the current multi-selection.
     ClearSelection,
+    /// Start tagging the clicked entry or selection.
     AddTag,
+    /// Open the move-to-folder picker for the selection/entry.
     MoveTo,
+    /// Open the export dialog for the selection/entry.
     Export,
+    /// Reveal the PDF source file in the platform file manager.
     RevealInFileManager,
+    /// Open the directory that contains the PDF source file.
     OpenContainingFolder,
+    /// Pick a replacement path for a missing PDF source file.
     RelinkMissingFile,
+    /// Persist details-panel metadata overrides for the entry.
     SaveDetails,
+    /// Clear details overrides and restore extracted metadata.
     ResetDetails,
+    /// Re-extract metadata from the source PDF file(s).
     RefreshMetadata,
+    /// Clear display metadata overrides for the selection.
     ResetMetadata,
+    /// Rebuild cover thumbnails for the selection.
     RebuildThumbnails,
+    /// Rebuild the full-text search index for the selection.
     Reindex,
+    /// Move the selection/entry to the trash can.
     DeleteFromLibrary,
+    /// Select / scope the browser to the clicked folder.
     SelectFolder,
+    /// Open the create-folder dialog under the current scope.
     NewFolder,
+    /// Start renaming the clicked folder.
     RenameFolder,
+    /// Start renaming the clicked tag.
     RenameTag,
+    /// Delete the clicked tag from every PDF that uses it.
     DeleteTag,
+    /// Open the move picker to re-parent the clicked folder.
     MoveFolderTo,
+    /// Move the clicked folder to the library root.
     MoveFolderToRoot,
+    /// Promote the clicked folder one level toward the root.
     MoveFolderUp,
+    /// Reorder the clicked folder earlier among its siblings.
     MoveFolderEarlier,
+    /// Reorder the clicked folder later among its siblings.
     MoveFolderLater,
+    /// Move the clicked folder to the trash can.
     DeleteFolder,
+    /// Open the native folder picker for bulk import.
     ImportFolder,
+    /// Reload library entries and folders from storage.
     RefreshLibrary,
+    /// Toggle between grid and list library layout.
     ToggleLayout,
+    /// Sort the library by manual order.
     SortManual,
+    /// Sort the library by title A→Z.
     SortTitleAsc,
+    /// Copy the current PDF text selection to the OS clipboard.
     CopyViewerSelection,
+    /// Open the find-in-document bar.
     FindInDocument,
+    /// Open the jump-to-page overlay.
     JumpToPage,
+    /// Increase viewer zoom.
     ZoomIn,
+    /// Decrease viewer zoom.
     ZoomOut,
+    /// Reset viewer zoom to the default width.
     ResetZoom,
+    /// Show or hide the viewer outline / TOC sidebar.
     ToggleToc,
+    /// Leave the viewer and return to the library.
     BackToLibrary,
 }
 
@@ -161,7 +202,7 @@ pub enum LibrarySidebarTab {
 }
 
 impl LibrarySidebarTab {
-    /// User-facing tab label.
+    /// Tab title shown on the left library sidebar switcher.
     pub fn label(self) -> &'static str {
         match self {
             Self::Files => "Files",
@@ -180,7 +221,7 @@ pub enum ViewerSidebarTab {
 }
 
 impl ViewerSidebarTab {
-    /// User-facing tab label.
+    /// Tab title shown on the open-PDF viewer sidebar switcher.
     pub fn label(self) -> &'static str {
         match self {
             Self::Contents => "Contents",

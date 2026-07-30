@@ -1,6 +1,17 @@
 //! # Viewer sidebar shell
 //!
-//! Host container for outline (and related) tabs while viewing a document.
+//! Host container under `components::viewer::sidebar` for the open document’s
+//! secondary pane: Contents (outline) and Thumbnails tabs, with a hide
+//! control. Bodies scroll independently of the main canvas.
+//!
+//! ## Ownership
+//!
+//! Reads `app.viewer.viewer_sidebar_tab`, outline expansion, and rendered
+//! thumbnail tiles. Emits tab selection, outline toggles, page jumps, and
+//! `ToggleSidebar`. Outline rows come from [`super::outline`]; thumbnails
+//! reuse placeholder previews from `components::library::cards`.
+//!
+//! Related: floating “show contents” control in [`super::toolbar`].
 
 use crate::components::viewer::outline::outline_list;
 use crate::*;
@@ -9,7 +20,7 @@ use iced::widget::{button, column, image, row, scrollable};
 use iced::ContentFit;
 use pdf_folio_core::TileKey;
 
-/// Compose the viewer sidebar for the open document.
+/// Compose the full viewer sidebar (tab strip + Contents or Thumbnails body).
 pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let heading = row![
@@ -44,6 +55,7 @@ pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     .into()
 }
 
+/// Contents / Thumbnails tab button with active styling when selected.
 fn viewer_sidebar_tab_button<'a>(
     app: &PDFolioApp,
     tab: ViewerSidebarTab,
@@ -79,6 +91,7 @@ fn viewer_sidebar_tab_button<'a>(
     .on_press(Message::ViewerSidebarTabSelected(tab))
 }
 
+/// Scrollable outline list, or an empty-state message when the PDF has no TOC.
 fn view_outline_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     if app.viewer.outline.is_empty() {
         container(
@@ -104,6 +117,7 @@ fn view_outline_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Messa
     }
 }
 
+/// Scrollable column of page thumbnail buttons for the Thumbnails tab.
 fn view_thumbnails_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
     let Some(doc) = app.viewer.doc.as_ref() else {
         return container("").height(Length::Fill).into();
@@ -126,6 +140,7 @@ fn view_thumbnails_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Me
         .into()
 }
 
+/// One page thumbnail (rendered tile or placeholder) that jumps to `page` on press.
 fn thumbnail_button(app: &PDFolioApp, page: u16, tokens: ThemeTokens) -> Element<'_, Message> {
     let width = f32::from(app.layout().viewer_thumbnail_width_px);
     let height = width * app.viewer.page_aspect_ratios[usize::from(page)];
@@ -189,6 +204,7 @@ fn thumbnail_button(app: &PDFolioApp, page: u16, tokens: ThemeTokens) -> Element
         .into()
 }
 
+/// Vertical scrollbar configuration for viewer sidebar panes.
 fn sidebar_scroll_direction(tokens: ThemeTokens) -> Direction {
     Direction::Vertical(
         Scrollbar::new()

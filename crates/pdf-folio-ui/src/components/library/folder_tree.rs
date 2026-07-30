@@ -1,13 +1,23 @@
 //! # Folder tree presentation
 //!
-//! Renders indented folder rows with fold chevrons, drop targets, and drag
-//! styling for the library navigation sidebar.
+//! Renders indented folder rows under `components::library::folder_tree` for
+//! the library navigation sidebar: fold chevrons, entry counts, drop-target
+//! styling, and drag highlights.
+//!
+//! ## Ownership
+//!
+//! Presentation only—expansion sets and drop targets come from
+//! `PDFolioApp` / library domain state. Hit-testing and dwell logic live in
+//! [`super::drag`]; shared chevron and color helpers come from
+//! [`crate::components::shared::sidebar`].
 
 use crate::library::view::*;
 use crate::*;
 use iced::widget::{button, column, row, Svg};
 
+/// Right chevron for a collapsed folder-tree fold button.
 const FILE_TREE_CHEVRON_RIGHT_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M6.25 4.25 10 8l-3.75 3.75"/></svg>"##;
+/// Down chevron for an expanded folder-tree fold button.
 const FILE_TREE_CHEVRON_DOWN_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4.25 6.25 8 10l3.75-3.75"/></svg>"##;
 
 /// Expand/collapse chevron for a folder tree node.

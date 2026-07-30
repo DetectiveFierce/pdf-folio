@@ -38,8 +38,11 @@ use url::Url;
 
 use super::RaindropOAuthConfig;
 
+/// Raindrop OAuth authorize endpoint.
 const OAUTH_AUTHORIZE_URL: &str = "https://raindrop.io/oauth/authorize";
+/// Raindrop OAuth token exchange endpoint.
 const OAUTH_TOKEN_URL: &str = "https://raindrop.io/oauth/access_token";
+/// Loopback TCP port for the OAuth redirect listener.
 const OAUTH_REDIRECT_PORT: u16 = 53147;
 
 /// OAuth redirect URI that must be configured in the user's Raindrop app.
@@ -111,6 +114,11 @@ pub(crate) fn cached_access_token() -> Result<String> {
     Ok(cache.access_token)
 }
 
+/// Runs browser OAuth, exchanges the code for an access token, and caches it on disk.
+///
+/// # Errors
+///
+/// Returns an error when the loopback listener, browser, token exchange, or cache write fails.
 async fn oauth_access_token(client_id: &str, client_secret: &str) -> Result<String> {
     let redirect_uri = String::from(OAUTH_CALLBACK_URL);
     let state = format!(
@@ -155,6 +163,11 @@ async fn oauth_access_token(client_id: &str, client_secret: &str) -> Result<Stri
     Ok(token.access_token)
 }
 
+/// Writes the bearer token to `…/raindrop/token.json` under the app data dir.
+///
+/// # Errors
+///
+/// Returns an error when the cache directory or file cannot be written.
 fn save_cached_access_token(access_token: &str) -> Result<()> {
     let path = token_cache_path()?;
     if let Some(parent) = path.parent() {
@@ -169,12 +182,22 @@ fn save_cached_access_token(access_token: &str) -> Result<()> {
     Ok(())
 }
 
+/// Path to the Raindrop token cache file under the PDF-Folio data directory.
+///
+/// # Errors
+///
+/// Returns an error when the platform data directory cannot be resolved.
 fn token_cache_path() -> Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "pdf-folio", "PDF-Folio")
         .context("Could not find a data directory for PDF-Folio.")?;
     Ok(project_dirs.data_dir().join("raindrop").join("token.json"))
 }
 
+/// Accepts one loopback HTTP request and returns the OAuth `code` after validating `state`.
+///
+/// # Errors
+///
+/// Returns an error when the request is malformed, `state` mismatches, or Raindrop returned `error`.
 async fn wait_for_oauth_code(listener: TcpListener, expected_state: &str) -> Result<String> {
     let (mut stream, _) = listener.accept().await?;
     let mut buffer = vec![0_u8; 8192];
@@ -211,21 +234,31 @@ async fn wait_for_oauth_code(listener: TcpListener, expected_state: &str) -> Res
         .ok_or_else(|| anyhow!("Raindrop sign-in did not return an authorization code."))
 }
 
+/// JSON body for Raindrop’s token endpoint after browser authorization.
 #[derive(Debug, Serialize)]
 struct TokenExchangeRequest {
+    /// Always `authorization_code` for this flow.
     grant_type: &'static str,
+    /// Authorization code from the loopback callback.
     code: String,
+    /// Raindrop OAuth app client id.
     client_id: String,
+    /// Raindrop OAuth app client secret.
     client_secret: String,
+    /// Redirect URI that matches the authorize step.
     redirect_uri: String,
 }
 
+/// Subset of Raindrop’s token response used after code exchange.
 #[derive(Debug, Deserialize)]
 struct TokenExchangeResponse {
+    /// Bearer token for subsequent REST calls.
     access_token: String,
 }
 
+/// On-disk cache shape for a Raindrop access token.
 #[derive(Debug, Serialize, Deserialize)]
 struct TokenCache {
+    /// Cached bearer token string.
     access_token: String,
 }

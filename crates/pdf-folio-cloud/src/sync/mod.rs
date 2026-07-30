@@ -40,14 +40,23 @@
 //! | [`status`] | Report/checkpoint/plan types, `REGISTRY_LIBRARY_ID` |
 //! | [`cli`] | `pdf-folio sync` subcommands |
 
+/// Desktop Google OAuth (PKCE) against the control plane.
 pub mod auth;
+/// R2 client and local content-addressed [`BlobCache`].
 pub mod blobs;
+/// `pdf-folio sync` subcommands (auth, plan, push/pull, blobs, sync-once).
 pub mod cli;
+/// High-level [`SyncClient`] constructor holding session + Turso + R2 clients.
 pub mod client;
+/// CRDT op preparation, LWW materialization, remote exchange, and hydration.
 pub mod crdt;
+/// Turso/Hrana SQL-over-HTTP client and value types.
 pub mod remote;
+/// Preflight + conditional full automatic sync pass.
 pub mod run;
+/// Durable session JWT cache under the XDG data dir.
 pub mod session;
+/// Report, plan, and registry types returned by sync passes.
 pub mod status;
 
 pub use auth::{sign_in_with_google, GoogleAuthConfig};

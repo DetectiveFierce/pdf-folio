@@ -11,35 +11,38 @@ use crate::tokens::ThemeTokens;
 
 use super::mix_color;
 
-/// Canvas shadow primitive.
+/// Page drop-shadow offsets/color drawn under rendered PDF pages on the canvas.
 #[derive(Debug, Clone, Copy)]
 pub struct Shadow {
-    /// Horizontal shadow offset.
+    /// Horizontal offset in logical pixels (from `primitives.page_shadow_offset_x`).
     pub offset_x: f32,
-    /// Vertical shadow offset.
+    /// Vertical offset in logical pixels (from `primitives.page_shadow_offset_y`).
     pub offset_y: f32,
-    /// Shadow color.
+    /// Shadow tint (theme `shadow` token).
     pub color: Color,
 }
 
-/// Canvas drawing colors used by the viewer.
+/// Non-widget paint bundle for the PDF page canvas (not iced stylesheets).
+///
+/// Built by [`viewer_primitives`] from palette + `PrimitiveTokens` so the
+/// canvas renderer stays theme-aware without depending on widget classes.
 #[derive(Debug, Clone, Copy)]
 pub struct ViewerPrimitiveStyle {
-    /// Canvas background color.
+    /// Area behind pages (`tokens.canvas`).
     pub canvas: Color,
-    /// Placeholder fill color.
+    /// Fill for not-yet-rendered page placeholders (`tokens.placeholder`).
     pub placeholder: Color,
-    /// Page shadow.
+    /// Drop shadow under each page raster.
     pub page_shadow: Shadow,
-    /// Unselected find result fill.
+    /// Unselected find-in-document highlight (`primitives.viewer_find_fill`).
     pub find_fill: Color,
-    /// Selected find result fill.
+    /// Active find match highlight (`primitives.viewer_find_selected_fill`).
     pub find_selected_fill: Color,
-    /// Text selection fill.
+    /// Text-selection overlay (accent mixed with theme alpha/mix primitives).
     pub text_selection_fill: Color,
 }
 
-/// Returns viewer canvas drawing primitives for the active theme.
+/// Collects canvas colors/shadows for the active theme snapshot.
 pub fn viewer_primitives(tokens: ThemeTokens) -> ViewerPrimitiveStyle {
     ViewerPrimitiveStyle {
         canvas: tokens.canvas,

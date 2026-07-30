@@ -87,6 +87,7 @@ pub(super) fn parse_color_literal(source: &str) -> Result<Color, String> {
     Ok(Color::from_rgba8(r, g, b, a))
 }
 
+/// Resolves a `$token` name against the semantic palette fields of `tokens`.
 fn theme_color(tokens: &ThemeTokens, token: &str) -> Option<Color> {
     Some(match token {
         "background" => tokens.background,
@@ -105,7 +106,9 @@ fn theme_color(tokens: &ThemeTokens, token: &str) -> Option<Color> {
     })
 }
 
-/// Returns the string argument at `index` on `node`, or a labeled error.
+/// Positional string argument on a KDL node (`name` is the error context label).
+///
+/// Used for theme ids, class names, label keys, and other free-form tokens.
 pub(super) fn node_string_arg<'a>(
     name: &str,
     node: &'a KdlNode,
@@ -121,7 +124,7 @@ pub(super) fn node_string_arg<'a>(
         })
 }
 
-/// Returns the numeric (`f32`) argument at `index` on `node`, or a labeled error.
+/// Positional numeric argument coerced to finite non-negative `f32` (layout metrics, sizes).
 pub(super) fn node_f32_arg(name: &str, node: &KdlNode, index: usize) -> Result<f32, String> {
     node.get(index)
         .map(|value| value_as_f32(name, value))
@@ -134,7 +137,7 @@ pub(super) fn node_f32_arg(name: &str, node: &KdlNode, index: usize) -> Result<f
         })
 }
 
-/// Returns the non-negative integer argument at `index` on `node`.
+/// Positional non-negative integer argument (counts, fill portions, discrete sizes).
 pub(super) fn node_usize_arg(name: &str, node: &KdlNode, index: usize) -> Result<usize, String> {
     let value = node.get(index).ok_or_else(|| {
         format!(
@@ -148,7 +151,9 @@ pub(super) fn node_usize_arg(name: &str, node: &KdlNode, index: usize) -> Result
     usize::try_from(*value).map_err(|_| format!("{name}: expected non-negative integer"))
 }
 
-/// Coerces a KDL integer or float value to `f32`.
+/// Coerces a KDL integer or float property/value to finite non-negative `f32`.
+///
+/// Rejects NaN/∞ and negatives so layout metrics never parse as invalid lengths.
 pub(super) fn value_as_f32(name: &str, value: &KdlValue) -> Result<f32, String> {
     let number = match value {
         KdlValue::Integer(value) => *value as f32,
@@ -161,7 +166,7 @@ pub(super) fn value_as_f32(name: &str, value: &KdlValue) -> Result<f32, String> 
     Ok(number)
 }
 
-/// Coerces a KDL integer value to `u16`.
+/// Coerces a KDL integer to `u16` (e.g. thumbnail widths, fill portions in range).
 pub(super) fn value_as_u16(name: &str, value: &KdlValue) -> Result<u16, String> {
     let KdlValue::Integer(value) = value else {
         return Err(format!("{name}: expected integer value"));
@@ -169,7 +174,7 @@ pub(super) fn value_as_u16(name: &str, value: &KdlValue) -> Result<u16, String> 
     u16::try_from(*value).map_err(|_| format!("{name}: expected integer from 0 to 65535"))
 }
 
-/// Coerces a KDL integer value to `usize`.
+/// Coerces a KDL integer to `usize` (overscan rows, column counts, map keys).
 pub(super) fn value_as_usize(name: &str, value: &KdlValue) -> Result<usize, String> {
     let KdlValue::Integer(value) = value else {
         return Err(format!("{name}: expected integer value"));
@@ -177,7 +182,7 @@ pub(super) fn value_as_usize(name: &str, value: &KdlValue) -> Result<usize, Stri
     usize::try_from(*value).map_err(|_| format!("{name}: expected non-negative integer"))
 }
 
-/// Coerces a KDL integer value to `u32`.
+/// Coerces a KDL integer to `u32` (font sizes and other small positive counts).
 pub(super) fn value_as_u32(name: &str, value: &KdlValue) -> Result<u32, String> {
     let KdlValue::Integer(value) = value else {
         return Err(format!("{name}: expected integer value"));
@@ -185,7 +190,8 @@ pub(super) fn value_as_u32(name: &str, value: &KdlValue) -> Result<u32, String> 
     u32::try_from(*value).map_err(|_| format!("{name}: expected non-negative integer"))
 }
 
-/// Parses a font weight keyword (`regular`, `medium`, `semibold`, `bold`).
+/// Maps KDL font-weight keywords onto iced weights (`regular`/`normal`, `medium`,
+/// `semibold`/`semi_bold`, `bold`).
 pub(super) fn parse_font_weight(name: &str, value: &str) -> Result<iced::font::Weight, String> {
     match value {
         "regular" | "normal" => Ok(iced::font::Weight::Normal),

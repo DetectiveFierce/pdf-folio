@@ -39,7 +39,7 @@ impl ViewerScrollMode {
     /// All user-facing scroll modes in menu order.
     pub const ALL: [Self; 4] = [Self::Page, Self::Vertical, Self::Horizontal, Self::Wrapped];
 
-    /// User-facing label.
+    /// Menu / toolbar caption for this scroll mode (e.g. `"Vertical Scrolling"`).
     pub fn label(self) -> &'static str {
         match self {
             Self::Page => "Page Scrolling",
@@ -49,7 +49,7 @@ impl ViewerScrollMode {
         }
     }
 
-    /// Short help text for menus.
+    /// Secondary menu subtitle describing the paging behavior of this mode.
     pub fn detail(self) -> &'static str {
         match self {
             Self::Page => "one page at a time",
@@ -75,7 +75,7 @@ impl ViewerSpreadMode {
     /// All user-facing spread modes in menu order.
     pub const ALL: [Self; 3] = [Self::None, Self::Odd, Self::Even];
 
-    /// User-facing label.
+    /// Menu / toolbar caption for this spread mode (e.g. `"Odd Spreads"`).
     pub fn label(self) -> &'static str {
         match self {
             Self::None => "No Spreads",
@@ -147,7 +147,10 @@ impl ViewerTextSelection {
         }
     }
 
-    /// Returns the ordered selection endpoints.
+    /// Returns the ordered selection endpoints `(start, end)` by document order.
+    ///
+    /// Swaps anchor/focus when the user dragged backwards so callers can iterate
+    /// pages and character ranges forward.
     pub fn ordered(self) -> (ViewerTextAnchor, ViewerTextAnchor) {
         if self.anchor <= self.focus {
             (self.anchor, self.focus)
@@ -156,13 +159,16 @@ impl ViewerTextSelection {
         }
     }
 
-    /// Returns whether a page is inside the selection.
+    /// Whether zero-based `page` lies between the ordered selection endpoints (inclusive).
     pub fn contains_page(self, page: u16) -> bool {
         let (start, end) = self.ordered();
         (start.page..=end.page).contains(&page)
     }
 
-    /// Returns the selected character range for a single page.
+    /// Selected character range for a single page, clamped to `page_char_count`.
+    ///
+    /// Full pages between the endpoints use `0..=last`. Returns `None` when the
+    /// page has no characters or is outside the selection.
     pub fn char_range_for_page(
         self,
         page: u16,
@@ -241,7 +247,11 @@ impl Default for ViewerFindState {
 }
 
 impl ViewerFindState {
-    /// Recomputes matches from loaded text layers.
+    /// Recomputes `matches` from loaded text layers and the current query/options.
+    ///
+    /// Tries to keep the previously selected match (or the next one at/after it);
+    /// falls back to index `0` when matches exist, or `None` when the query is
+    /// empty / no layers match.
     pub fn refresh_matches<'a>(
         &mut self,
         layers: impl Iterator<Item = (&'a u16, &'a PageTextLayer)>,
@@ -261,18 +271,18 @@ impl ViewerFindState {
         };
     }
 
-    /// Returns the currently selected match.
+    /// Currently selected match from `matches`, if `selected` is in range.
     pub fn selected_match(&self) -> Option<ViewerFindMatch> {
         self.selected
             .and_then(|index| self.matches.get(index).copied())
     }
 
-    /// Selects the next match, wrapping at the end.
+    /// Advances `selected` to the next match, wrapping from last to first.
     pub fn select_next(&mut self) {
         self.select_relative(1);
     }
 
-    /// Selects the previous match, wrapping at the beginning.
+    /// Moves `selected` to the previous match, wrapping from first to last.
     pub fn select_previous(&mut self) {
         self.select_relative(-1);
     }
@@ -352,12 +362,14 @@ pub fn viewer_find_matches<'a>(
     matches
 }
 
+/// Normalize `text` for find-in-document matching (optional case fold and diacritic fold).
 fn normalize_find_text(text: &str, match_case: bool, match_diacritics: bool) -> String {
     text.chars()
         .flat_map(|character| normalize_find_char(character, match_case, match_diacritics))
         .collect()
 }
 
+/// Normalize one character for find matching; may expand to multiple chars when lowercasing.
 fn normalize_find_char(character: char, match_case: bool, match_diacritics: bool) -> Vec<char> {
     let mut chars = if match_case {
         vec![character]
@@ -374,6 +386,7 @@ fn normalize_find_char(character: char, match_case: bool, match_diacritics: bool
     chars
 }
 
+/// Map common Latin letters with diacritics to their base ASCII letter (identity otherwise).
 fn fold_latin_diacritic(character: char) -> char {
     match character {
         'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'Ā' | 'Ă' | 'Ą' | 'à' | 'á' | 'â' | 'ã' | 'ä' | 'å'
@@ -1079,7 +1092,11 @@ impl PDFolioApp {
         ])
     }
 
-    /// Sets viewer find query.
+    /// Updates the find-in-document query and refreshes match highlights.
+    ///
+    /// Stores `query` on `viewer_find`, recomputes matches from loaded text
+    /// layers, requests any remaining page text layers, and scrolls to the
+    /// selected match when one exists. Does not open/close the find bar.
     pub(crate) fn set_viewer_find_query(&mut self, query: String) -> Task<Message> {
         self.viewer.viewer_find.query = query;
         self.refresh_viewer_find_matches();

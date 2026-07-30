@@ -1,13 +1,29 @@
 //! # Document outline
 //!
-//! Hierarchical table-of-contents list that jumps to pages on activation.
+//! Hierarchical table-of-contents list under `components::viewer::outline`.
+//! Renders nested outline nodes with expand/collapse paths and page jump
+//! actions for the viewer sidebar Contents tab.
+//!
+//! ## Ownership
+//!
+//! Pure presentation given `OutlineNode` slices and an expanded-path set from
+//! `app.viewer`. Emits `ToggleOutlineNode` or `JumpToPage`. Hosted by
+//! [`super::sidebar`]; document outline data is loaded with the PDF in the
+//! viewer domain.
+//!
+//! Related: thumbnail page jumps in the same sidebar; page chrome in
+//! [`super::page_controls`].
 
 use crate::*;
 use iced::widget::{column, row};
 use pdf_folio_core::OutlineNode;
 use std::collections::HashSet;
 
-/// Render outline entries as an interactive nested list.
+/// Recursive interactive outline list for the Contents sidebar tab.
+///
+/// `depth` and `parent_path` drive indentation and stable node keys in
+/// `expanded_paths`. Nodes with children toggle expansion; leaf nodes with a
+/// page target jump there.
 pub(crate) fn outline_list<'a>(
     nodes: &'a [OutlineNode],
     depth: u16,
@@ -78,6 +94,7 @@ pub(crate) fn outline_list<'a>(
     list.into()
 }
 
+/// Pressable TOC entry styled with `toc_entry`, emitting `message` on activate.
 fn outline_button<'a>(
     content: impl Into<Element<'a, Message>>,
     message: Message,

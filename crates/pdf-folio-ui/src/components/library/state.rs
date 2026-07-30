@@ -1,21 +1,35 @@
 //! # Library presentation enums
 //!
-//! Shared enums for metadata density and reading filters used by both pure
-//! helpers and domain state. Kept free of iced dependencies where possible.
+//! Shared enums under `components::library::state` for metadata density and
+//! reading-progress filters. Used by pure helpers ([`super::metadata`],
+//! [`super::filters`]), toolbar pickers ([`super::view`]), and domain library
+//! state that persists user preferences.
+//!
+//! Kept free of iced and `Db` dependencies so the same types can be
+//! re-exported into the library domain without pulling presentation crates.
+//! Density maps to concrete field lists for settings serialization; reading
+//! filters pair with progress classification in [`super::filters`].
 
-/// Density of metadata shown in library cards and rows.
+/// How much secondary metadata is shown under library card/row titles.
+///
+/// Controls the strings built by [`super::metadata::library_card_metadata_label`]
+/// and [`super::metadata::library_row_metadata_label`], and the toolbar density
+/// picker in [`super::view`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryMetadataDensity {
-    /// Show title and author with minimal supporting metadata.
+    /// Title plus author only (no page count or size line on cards).
     Minimal,
-    /// Show common reading metadata.
+    /// Author and page count (standard library density).
     Standard,
-    /// Show reading metadata plus file details.
+    /// Author, page count, and file size for denser browsing.
     Detailed,
 }
 
 impl LibraryMetadataDensity {
-    /// From visible fields.
+    /// Map a persisted settings field list to the matching density preset.
+    ///
+    /// Presence of `"file_size"` → [`Self::Detailed`]; `"page_count"` without
+    /// size → [`Self::Standard`]; otherwise [`Self::Minimal`].
     pub fn from_visible_fields(fields: &[String]) -> Self {
         let has_file_size = fields.iter().any(|field| field == "file_size");
         let has_page_count = fields.iter().any(|field| field == "page_count");
@@ -28,7 +42,10 @@ impl LibraryMetadataDensity {
         }
     }
 
-    /// Visible fields.
+    /// Field keys this density shows, for settings write-back and UI toggles.
+    ///
+    /// Always includes `"author"`; standard adds `"page_count"`, detailed also
+    /// adds `"file_size"`.
     pub fn visible_fields(self) -> Vec<String> {
         match self {
             Self::Minimal => vec![String::from("author")],
@@ -41,7 +58,7 @@ impl LibraryMetadataDensity {
         }
     }
 
-    /// Returns the user-facing label.
+    /// Short label for the density pick list (`"Minimal"`, `"Standard"`, …).
     pub fn label(self) -> &'static str {
         match self {
             Self::Minimal => "Minimal",
@@ -57,7 +74,10 @@ impl std::fmt::Display for LibraryMetadataDensity {
     }
 }
 
-/// Reading-progress filter applied to the library.
+/// Reading-progress bucket used to filter the library entry list.
+///
+/// Classification of a concrete entry is performed by
+/// [`super::filters::library_entry_reading_state`] using saved `last_page` / page count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryReadingFilter {
     /// Entries with no saved progress.
@@ -69,7 +89,7 @@ pub enum LibraryReadingFilter {
 }
 
 impl LibraryReadingFilter {
-    /// Returns the user-facing label.
+    /// Short label for filter chips and menu items.
     pub fn label(self) -> &'static str {
         match self {
             Self::Unread => "Unread",

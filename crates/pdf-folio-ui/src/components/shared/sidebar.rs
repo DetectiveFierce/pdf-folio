@@ -1,12 +1,24 @@
 //! # Shared sidebar chrome
 //!
-//! Colors, scroll direction, chevrons, and action buttons reused by library
-//! and viewer sidebars.
+//! Cross-mode sidebar helpers under `components::shared::sidebar`: scrollbar
+//! direction, detail-row text colors, disclosure chevron buttons, and compact
+//! action buttons. Library and viewer sidebars import these so chrome stays
+//! visually consistent without duplicating style resolution.
+//!
+//! ## Ownership
+//!
+//! Presentation utilities only—no knowledge of folder trees or outline data.
+//! Library folder rows use these colors/buttons from
+//! `components::library::folder_tree` and domain inspector/sidebar views;
+//! viewer outline/thumbnail chrome has its own shell but reuses chevrons.
+//!
+//! Related: SVG sources in [`super::icons`]; viewer-specific body content in
+//! `components::viewer::sidebar`.
 
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 
-/// Vertical scrollable direction style for sidebar panes.
+/// Vertical scrollbar configuration shared by library and viewer sidebar panes.
 pub(crate) fn sidebar_scroll_direction(tokens: ThemeTokens) -> Direction {
     Direction::Vertical(
         Scrollbar::new()

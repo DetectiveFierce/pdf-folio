@@ -18,6 +18,11 @@
 use anyhow::{Context, Result};
 use pdf_folio_cloud::sync::remote::{TursoRemote, TursoToken};
 
+/// Process entry: apply embedded `turso_schema.sql` with direct Turso env credentials.
+///
+/// # Errors
+///
+/// Returns an error when env vars are missing or the remote schema batch fails.
 #[tokio::main]
 async fn main() -> Result<()> {
     let database_url = std::env::var("PDF_FOLIO_TURSO_DATABASE_URL")

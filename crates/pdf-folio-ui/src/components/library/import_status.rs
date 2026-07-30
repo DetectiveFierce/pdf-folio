@@ -1,7 +1,12 @@
 //! # Import and bulk-operation progress UI
 //!
-//! Banners and dialogs that show long-running library work (bulk ops,
-//! Raindrop import progress) without owning the tasks themselves.
+//! Banners and modal progress UI under `components::library::import_status`
+//! for long-running library work: bulk tag/move/delete operations and
+//! streaming Raindrop imports. Shows indeterminate progress and phase labels
+//! without owning the tasks themselves.
+//!
+//! Tasks and progress mutation live in `crate::library::{tasks, update}`;
+//! richer import/export configuration dialogs live in [`super::dialogs`].
 
 use crate::library::view::format_count;
 use crate::*;

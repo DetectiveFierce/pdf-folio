@@ -1,7 +1,19 @@
 //! # Viewer canvas
 //!
-//! Custom iced widgets that paint PDF pages, selection overlays, and handle
-//! wheel/scroll interaction for the continuous viewer.
+//! Custom iced `canvas::Program` widgets under `components::viewer::canvas`
+//! that paint continuous PDF pages, text-selection highlights, and animated
+//! spinners. Handles wheel zoom/scroll, text selection drag, empty-click
+//! clear, and right-click context menu open on the page surface.
+//!
+//! ## Ownership
+//!
+//! Presentation and hit-testing only: reads page layout, rendered tiles, and
+//! selection state from `app.viewer`, emits viewer `Message`s. Page raster
+//! cache and document loading live in the viewer domain/shell. Spinner is
+//! reused by `components::shared::{loading, sync_status}`.
+//!
+//! Related: [`super::toolbar`] / [`super::find_bar`] for chrome around the
+//! canvas; `crate::viewer::view` hosts the continuous layout.
 
 use crate::*;
 use iced::widget::canvas;
@@ -9,31 +21,53 @@ use iced::{mouse, Color, Point, Radians, Rectangle, Renderer, Size, Theme};
 use pdf_folio_core::{PageTextChar, PageTextLayer, TileKey};
 use std::time::Instant;
 
+/// Pointer movement (logical px) after an empty press before the click is
+/// treated as a drag rather than a selection-clear click.
 const EMPTY_CANVAS_CLICK_DRAG_THRESHOLD: f32 = 4.0;
 
+/// Continuous PDF page surface painted via iced canvas.
+///
+/// Implements pointer wheel (Ctrl-zoom / horizontal scroll modes), text
+/// selection start/update, and context-menu open. Draw path composites
+/// rendered page tiles from the viewer cache.
 #[derive(Debug)]
-/// Viewer Canvas.
 pub(crate) struct ViewerCanvas<'a> {
+    /// Shared app state providing document layout, tiles, and modifiers.
     pub(crate) app: &'a PDFolioApp,
 }
 
+/// Per-widget interaction state for [`ViewerCanvas`].
+///
+/// Tracks a provisional empty-canvas press so a short click can clear text
+/// selection while a drag past the threshold is ignored as a clear.
 #[derive(Debug, Default)]
-/// Viewer Canvas State.
 pub(crate) struct ViewerCanvasState {
+    /// Cursor position of a left press that did not hit a character; cleared
+    /// once movement exceeds [`EMPTY_CANVAS_CLICK_DRAG_THRESHOLD`] or on release.
     pending_empty_click: Option<Point>,
 }
 
+/// Transparent overlay that draws active text-selection highlights over pages.
+///
+/// Layered above [`ViewerCanvas`] so selection geometry stays independent of
+/// tile redraws.
 #[derive(Debug)]
-/// Viewer Selection Overlay.
 pub(crate) struct ViewerSelectionOverlay<'a> {
+    /// App state with current `viewer_text_selection` and page text layers.
     pub(crate) app: &'a PDFolioApp,
 }
 
+/// Animated circular spinner used for history restore, document open, and sync.
+///
+/// `started_at` / `now` drive rotation; `color` is typically theme primary or
+/// a muted accent depending on the host surface.
 #[derive(Debug, Clone, Copy)]
-/// History Restore Spinner.
 pub(crate) struct HistoryRestoreSpinner {
+    /// Instant when the long-running operation began (defines rotation phase).
     pub(crate) started_at: Instant,
+    /// Current animation clock, usually `app.library.animation_now`.
     pub(crate) now: Instant,
+    /// Stroke color for the spinner arc.
     pub(crate) color: Color,
 }
 
@@ -270,6 +304,7 @@ impl canvas::Program<Message> for ViewerSelectionOverlay<'_> {
     }
 }
 
+/// Hit-test: map a canvas-local point to a text character anchor on a visible page.
 fn char_at_position(
     app: &PDFolioApp,
     _bounds: Rectangle,
@@ -294,6 +329,7 @@ fn char_at_position(
     None
 }
 
+/// Hit-test within one page’s text layer: exact glyph hit, else nearest on the same line band.
 fn char_in_page_at_position(
     layer: &PageTextLayer,
     page_rect: Rectangle,
@@ -369,6 +405,7 @@ impl canvas::Program<Message> for HistoryRestoreSpinner {
     }
 }
 
+/// Paint find-match rectangles on `page` (selected match uses accent fill; others optional).
 fn draw_find_highlights(
     app: &PDFolioApp,
     frame: &mut canvas::Frame,
@@ -411,6 +448,7 @@ fn draw_find_highlights(
     }
 }
 
+/// Paint the active text-selection range as filled line rectangles on `page`.
 fn draw_text_selection(
     app: &PDFolioApp,
     frame: &mut canvas::Frame,
@@ -435,11 +473,13 @@ fn draw_text_selection(
     }
 }
 
+/// Theme fill color used for text selection (test helper).
 #[cfg(test)]
 fn viewer_selection_fill(tokens: ThemeTokens) -> iced::Color {
     viewer_primitives(tokens).text_selection_fill
 }
 
+/// Merge selected character screen rects into per-line highlight rectangles.
 fn selected_line_highlights(
     layer: &PageTextLayer,
     page_rect: Rectangle,
@@ -482,6 +522,7 @@ fn selected_line_highlights(
         .collect()
 }
 
+/// Map a normalized character bounds rect into screen coordinates within `page_rect`.
 fn character_screen_rect(character: &PageTextChar, page_rect: Rectangle) -> Rectangle {
     Rectangle::new(
         Point::new(
@@ -495,16 +536,19 @@ fn character_screen_rect(character: &PageTextChar, page_rect: Rectangle) -> Rect
     )
 }
 
+/// Vertical center of a rectangle (line-grouping key for selection highlights).
 fn rect_center_y(rect: Rectangle) -> f32 {
     rect.y + rect.height / 2.0
 }
 
+/// Euclidean distance between two points (empty-click drag threshold checks).
 fn point_distance(a: Point, b: Point) -> f32 {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
     (dx * dx + dy * dy).sqrt()
 }
 
+/// Expand a rect by horizontal/vertical padding (used when building line highlights).
 fn pad_rect(rect: Rectangle, horizontal: f32, vertical: f32) -> Rectangle {
     Rectangle::new(
         Point::new(rect.x - horizontal, rect.y - vertical),
@@ -512,6 +556,7 @@ fn pad_rect(rect: Rectangle, horizontal: f32, vertical: f32) -> Rectangle {
     )
 }
 
+/// Axis-aligned bounding box of two rectangles (merge adjacent glyph highlights).
 fn union_rect(a: Rectangle, b: Rectangle) -> Rectangle {
     let left = a.x.min(b.x);
     let top = a.y.min(b.y);
@@ -520,6 +565,7 @@ fn union_rect(a: Rectangle, b: Rectangle) -> Rectangle {
     Rectangle::new(Point::new(left, top), Size::new(right - left, bottom - top))
 }
 
+/// Clip a highlight rect to the page bounds so paint does not spill past the page.
 fn clamp_rect_to_page(rect: Rectangle, page_rect: Rectangle) -> Rectangle {
     let left = rect.x.max(page_rect.x);
     let top = rect.y.max(page_rect.y);
@@ -531,12 +577,14 @@ fn clamp_rect_to_page(rect: Rectangle, page_rect: Rectangle) -> Rectangle {
     )
 }
 
+/// Inclusive point-in-rectangle test for character hit-testing.
 fn point_in_rect(point: Point, rect: Rectangle) -> bool {
     point.x >= rect.x
         && point.x <= rect.x + rect.width
         && point.y >= rect.y
         && point.y <= rect.y + rect.height
 }
+
 /// Convert a wheel event into a pixel scroll delta for the viewer.
 pub(crate) fn scroll_delta_pixels(
     delta: mouse::ScrollDelta,
@@ -548,6 +596,7 @@ pub(crate) fn scroll_delta_pixels(
     }
 }
 
+/// Unit tests for selection highlight geometry helpers.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,6 +633,7 @@ mod tests {
         assert!(fill.a >= 0.4);
     }
 
+    /// Build a fixed-size test glyph at normalized page coordinates `(x, y)`.
     fn text_char(index: usize, text: &str, x: f32, y: f32) -> PageTextChar {
         PageTextChar {
             index,

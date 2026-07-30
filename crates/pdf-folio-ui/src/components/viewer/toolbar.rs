@@ -1,7 +1,19 @@
 //! # Viewer toolbar
 //!
-//! Top bar controls for navigation back to the library, find, zoom, and
-//! sidebar toggles while a document is open.
+//! Top bar under `components::viewer::toolbar` while a document is open:
+//! back to library, open PDF, document title, page controls, zoom, find,
+//! theme toggle, and sidebar affordances. Also hosts the zoom dropdown and
+//! its outside-click capture layer, plus the floating “show outline” control
+//! when the sidebar is closed.
+//!
+//! ## Ownership
+//!
+//! Composes widgets from [`super::page_controls`] and [`super::zoom`]; emits
+//! navigation, zoom, find, and chrome messages. Domain viewer view embeds
+//! this bar above the canvas stack.
+//!
+//! Related: find bar in [`super::find_bar`]; context menus on the canvas for
+//! overlapping actions (zoom, find, TOC).
 
 use crate::components::shared::sidebar::chevron_button;
 use crate::components::viewer::page_controls::viewer_page_control;
@@ -76,6 +88,7 @@ pub(crate) fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
         .into()
 }
 
+/// “← Library” toolbar button that returns to library mode.
 fn viewer_library_back_button<'a>(
     layout: &crate::style::AppLayoutTokens,
     tokens: ThemeTokens,
@@ -112,7 +125,7 @@ fn viewer_library_back_button<'a>(
     .style(move |_, status| crate::style::button_style(tokens, Class::ViewerToolbarButton, status))
 }
 
-/// Click-outside layer that closes the zoom dropdown.
+/// Full-window transparent layer that closes the zoom menu on outside click.
 pub(crate) fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Message> {
     pin(
         mouse_area(container("").width(Length::Fill).height(Length::Fill))
@@ -124,7 +137,7 @@ pub(crate) fn zoom_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Messa
     .into()
 }
 
-/// Zoom presets and width-fit options dropdown.
+/// Positioned zoom preset dropdown panel (content from [`super::zoom::zoom_menu`]).
 pub(crate) fn view_zoom_menu_dropdown(
     app: &PDFolioApp,
     tokens: ThemeTokens,
@@ -137,6 +150,7 @@ pub(crate) fn view_zoom_menu_dropdown(
         .into()
 }
 
+/// Truncated document title for the toolbar, with a tooltip when ellipsized.
 fn viewer_toolbar_title<'a>(
     title: &'a str,
     width: f32,
@@ -189,6 +203,7 @@ fn viewer_toolbar_title<'a>(
     .into()
 }
 
+/// Compact status text for selection counts and similar toolbar feedback.
 fn viewer_toolbar_status_label<'a>(
     label: String,
     width: f32,
@@ -216,6 +231,7 @@ fn viewer_toolbar_status_label<'a>(
     .into()
 }
 
+/// Available title width after reserving fixed chrome and optional selection controls.
 fn viewer_toolbar_title_width(app: &PDFolioApp) -> f32 {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
@@ -240,6 +256,7 @@ fn viewer_toolbar_title_width(app: &PDFolioApp) -> f32 {
     )
 }
 
+/// X pin for the zoom dropdown so it aligns under the zoom control.
 fn viewer_zoom_menu_x(app: &PDFolioApp) -> f32 {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
@@ -267,7 +284,7 @@ fn viewer_zoom_menu_x(app: &PDFolioApp) -> f32 {
         .max(toolbar_layout.padding_left(Spacing::MD))
 }
 
-/// Floating control to open the viewer outline sidebar.
+/// Floating chevron shown when the outline sidebar is closed (“Show Contents”).
 pub(crate) fn viewer_floating_sidebar_toggle<'a>(tokens: ThemeTokens) -> Element<'a, Message> {
     chevron_button(
         CHEVRON_RIGHT_SVG,
@@ -278,6 +295,7 @@ pub(crate) fn viewer_floating_sidebar_toggle<'a>(tokens: ThemeTokens) -> Element
     )
 }
 
+/// Resolve themed text color for `class`/`state`, falling back to `fallback`.
 fn class_text_color(
     tokens: ThemeTokens,
     class: Class,

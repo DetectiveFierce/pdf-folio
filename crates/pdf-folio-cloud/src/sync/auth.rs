@@ -37,8 +37,11 @@ use url::Url;
 
 use super::session::{save_session, Session};
 
+/// Google OAuth 2.0 authorize endpoint for the browser PKCE flow.
 const GOOGLE_AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+/// Loopback TCP port for the Google OAuth redirect listener.
 const OAUTH_REDIRECT_PORT: u16 = 53149;
+/// Fixed loopback redirect URI registered on the Google OAuth desktop client.
 const OAUTH_CALLBACK_URL: &str = "http://127.0.0.1:53149/callback";
 
 /// Client-side configuration for signing into the PDF-Folio sync server.
@@ -112,6 +115,11 @@ pub async fn sign_in_with_google(config: &GoogleAuthConfig) -> Result<Session> {
     Ok(session)
 }
 
+/// Accepts one loopback HTTP request and returns the Google OAuth `code` after validating `state`.
+///
+/// # Errors
+///
+/// Returns an error when the request is malformed, `state` mismatches, or Google returned `error`.
 async fn wait_for_oauth_code(listener: TcpListener, expected_state: &str) -> Result<String> {
     let (mut stream, _) = listener.accept().await?;
     let mut buffer = vec![0_u8; 8192];
@@ -148,16 +156,19 @@ async fn wait_for_oauth_code(listener: TcpListener, expected_state: &str) -> Res
         .ok_or_else(|| anyhow!("Google sign-in did not return an authorization code."))
 }
 
+/// Random URL-safe PKCE code verifier (32 random bytes, base64url, no padding).
 fn pkce_verifier() -> String {
     let mut bytes = [0_u8; 32];
     rand::rng().fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// S256 PKCE challenge: base64url(SHA-256(verifier)) without padding.
 fn pkce_challenge(verifier: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
+/// Opaque OAuth `state` nonce (random + wall-clock nanos) for CSRF protection.
 fn nonce() -> String {
     let mut bytes = [0_u8; 16];
     rand::rng().fill_bytes(&mut bytes);
@@ -171,17 +182,26 @@ fn nonce() -> String {
     )
 }
 
+/// JSON body posted to the control plane after Google returns an authorization code.
 #[derive(Debug, Serialize)]
 struct ServerCallbackRequest {
+    /// Google authorization code from the loopback callback.
     code: String,
+    /// PKCE verifier that pairs with the authorize-step challenge.
     code_verifier: String,
+    /// Redirect URI used at authorize time (must match the Google client config).
     redirect_uri: String,
 }
 
+/// Session payload returned by `POST /auth/google/callback` on the control plane.
 #[derive(Debug, Deserialize)]
 struct ServerSessionResponse {
+    /// HS256 session JWT for subsequent control-plane calls.
     session_token: String,
+    /// When the session JWT expires.
     expires_at: chrono::DateTime<chrono::Utc>,
+    /// Google subject of the authorized account.
     google_sub: String,
+    /// Google email when present on userinfo.
     email: Option<String>,
 }

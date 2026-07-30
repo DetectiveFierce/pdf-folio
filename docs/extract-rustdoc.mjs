@@ -139,13 +139,21 @@ function stripDocLine(line) {
   return null;
 }
 
+/**
+ * Walk upward past blank lines, multi-line `#[…]` attributes, and plain `//`
+ * comments to find the contiguous `///` / `//!` block attached to an item.
+ * Multi-line attrs (e.g. clap `#[command(…)]`) previously hid item docs.
+ */
 function collectLeadingDocs(lines, index) {
-  // Walk upward collecting /// and attrs; return docs joined + start index
   let i = index - 1;
-  const docLines = [];
   while (i >= 0) {
     const t = lines[i].trim();
     if (t === "") {
+      i--;
+      continue;
+    }
+    // Plain // notes between attrs and item (clippy allow rationales, etc.)
+    if (t.startsWith("//") && !t.startsWith("///") && !t.startsWith("//!")) {
       i--;
       continue;
     }
@@ -153,14 +161,49 @@ function collectLeadingDocs(lines, index) {
       i--;
       continue;
     }
+    // Multi-line attribute body/closer: walk back until the opening `#[`
+    if (
+      t === ")]" ||
+      t === "]" ||
+      t.endsWith(")]") ||
+      (/[=,]/.test(t) && !t.startsWith("//") && !t.startsWith("///"))
+    ) {
+      let j = i;
+      let foundOpen = false;
+      while (j >= 0) {
+        const jt = lines[j].trim();
+        if (jt.startsWith("#[")) {
+          foundOpen = true;
+          i = j - 1;
+          break;
+        }
+        if (jt.startsWith("///") || jt.startsWith("//!")) break;
+        if (
+          jt === "" ||
+          jt.startsWith("//") ||
+          /[=,()[\]]/.test(jt)
+        ) {
+          j--;
+          continue;
+        }
+        break;
+      }
+      if (foundOpen) continue;
+    }
     if (t.startsWith("///") || t.startsWith("//!")) {
-      // collect contiguous doc block above
       let j = i;
       const block = [];
       while (j >= 0) {
         const d = stripDocLine(lines[j]);
         if (d === null) {
-          if (lines[j].trim() === "" || lines[j].trim().startsWith("#[")) {
+          const jt = lines[j].trim();
+          if (
+            jt === "" ||
+            jt.startsWith("#[") ||
+            (jt.startsWith("//") &&
+              !jt.startsWith("///") &&
+              !jt.startsWith("//!"))
+          ) {
             j--;
             continue;
           }
@@ -169,12 +212,11 @@ function collectLeadingDocs(lines, index) {
         block.push(d);
         j--;
       }
-      docLines.push(...block.reverse());
-      break;
+      return block.reverse().join("\n").trim();
     }
     break;
   }
-  return docLines.join("\n").trim();
+  return "";
 }
 
 function parseSignature(lines, startIdx) {
@@ -260,18 +302,12 @@ function parseRustFile(absPath) {
     const kind = kindRaw === "const fn" ? "fn" : kindRaw;
     const name = m[4];
 
-    // Skip non-visible private items at module level? Keep crate-visible for maintainers.
-    // Include: pub, pub(crate), pub(super), and top-level private modules with docs.
+    // Maintainer docs include private modules and their module-level items
+    // (private free fns/consts/types, not only pub). Nested private helpers
+    // inside functions/impls (indent > 0 without `pub`) stay out to limit noise.
     const isPub = visRaw.startsWith("pub");
-    // Skip heavily indented nested private helpers unless public
     const indentLevel = indent.replace(/\t/g, "    ").length;
     if (!isPub && indentLevel > 0) continue;
-    if (!isPub && kind !== "mod" && kind !== "struct" && kind !== "enum") {
-      // still skip private free functions to reduce noise
-      if (kind === "fn" || kind === "const" || kind === "static" || kind === "type") {
-        continue;
-      }
-    }
 
     // Skip test modules and obvious test fns
     if (name === "tests" || name.startsWith("test_")) continue;
@@ -317,6 +353,44 @@ function visibilityBadge(vis) {
   if (vis === "pub") return "`pub`";
   if (vis.startsWith("pub(")) return "`" + vis + "`";
   return "`" + vis + "`";
+}
+
+/** Short human label for module visibility in tables / page chrome. */
+function visibilityLabel(vis) {
+  if (!vis || vis === "private") return "private";
+  return vis;
+}
+
+/**
+ * Resolve a child module's visibility from the parent module's `mod` item,
+ * or from a sibling declaration when the parent re-exports via `pub use`.
+ */
+function resolveModuleVisibility(modules, crateName, segs) {
+  if (!segs.length) return "pub"; // crate root
+  const parentSegs = segs.slice(0, -1);
+  const childName = segs[segs.length - 1];
+  const parent = modules.find(
+    (m) =>
+      m.crateName === crateName &&
+      m.segs.length === parentSegs.length &&
+      parentSegs.every((s, i) => m.segs[i] === s)
+  );
+  if (!parent) return "private";
+  const decl = (parent.items || []).find(
+    (it) => it.kind === "mod" && it.name === childName
+  );
+  if (decl) return decl.visibility || "private";
+  // Fallback: pub use re-export of the module name
+  const reexport = (parent.items || []).find(
+    (it) =>
+      it.kind === "use" &&
+      it.visibility?.startsWith?.("pub") &&
+      (it.name === childName ||
+        (it.signature || "").includes(`::${childName}`) ||
+        (it.signature || "").endsWith(childName))
+  );
+  if (reexport) return reexport.visibility || "pub";
+  return "private";
 }
 
 /** Must match site.js tokenClassForKind — one class per kind site-wide. */
@@ -794,8 +868,51 @@ function renderItem(item, crateName, segs, linkIndex) {
       `<p class="api-item-docs dim"><em>No rustdoc comment on this item yet.</em></p>`
     );
   }
+  // File-backed modules: deep-link to the child module page (incl. private).
+  if (item.kind === "mod" && item.childHref) {
+    parts.push(
+      `<p class="api-item-meta">Module page: <a href="${item.childHref}"><code>${item.childModuleName || item.name}</code></a>${item.childVisibility ? ` · <code class="api-vis">${item.childVisibility}</code>` : ""}</p>`
+    );
+    parts.push("");
+  }
   parts.push("");
   return parts.join("\n");
+}
+
+/**
+ * Attach child-module docs/links onto `mod` items so private submodule
+ * declarations are not blank rows in the parent Items table.
+ */
+function enrichModItems(items, crateName, segs, children) {
+  if (!items?.length || !children?.length) return items || [];
+  const byName = new Map(
+    children.map((ch) => [ch.segs[ch.segs.length - 1], ch])
+  );
+  return items.map((it) => {
+    if (it.kind !== "mod") return it;
+    const ch = byName.get(it.name);
+    if (!ch) return it;
+    const childHref = hrefBetweenModules(segs, ch.segs);
+    const childVis = ch.moduleVisibility || "private";
+    let docs = it.docs;
+    if (!docs && ch.moduleDocs) {
+      const first = ch.moduleDocs
+        .split("\n")
+        .find((l) => l.trim() && !l.trim().startsWith("#"));
+      docs = first
+        ? `${first.trim()}\n\nFull docs: [\`${ch.moduleName}\`](${childHref}) (\`${visibilityLabel(childVis)}\`).`
+        : `See [\`${ch.moduleName}\`](${childHref}) (\`${visibilityLabel(childVis)}\`).`;
+    } else if (docs && !docs.includes(childHref)) {
+      docs = `${docs}\n\nModule page: [\`${ch.moduleName}\`](${childHref}).`;
+    }
+    return {
+      ...it,
+      docs,
+      childHref,
+      childModuleName: ch.moduleName,
+      childVisibility: childVis,
+    };
+  });
 }
 
 function renderModulePage({
@@ -803,6 +920,7 @@ function renderModulePage({
   segs,
   moduleName,
   moduleDocs,
+  moduleVisibility,
   items,
   sourceRel,
   children,
@@ -815,6 +933,7 @@ function renderModulePage({
   const lede =
     moduleDocs.split("\n").find((l) => l.trim()) ||
     `Rust module \`${moduleName}\`.`;
+  const vis = moduleVisibility || (segs.length === 0 ? "pub" : "private");
 
   const lines = [];
   const fm = (s) => String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -828,7 +947,7 @@ function renderModulePage({
   lines.push("");
 
   lines.push(
-    `Source: \`${sourceRel}\` · Module: \`${moduleName}\``
+    `Source: \`${sourceRel}\` · Module: \`${moduleName}\` · Visibility: \`${visibilityLabel(vis)}\``
   );
   lines.push("");
 
@@ -856,9 +975,19 @@ function renderModulePage({
   if (children?.length) {
     lines.push("## Submodules");
     lines.push("");
-    lines.push("| Module | Summary |");
-    lines.push("| --- | --- |");
-    for (const ch of children) {
+    lines.push(
+      "Includes **private** modules (default Rust visibility). This site is a maintainer map, not a public-API filter."
+    );
+    lines.push("");
+    lines.push("| Module | Visibility | Summary |");
+    lines.push("| --- | --- | --- |");
+    // Private first? No — stable alpha by short name, visibility column makes them findable.
+    const sortedChildren = [...children].sort((a, b) => {
+      const an = a.segs[a.segs.length - 1] || "";
+      const bn = b.segs[b.segs.length - 1] || "";
+      return an.localeCompare(bn);
+    });
+    for (const ch of sortedChildren) {
       const summary = (ch.moduleDocs || "")
         .split("\n")
         .find((l) => l.trim())
@@ -866,18 +995,22 @@ function renderModulePage({
         .trim()
         .slice(0, 120) || "—";
       const relHref = hrefBetweenModules(segs, ch.segs);
+      const chVis = visibilityLabel(ch.moduleVisibility || "private");
+      const short = ch.segs[ch.segs.length - 1] || ch.moduleName;
       lines.push(
-        `| [\`${ch.moduleName}\`](${relHref}) | ${escapeMd(summary)} |`
+        `| [\`${short}\`](${relHref}) | \`${chVis}\` | ${escapeMd(summary)} |`
       );
     }
     lines.push("");
   }
 
-  // Group items
+  // Group items (module-level private items included; nested private noise skipped)
   const byKind = new Map();
+  const listedItems = [];
   for (const it of items) {
-    // skip nested deep private noise
+    // skip nested deep private noise (private helpers inside impl/fn bodies)
     if (it.indent > 0 && !it.visibility.startsWith("pub")) continue;
+    listedItems.push(it);
     const list = byKind.get(it.kind) || [];
     list.push(it);
     byKind.set(it.kind, list);
@@ -895,26 +1028,34 @@ function renderModulePage({
     "use",
   ];
 
-  const pubItems = items.filter((it) => it.visibility.startsWith("pub"));
-  const documented = pubItems.filter((it) => it.docs).length;
+  const pubItems = listedItems.filter((it) => it.visibility.startsWith("pub"));
+  const privateItems = listedItems.filter(
+    (it) => !it.visibility.startsWith("pub")
+  );
+  const pubDocumented = pubItems.filter((it) => it.docs).length;
+  const privateDocumented = privateItems.filter((it) => it.docs).length;
+  const allDocumented = listedItems.filter((it) => it.docs).length;
 
   lines.push("## Items");
   lines.push("");
   lines.push(
-    `${items.length} extracted item(s); ${documented}/${pubItems.length} \`pub\` item(s) have rustdoc.`
+    `${listedItems.length} extracted item(s); ${allDocumented}/${listedItems.length} have rustdoc · ${pubDocumented}/${pubItems.length} \`pub*\` · ${privateDocumented}/${privateItems.length} private.`
   );
   lines.push("");
 
   // TOC of items
-  if (items.length > 0) {
+  if (listedItems.length > 0) {
     lines.push("| Kind | Name | Visibility | Docs |");
     lines.push("| --- | --- | --- | --- |");
     for (const kind of kindOrder) {
       for (const it of byKind.get(kind) || []) {
-        if (it.indent > 0 && !it.visibility.startsWith("pub")) continue;
         const mark = it.docs ? "yes" : "—";
+        const nameCell =
+          it.kind === "mod" && it.childHref
+            ? `[\`${it.name}\`](${it.childHref})`
+            : `[\`${it.name}\`](#${itemAnchor(it)})`;
         lines.push(
-          `| \`${it.kind}\` | [\`${it.name}\`](#${itemAnchor(it)}) | ${visibilityBadge(it.visibility)} | ${mark} |`
+          `| \`${it.kind}\` | ${nameCell} | ${visibilityBadge(it.visibility)} | ${mark} |`
         );
       }
     }
@@ -922,10 +1063,7 @@ function renderModulePage({
   }
 
   for (const kind of kindOrder) {
-    const list = byKind.get(kind) || [];
-    const filtered = list.filter(
-      (it) => !(it.indent > 0 && !it.visibility.startsWith("pub"))
-    );
+    const filtered = byKind.get(kind) || [];
     if (!filtered.length) continue;
     // Human titles: "Functions", not bare "fn"
     lines.push(`## ${kindSectionTitle(kind)}`);
@@ -1167,6 +1305,16 @@ function extract() {
     byKey.set(`${m.crateName}::${m.segs.join("::")}`, m);
   }
 
+  // Resolve each module's visibility from its parent's `mod` declaration
+  // (private modules are first-class on this maintainer docs site).
+  for (const m of modules) {
+    m.moduleVisibility = resolveModuleVisibility(
+      modules,
+      m.crateName,
+      m.segs
+    );
+  }
+
   const linkIndex = buildLinkIndex(modules);
 
   // Children relationships
@@ -1184,12 +1332,19 @@ function extract() {
     const children = childrenOf(m.crateName, m.segs).sort((a, b) =>
       a.moduleName.localeCompare(b.moduleName)
     );
+    const items = enrichModItems(
+      m.items,
+      m.crateName,
+      m.segs,
+      children
+    );
     const md = renderModulePage({
       crateName: m.crateName,
       segs: m.segs,
       moduleName: m.moduleName,
       moduleDocs: m.moduleDocs,
-      items: m.items,
+      moduleVisibility: m.moduleVisibility,
+      items,
       sourceRel: m.sourceRel,
       children,
       guideLinks: guideLinksFor(m.crateName, m.segs),
@@ -1237,6 +1392,10 @@ function extract() {
   );
   indexLines.push("");
   indexLines.push(
+    "**Private modules are included.** Default Rust visibility (`mod foo` without `pub`) still gets a full page and appears in submodule tables and the sidebar tree — this is a maintainer map of the tree, not a public-API surface."
+  );
+  indexLines.push("");
+  indexLines.push(
     "Rebuild with `pnpm build` (runs `extract-rustdoc.mjs` then the site builder). Edit documentation in the `.rs` files; do not hand-edit `content/api/`."
   );
   indexLines.push("");
@@ -1250,23 +1409,33 @@ function extract() {
       crateMods.find((m) => m.segs.length === 0) || crateMods[0];
     const blurb = CRATE_BLURBS[crateName] || "";
     const modCount = crateMods.length;
-    const pubItems = crateMods.reduce(
-      (n, m) => n + m.items.filter((i) => i.visibility === "pub").length,
-      0
-    );
-    const pubDoc = crateMods.reduce(
-      (n, m) =>
+    const privateMods = crateMods.filter(
+      (m) => m.segs.length > 0 && !String(m.moduleVisibility || "").startsWith("pub")
+    ).length;
+    const listedItems = crateMods.reduce((n, m) => {
+      return (
         n +
-        m.items.filter((i) => i.visibility === "pub" && i.docs).length,
-      0
-    );
+        (m.items || []).filter(
+          (i) => !(i.indent > 0 && !i.visibility.startsWith("pub"))
+        ).length
+      );
+    }, 0);
+    const documented = crateMods.reduce((n, m) => {
+      return (
+        n +
+        (m.items || []).filter(
+          (i) =>
+            i.docs && !(i.indent > 0 && !i.visibility.startsWith("pub"))
+        ).length
+      );
+    }, 0);
     indexLines.push(`  <a class="card-link" href="${crateName}/index.md">`);
     indexLines.push(`    <div class="card-title">${crateName}</div>`);
     indexLines.push(
       `    <p class="card-desc">${blurb || (root.moduleDocs || "").split("\n")[0] || ""}</p>`
     );
     indexLines.push(
-      `    <div class="card-meta">${modCount} modules · ${pubDoc}/${pubItems} pub docs</div>`
+      `    <div class="card-meta">${modCount} modules (${privateMods} private) · ${documented}/${listedItems} items documented</div>`
     );
     indexLines.push(`  </a>`);
   }
@@ -1275,28 +1444,40 @@ function extract() {
   indexLines.push("## How this relates to the guides");
   indexLines.push("");
   indexLines.push(
-    "Narrative architecture and design notes live under [Architecture](../architecture/overview.md), [Crates](../crates/core.md), and [Subsystems](../subsystems/rendering.md). API pages list what the code exports and what rustdoc says about each item. Prefer linking from guides to API modules when pointing maintainers at a concrete type or function."
+    "Narrative architecture and design notes live under [Architecture](../architecture/overview.md), [Crates](../crates/core.md), and [Subsystems](../subsystems/rendering.md). API pages list modules (including private) and what rustdoc says about each item. Prefer linking from guides to API modules when pointing maintainers at a concrete type or function."
   );
   indexLines.push("");
   indexLines.push("## Coverage summary");
   indexLines.push("");
-  indexLines.push("| Crate | Modules | Pub items | Pub with docs |");
-  indexLines.push("| --- | ---: | ---: | ---: |");
+  indexLines.push(
+    "| Crate | Modules | Private modules | Items | Documented |"
+  );
+  indexLines.push("| --- | ---: | ---: | ---: | ---: |");
   for (const crateName of orderedCrates) {
     const crateMods = modules.filter((m) => m.crateName === crateName);
     if (!crateMods.length) continue;
-    const pubItems = crateMods.reduce(
-      (n, m) => n + m.items.filter((i) => i.visibility === "pub").length,
-      0
-    );
-    const pubDoc = crateMods.reduce(
-      (n, m) =>
+    const privateMods = crateMods.filter(
+      (m) => m.segs.length > 0 && !String(m.moduleVisibility || "").startsWith("pub")
+    ).length;
+    const listedItems = crateMods.reduce((n, m) => {
+      return (
         n +
-        m.items.filter((i) => i.visibility === "pub" && i.docs).length,
-      0
-    );
+        (m.items || []).filter(
+          (i) => !(i.indent > 0 && !i.visibility.startsWith("pub"))
+        ).length
+      );
+    }, 0);
+    const documented = crateMods.reduce((n, m) => {
+      return (
+        n +
+        (m.items || []).filter(
+          (i) =>
+            i.docs && !(i.indent > 0 && !i.visibility.startsWith("pub"))
+        ).length
+      );
+    }, 0);
     indexLines.push(
-      `| [${crateName}](${crateName}/index.md) | ${crateMods.length} | ${pubItems} | ${pubDoc} |`
+      `| [${crateName}](${crateName}/index.md) | ${crateMods.length} | ${privateMods} | ${listedItems} | ${documented} |`
     );
   }
   indexLines.push("");
@@ -1304,44 +1485,44 @@ function extract() {
   writeFileSync(join(OUT, "index.md"), indexLines.join("\n"), "utf8");
   pageCount++;
 
-  // Emit nav fragment helper as JSON for build.mjs / manual merge
-  const navApi = {
-    label: "API Reference",
-    collapsed: false,
-    items: [
-      { title: "API Home", path: "api/index.md" },
-      ...orderedCrates
-        .filter((c) => modules.some((m) => m.crateName === c))
-        .map((crateName) => {
-          const crateMods = modules
-            .filter((m) => m.crateName === crateName)
-            .sort((a, b) => a.segs.join("/").localeCompare(b.segs.join("/")));
-          const rootPath = `api/${crateName}/index.md`;
-          // Flatten important first-level modules as children anchors aren't enough — list as nested items in a flat nav: only root + top-level modules
-          const top = crateMods.filter((m) => m.segs.length === 1);
-          return {
-            title: crateName,
-            path: rootPath,
-            children: top.map((m) => ({
-              title: m.segs[0],
-              // use page path via special field — build.mjs only supports anchors on same page
-              // So we list top-level modules as separate nav items instead
-            })),
-          };
-        }),
-    ],
-  };
+  /**
+   * Build a recursive nav tree of modules under a parent path.
+   * Includes private modules so the sidebar is a full source map.
+   * Child entries use `path` (handled by build.mjs) rather than in-page anchors.
+   */
+  function moduleNavChildren(crateName, parentSegs) {
+    return childrenOf(crateName, parentSegs)
+      .sort((a, b) => {
+        const an = a.segs[a.segs.length - 1] || "";
+        const bn = b.segs[b.segs.length - 1] || "";
+        return an.localeCompare(bn);
+      })
+      .map((m) => {
+        const short = m.segs[m.segs.length - 1] || m.moduleName;
+        const vis = m.moduleVisibility || "private";
+        const privateMark = String(vis).startsWith("pub") ? "" : " · private";
+        const kids = moduleNavChildren(crateName, m.segs);
+        const item = {
+          title: `${short}${privateMark}`,
+          path: pageOutRel(crateName, m.segs),
+        };
+        if (kids.length) item.children = kids;
+        return item;
+      });
+  }
 
-  // Sidebar: API home + crate roots. Submodules are linked from each crate page body.
-  // (nav.json children only support in-page anchors, not nested routes.)
+  // Sidebar: API home + crate roots + nested module tree (public and private).
   const navGroupsItems = [{ title: "API Home", path: "api/index.md" }];
   for (const crateName of orderedCrates) {
     const crateMods = modules.filter((m) => m.crateName === crateName);
     if (!crateMods.length) continue;
-    navGroupsItems.push({
+    const kids = moduleNavChildren(crateName, []);
+    const entry = {
       title: crateName,
       path: `api/${crateName}/index.md`,
-    });
+    };
+    if (kids.length) entry.children = kids;
+    navGroupsItems.push(entry);
   }
 
   writeFileSync(
@@ -1360,8 +1541,11 @@ function extract() {
 
   // Stats
   let undocMods = modules.filter((m) => !m.moduleDocs).length;
+  const privateModCount = modules.filter(
+    (m) => m.segs.length > 0 && !String(m.moduleVisibility || "").startsWith("pub")
+  ).length;
   console.log(
-    `  modules: ${modules.length}, pages: ${pageCount}, modules missing //! : ${undocMods}`
+    `  modules: ${modules.length} (${privateModCount} private), pages: ${pageCount}, modules missing //! : ${undocMods}`
   );
   return { modules, pageCount, navGroupsItems };
 }

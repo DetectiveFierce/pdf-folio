@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use super::config::Config;
 use super::handlers::AppState;
 
+/// Google OpenID Connect userinfo endpoint used after token exchange.
 const GOOGLE_USERINFO_URI: &str = "https://openidconnect.googleapis.com/v1/userinfo";
 
 /// Session JWT lifetime (~30 days). Also used as the advertised Turso token window.
@@ -157,6 +158,7 @@ pub(crate) struct SessionClaims {
 /// Subset of Google’s token-endpoint JSON used after code exchange.
 #[derive(Debug, Deserialize)]
 pub(crate) struct GoogleTokenResponse {
+    /// Bearer access token for the userinfo request.
     pub(crate) access_token: String,
 }
 

@@ -83,6 +83,11 @@ pub fn save_session(session: &Session) -> Result<()> {
     Ok(())
 }
 
+/// Path to the session JWT cache file (`…/sync/session.json` under the app data dir).
+///
+/// # Errors
+///
+/// Returns an error when the platform data directory cannot be resolved.
 fn session_cache_path() -> Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "pdf-folio", "PDF-Folio")
         .context("Could not find a data directory for PDF-Folio.")?;

@@ -11,7 +11,9 @@
 //! Message emission stays in the widgets; this layer does not implement
 //! update logic.
 
+/// Scrollable document canvas stack (pages, selection overlay, find bar).
 pub(crate) mod document;
+/// Full viewer surface: toolbar, optional sidebar, error banner, jump dialog, canvas.
 pub(crate) mod root;
 
 pub(crate) use root::view_viewer;

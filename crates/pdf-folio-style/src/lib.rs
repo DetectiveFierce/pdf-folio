@@ -74,11 +74,17 @@
 //! so the UI crate can register them with iced at startup. Prefer
 //! [`ui_font`] / [`display_font`] over ad-hoc font picks.
 
+/// KDL style book load/merge and theme resolution.
 pub mod book;
+/// Asymmetric (per-side) border widget.
 pub mod borders;
+/// Semantic [`Class`](classes::Class) enums and iced stylesheet helpers.
 pub mod classes;
+/// Styled widget constructors for common chrome.
 pub mod components;
+/// Runtime theme selection (`espresso` / `light`).
 pub mod theme;
+/// Design tokens, layout metrics, and visual style types.
 pub mod tokens;
 
 /// Embedded TrueType bytes for IBM Plex Sans Regular (primary UI face).

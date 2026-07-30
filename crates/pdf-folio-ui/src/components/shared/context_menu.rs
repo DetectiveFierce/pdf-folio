@@ -1,21 +1,43 @@
 //! # Context menus
 //!
-//! Capture layer and dropdown rendering for right-click menus opened from
-//! library or viewer surfaces.
+//! Right-click menu chrome under `components::shared::context_menu`. Builds
+//! capture layers and positioned dropdowns for library entries, folders, tags,
+//! empty library background, and the viewer canvas.
+//!
+//! ## Ownership
+//!
+//! [`PDFolioApp::open_context_menu`] adjusts selection for the clicked target
+//! and stores the open menu on `app.chrome`. [`PDFolioApp::context_menu_action_message`]
+//! maps menu actions to `Message`s consumed by library/viewer/shell update.
+//! Item groups are private builders per target type.
+//!
+//! Stacked by [`super::root_surface`]. Related pointer menus: zoom dropdown in
+//! `components::viewer::toolbar`; keyboard actions in [`super::command_palette`].
 
 use crate::*;
 use iced::widget::{column, row, stack};
+
+/// Spec for one row in a context menu group before it is turned into a widget.
 #[derive(Debug, Clone, Copy)]
 struct ContextMenuItemSpec {
+    /// Primary action label shown on the left of the row.
     label: &'static str,
+    /// Optional shortcut or secondary detail shown on the right.
     detail: &'static str,
+    /// When false the row is non-interactive and uses disabled styling.
     enabled: bool,
+    /// When true the label uses the error/destructive color.
     destructive: bool,
+    /// Action emitted via `Message::ContextMenuActionSelected` on press.
     action: ContextMenuAction,
 }
 
 impl PDFolioApp {
-    /// open context menu.
+    /// Open a context menu for `target`, adjusting selection when needed.
+    ///
+    /// Entry clicks select the entry if it was not already multi-selected;
+    /// folder targets focus the folder details editor. Closes the zoom menu so
+    /// only one floating menu is open at a time.
     pub(crate) fn open_context_menu(&mut self, target: ContextMenuTarget) {
         self.viewer.zoom_menu_open = false;
 
@@ -42,7 +64,10 @@ impl PDFolioApp {
         });
     }
 
-    /// context menu action message.
+    /// Map a chosen [`ContextMenuAction`] to the `Message` that performs it.
+    ///
+    /// Returns `None` when no menu is open or the action does not apply to the
+    /// current target (for example copy selection with nothing selected).
     pub(crate) fn context_menu_action_message(&self, action: ContextMenuAction) -> Option<Message> {
         let target = &self.chrome.open_context_menu.as_ref()?.target;
         match action {
@@ -217,6 +242,7 @@ pub(crate) fn view_context_menu_dropdown(
         .into()
 }
 
+/// Estimated panel height for clamping the open menu within the window bounds.
 fn context_menu_height(app: &PDFolioApp, target: &ContextMenuTarget, tokens: ThemeTokens) -> f32 {
     let groups = context_menu_groups(app, target);
     let item_count = groups.iter().map(Vec::len).sum::<usize>();
@@ -231,6 +257,7 @@ fn context_menu_height(app: &PDFolioApp, target: &ContextMenuTarget, tokens: The
         + panel_layout.padding_y(Spacing::XS) * 2.0
 }
 
+/// Built context-menu panel: grouped items with separators for `target`.
 fn context_menu_panel<'a>(
     app: &'a PDFolioApp,
     target: &'a ContextMenuTarget,
@@ -263,6 +290,7 @@ fn context_menu_panel<'a>(
         .into()
 }
 
+/// Dispatch to the per-target item group builders for the open menu.
 fn context_menu_groups(
     app: &PDFolioApp,
     target: &ContextMenuTarget,
@@ -276,6 +304,7 @@ fn context_menu_groups(
     }
 }
 
+/// Item groups for a library entry (open/select, tag/move/export, reveal, destructive).
 fn library_entry_context_groups(
     app: &PDFolioApp,
     entry_id: &EntryId,
@@ -376,6 +405,7 @@ fn library_entry_context_groups(
     ]
 }
 
+/// Item groups for a folder row (open/new, rename/move/export/delete, reorder).
 fn folder_context_groups(
     app: &PDFolioApp,
     folder_id: Option<&FolderId>,
@@ -474,6 +504,7 @@ fn folder_context_groups(
     ]
 }
 
+/// Item groups for empty library background (import, selection actions, layout/sort).
 fn library_background_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuItemSpec>> {
     vec![
         vec![
@@ -520,6 +551,7 @@ fn library_background_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuIte
     ]
 }
 
+/// Item groups for a tag target (export tagged PDFs, rename, delete).
 fn tag_context_groups(app: &PDFolioApp, tag: &str) -> Vec<Vec<ContextMenuItemSpec>> {
     let exists = app.all_tags().iter().any(|candidate| candidate == tag);
     vec![vec![
@@ -534,6 +566,7 @@ fn tag_context_groups(app: &PDFolioApp, tag: &str) -> Vec<Vec<ContextMenuItemSpe
     ]]
 }
 
+/// Item groups for the viewer canvas (copy/find/jump, zoom, TOC, back to library).
 fn viewer_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuItemSpec>> {
     let has_selection = app.viewer.viewer_text_selection.is_some();
     vec![
@@ -583,6 +616,7 @@ fn viewer_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuItemSpec>> {
     ]
 }
 
+/// Non-destructive menu item spec helper.
 fn spec(
     label: &'static str,
     detail: &'static str,
@@ -598,6 +632,7 @@ fn spec(
     }
 }
 
+/// Destructive (error-colored) menu item spec helper.
 fn destructive_spec(
     label: &'static str,
     detail: &'static str,
@@ -613,6 +648,7 @@ fn destructive_spec(
     }
 }
 
+/// Single interactive (or disabled) context menu row widget from an item spec.
 fn context_menu_item<'a>(
     item: ContextMenuItemSpec,
     tokens: ThemeTokens,
@@ -684,6 +720,7 @@ fn context_menu_item<'a>(
     }
 }
 
+/// Horizontal rule between context menu groups.
 fn context_menu_separator(tokens: ThemeTokens) -> Element<'static, Message> {
     container("")
         .height(tokens.primitives.context_menu_separator_height)
@@ -696,6 +733,7 @@ fn context_menu_separator(tokens: ThemeTokens) -> Element<'static, Message> {
         .into()
 }
 
+/// Resolve themed text color for `class`/`state`, falling back to `fallback`.
 fn class_text_color(
     tokens: ThemeTokens,
     class: Class,
