@@ -567,7 +567,8 @@ impl Db {
 
         transaction.commit()?;
         Ok(())
-    }}
+    }
+}
 
 pub(super) fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryEntry> {
     let added_at: i64 = row.get(12)?;

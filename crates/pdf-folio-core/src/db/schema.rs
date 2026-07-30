@@ -95,15 +95,6 @@ impl Db {
                 created_at  INTEGER NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS annotations (
-                id          TEXT PRIMARY KEY,
-                entry_id    TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-                page        INTEGER NOT NULL,
-                kind        TEXT NOT NULL,
-                data        TEXT NOT NULL,
-                created_at  INTEGER NOT NULL
-            );
-
             CREATE TABLE IF NOT EXISTS folders (
                 id          TEXT PRIMARY KEY,
                 name        TEXT NOT NULL,

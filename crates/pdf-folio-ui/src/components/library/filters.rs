@@ -1,6 +1,6 @@
 //! Library filtering and search matching helpers.
 
-use pdf_folio_db::{FolderId, LibraryEntry};
+use pdf_folio_core::{FolderId, LibraryEntry};
 
 use super::metadata::{entry_author, entry_title};
 use super::state::LibraryReadingFilter;

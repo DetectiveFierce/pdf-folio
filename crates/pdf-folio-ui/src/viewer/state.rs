@@ -568,7 +568,6 @@ impl PDFolioApp {
                 jump_dialog_open: false,
                 page_input_editing: false,
                 jump_input: String::new(),
-                annotations: Vec::new(),
             },
             library: LibraryRuntime {
                 compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),

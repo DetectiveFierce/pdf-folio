@@ -51,13 +51,13 @@ use pdf_folio_cloud::raindrop::{
     RaindropImportDestination, RaindropImportPhase, RaindropImportPreview, RaindropImportProgress,
     RaindropPdfCandidate,
 };
-use pdf_folio_core::{Annotation, OutlineNode, PageTextLayer, PdfDoc, TileCache, TileKey};
 #[cfg(test)]
-use pdf_folio_db::NewLibraryEntry;
-use pdf_folio_db::{
+use pdf_folio_core::NewLibraryEntry;
+use pdf_folio_core::{
     Db, EntryId, Folder, FolderId, ImportedEntry, LibraryEntry, LibraryLayoutMode,
     LibraryOrganizationSnapshot, LibraryPreferences, LibrarySortMode, LibraryWatchEvent,
 };
+use pdf_folio_core::{OutlineNode, PageTextLayer, PdfDoc, TileCache, TileKey};
 
 use crate::library::drag::{
     active_folder_drop_target, can_drag_reorder_library as can_drag_reorder_library_for_state,

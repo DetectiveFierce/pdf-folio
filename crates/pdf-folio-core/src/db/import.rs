@@ -183,7 +183,6 @@ fn clean_import_title(value: impl AsRef<str>) -> Option<String> {
     }
 }
 
-
 // --- External import sources -------------------------------------------------
 
 use chrono::{DateTime, Utc};
@@ -239,7 +238,6 @@ impl Db {
             .optional()
             .context("Could not load import source.")
     }
-
 }
 
 fn row_to_import_source(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportSource> {
@@ -255,14 +253,11 @@ fn row_to_import_source(row: &rusqlite::Row<'_>) -> rusqlite::Result<ImportSourc
     })
 }
 
-
 // --- Filesystem watching -----------------------------------------------------
 //
-// `LibraryWatcher` previously lived in its own `watcher.rs` module within the
-// standalone `pdf-folio-db` crate. It has been folded into the import module
-// because both are concerned with PDFs entering the library: the import
-// helpers do the initial scan/import, and the watcher reacts to filesystem
-// changes in already-imported folders.
+// `LibraryWatcher` lives in the import module because both are concerned with
+// PDFs entering the library: the import helpers do the initial scan/import, and
+// the watcher reacts to filesystem changes in already-imported folders.
 
 use std::sync::mpsc::Sender;
 

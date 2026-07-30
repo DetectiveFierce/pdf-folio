@@ -1,6 +1,6 @@
 //! Stable widget ids, animation timings, and option lists shared by app views.
 
-use pdf_folio_db::LibrarySortMode;
+use pdf_folio_core::LibrarySortMode;
 
 use crate::library::state::LibraryMetadataDensity;
 

@@ -8,7 +8,7 @@ use iced::Task;
 #[cfg(not(test))]
 use pdf_folio_cloud::sync::cached_session;
 use pdf_folio_cloud::sync::{sign_in_with_google, GoogleAuthConfig, Session};
-use pdf_folio_db::{EntryId, FolderId, LibrarySortMode};
+use pdf_folio_core::{EntryId, FolderId, LibrarySortMode};
 
 use crate::*;
 

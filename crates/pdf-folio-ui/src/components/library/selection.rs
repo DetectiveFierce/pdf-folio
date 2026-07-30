@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use pdf_folio_db::EntryId;
+use pdf_folio_core::EntryId;
 
 use pdf_folio_style::MasterCheckboxState;
 

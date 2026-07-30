@@ -1126,7 +1126,6 @@ impl Db {
             entry_folders: snapshot.entry_folders.len(),
         })
     }
-
 }
 
 fn row_to_sync_crdt_operation(row: &rusqlite::Row<'_>) -> rusqlite::Result<SyncCrdtOperation> {

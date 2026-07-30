@@ -139,7 +139,7 @@ fn mirror_collections_reanchors_unresolved_parents_under_selected_root() {
 
 fn test_db() -> Db {
     let path = std::env::temp_dir().join(format!(
-        "pdf-folio-raindrop-{}-{:?}.db",
+        "pdf-folio-cloud-raindrop-{}-{:?}.db",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

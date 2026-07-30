@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 use iced::futures::SinkExt;
 use iced::{event, mouse, stream, time, Event, Subscription};
 use notify::{EventKind, RecursiveMode, Watcher};
-use pdf_folio_db::{Db, LibraryWatcher};
+use pdf_folio_core::{Db, LibraryWatcher};
 
 use super::{shortcuts, AppMode, PDFolioApp, LIBRARY_CARD_HOVER_TICK_MS, VIEWER_ANIMATION_TICK_MS};
 use crate::library::drag::LIBRARY_DRAG_AUTOSCROLL_TICK_MS;
@@ -470,7 +470,7 @@ fn watch_directories_stream(paths: &Vec<PathBuf>) -> impl iced::futures::Stream<
 }
 
 async fn drain_pending_library_watch_events(
-    receiver: &Arc<std::sync::Mutex<std::sync::mpsc::Receiver<pdf_folio_db::LibraryWatchEvent>>>,
+    receiver: &Arc<std::sync::Mutex<std::sync::mpsc::Receiver<pdf_folio_core::LibraryWatchEvent>>>,
     output: &mut iced::futures::channel::mpsc::Sender<Message>,
 ) {
     loop {

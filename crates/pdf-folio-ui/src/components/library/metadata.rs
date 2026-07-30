@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use pdf_folio_db::LibraryEntry;
+use pdf_folio_core::LibraryEntry;
 
 use super::state::LibraryMetadataDensity;
 

@@ -3,7 +3,7 @@
 use iced::widget::scrollable::{Direction, Scrollbar, Viewport};
 use iced::widget::{button, container, pick_list, row, scrollable, slider, text, tooltip, Svg};
 use iced::{Element, Length};
-use pdf_folio_db::LibrarySortMode;
+use pdf_folio_core::LibrarySortMode;
 use pdf_folio_style::{
     button_style, container_style, menu_style_for_class, pick_list_style, slider_style, ui_font,
     Class, ComponentState, FontSize, FontWeight, Spacing, ThemeTokens, VisualOverride,

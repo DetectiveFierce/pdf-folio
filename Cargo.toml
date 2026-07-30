@@ -3,7 +3,6 @@ members = [
     "crates/iced-widget-patch",
     "crates/pdf-folio-core",
     "crates/pdf-folio-cloud",
-    "crates/pdf-folio-db",
     "crates/pdf-folio-style",
     "crates/pdf-folio-ui",
     "crates/pdf-folio-main",

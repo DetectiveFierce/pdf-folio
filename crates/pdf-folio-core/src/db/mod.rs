@@ -16,9 +16,7 @@
 
 use std::path::PathBuf;
 
-
 mod naming;
-
 
 mod types;
 pub use types::*;
@@ -38,14 +36,7 @@ pub struct Db {
     path: PathBuf,
 }
 
-impl Db {
-
-
-
-}
-
-
-
+impl Db {}
 
 #[cfg(test)]
 mod tests;

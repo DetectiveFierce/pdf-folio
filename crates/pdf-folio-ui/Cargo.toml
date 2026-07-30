@@ -12,7 +12,6 @@ directories.workspace = true
 iced.workspace = true
 notify.workspace = true
 pdf-folio-core = { path = "../pdf-folio-core" }
-pdf-folio-db = { path = "../pdf-folio-db" }
 pdf-folio-cloud = { path = "../pdf-folio-cloud" }
 pdf-folio-style = { path = "../pdf-folio-style" }
 reqwest.workspace = true

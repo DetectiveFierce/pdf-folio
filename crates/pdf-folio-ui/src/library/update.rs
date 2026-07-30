@@ -618,7 +618,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                             if let Some(folder_id) = destination_folder.as_ref() {
                                 db.add_entry_to_folder(&entry.id, folder_id)?;
                             }
-                            Ok(pdf_folio_db::ImportSummary {
+                            Ok(pdf_folio_core::ImportSummary {
                                 entries: vec![entry],
                                 errors: Vec::new(),
                             })

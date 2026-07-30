@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
-use super::naming::{clean_folder_name, next_folder_suffix, MANUAL_ORDER_GAP};
 use super::library::row_to_entry;
+use super::naming::{clean_folder_name, next_folder_suffix, MANUAL_ORDER_GAP};
 use super::{
     Db, EntryFolderMembership, EntryId, EntryTagSnapshot, EntryTrashState, Folder, FolderId,
     LibraryEntry, LibraryFolderSnapshot, LibraryOrganizationSnapshot,

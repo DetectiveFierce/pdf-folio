@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use iced::Point;
 use iced::Rectangle;
-use pdf_folio_db::{EntryId, Folder, FolderId, LibrarySortMode};
+use pdf_folio_core::{EntryId, Folder, FolderId, LibrarySortMode};
 
 pub const LIBRARY_DRAG_AUTOSCROLL_TICK_MS: u64 = 16;
 pub const LIBRARY_DRAG_AUTOSCROLL_EDGE_BAND: f32 = 96.0;

@@ -9,7 +9,7 @@ use directories::ProjectDirs;
 use iced::futures::SinkExt;
 use iced::Task;
 use pdf_folio_core::PdfDoc;
-use pdf_folio_db::{
+use pdf_folio_core::{
     hash_file, scan_pdf_files, Db, EntryId, Folder, FolderId, ImportSummary, ImportedEntry,
     IndexDocument, LibraryEntry, LibraryOrganizationSnapshot, LibrarySortMode, LibraryWatchEvent,
     NewLibraryEntry, SearchIndex,

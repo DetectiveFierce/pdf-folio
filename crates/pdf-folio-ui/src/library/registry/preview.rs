@@ -2,7 +2,7 @@ use crate::library::registry::state::{
     LibraryPreview, LibraryPreviewThumbnail, LIBRARY_SWITCHER_PREVIEW_LIMIT,
 };
 use crate::*;
-use pdf_folio_db::thumbnail_path;
+use pdf_folio_core::thumbnail_path;
 
 pub(crate) fn load_library_preview(profile: &LibraryProfile) -> LibraryPreview {
     Db::open(profile.db_path.clone())

@@ -1007,7 +1007,7 @@ impl PDFolioApp {
 
     pub(crate) fn library_folder_card_target_at_cursor(&self, cursor: Point) -> Option<FolderId> {
         let child_folders = self.child_folders();
-        let dragged_folder_sentinel = FolderId::new("__pdf_folio_db_drag__");
+        let dragged_folder_sentinel = FolderId::new("__pdf_folio_core_drag__");
         let folder_section_top = if self.parent_directory_drop_box_visible() {
             parent_directory_drop_box_height(self) + Spacing::MD
         } else {

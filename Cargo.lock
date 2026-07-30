@@ -4217,13 +4217,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdf-folio-db"
-version = "0.1.0"
-dependencies = [
- "pdf-folio-core",
-]
-
-[[package]]
 name = "pdf-folio-main"
 version = "0.1.0"
 dependencies = [
@@ -4262,7 +4255,6 @@ dependencies = [
  "notify",
  "pdf-folio-cloud",
  "pdf-folio-core",
- "pdf-folio-db",
  "pdf-folio-style",
  "reqwest",
  "rfd",

@@ -1,11 +1,11 @@
-use super::*;
 use super::naming::MANUAL_ORDER_GAP;
+use super::*;
 use chrono::Utc;
 use std::path::Path;
 
 fn test_db() -> Db {
     let path = std::env::temp_dir().join(format!(
-        "pdf-folio-db-{}-{}.db",
+        "pdf-folio-core-db-{}-{}.db",
         std::process::id(),
         Utc::now().timestamp_nanos_opt().unwrap_or_default()
     ));

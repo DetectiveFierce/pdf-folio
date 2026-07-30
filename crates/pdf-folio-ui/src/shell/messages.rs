@@ -9,10 +9,10 @@ use iced::Point;
 use pdf_folio_cloud::raindrop::{
     RaindropImportDestination, RaindropImportPreview, RaindropImportProgress, RaindropImportSummary,
 };
-use pdf_folio_core::{Annotation, AnnotationId, PageTextLayer, PdfDoc, TileKey};
-use pdf_folio_db::{
+use pdf_folio_core::{
     EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
 };
+use pdf_folio_core::{PageTextLayer, PdfDoc, TileKey};
 
 use crate::library::state::{LibraryMetadataDensity, LibraryReadingFilter};
 use crate::library::thumbnails::ThumbnailSize;
@@ -377,12 +377,6 @@ pub enum Message {
     LibraryPreferencesSaved,
     /// Last app session was persisted.
     SessionSaved,
-    /// Add an annotation.
-    AnnotationAdded(Annotation),
-    /// Delete an annotation.
-    AnnotationDeleted(AnnotationId),
-    /// Export annotations into a PDF.
-    ExportAnnotations,
     /// Library entries loaded.
     LibraryLoaded {
         entries: Vec<LibraryEntry>,

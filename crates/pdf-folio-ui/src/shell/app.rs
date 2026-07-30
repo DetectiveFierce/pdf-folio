@@ -115,7 +115,6 @@ pub struct ViewerRuntime {
     pub jump_dialog_open: bool,
     pub page_input_editing: bool,
     pub jump_input: String,
-    pub annotations: Vec<Annotation>,
 }
 
 /// Runtime state owned by the library surface.

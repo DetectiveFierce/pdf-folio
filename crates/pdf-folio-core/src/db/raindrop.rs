@@ -187,5 +187,4 @@ impl Db {
             .map(|id| id.map(EntryId::new))
             .context("Could not load Raindrop entry mapping.")
     }
-
 }
