@@ -6,3 +6,4 @@ pub(crate) mod loading;
 pub(crate) mod menus;
 pub(crate) mod root_surface;
 pub(crate) mod sidebar;
+pub(crate) mod sync_status;

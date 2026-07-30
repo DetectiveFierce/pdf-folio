@@ -2,6 +2,38 @@
 
 Source inspected: `github.com/DetectiveFierce/pdf-folio` (branch `main`).
 
+## Current handoff status
+
+Status as of the crate-consolidation pass on branch `consolidate-crates`:
+
+- Phases 1-6 are structurally complete enough for Phase 7 validation.
+- The workspace has the six target crates only: `iced-widget-patch`, `pdf-folio-core`, `pdf-folio-cloud`, `pdf-folio-style`, `pdf-folio-ui`, and `pdf-folio-main`.
+- The removed satellite crates are gone as workspace members and source directories: `pdf-folio-db`, `pdf-folio-raindrop`, `pdf-folio-sync`, `pdf-folio-sync-server`, `pdf-folio-ui-components`, and `pdf-folio-viewer`.
+- `pdf-folio-core` now owns PDF and DB code, including `pdf/geometry.rs`, consolidated `pdf/tests.rs`, and `db/{schema,library,organization,metadata,import,search,raindrop,sync}.rs`.
+- `pdf-folio-cloud` now owns sync, Raindrop, and server code, including `sync/{client,crdt,status,run,cli}.rs`, `raindrop/{client,import,matching}.rs`, and `server/{config,auth,handlers,storage}.rs`.
+- `pdf-folio-style` is split into the requested `book`, `classes`, `components`, and `borders` subtrees.
+- `pdf-folio-ui` now owns the former UI-components and viewer code, with shell/library/viewer modules and shared components for command palette, context menus, loading overlays, error banners, menus, sidebars, and sync status.
+- `pdf-folio-main` is intentionally thin: `src/main.rs` parses top-level app args, and `src/cli.rs` re-exports the sync CLI surface from `pdf_folio_cloud::sync::cli`.
+
+Judgment calls intentionally left as-is for Phase 7:
+
+- `pdf-folio-core/src/db/sync.rs` is kept as a focused DB sync-metadata module even though the original target diagram did not list it. Folding it into another DB file would make the split worse.
+- `pdf-folio-core/src/db/naming.rs` is kept as a private organization helper. It is small, isolated, and avoids diluting `organization.rs`.
+- `pdf-folio-cloud/src/sync/crdt.rs` remains large because it contains the CRDT metadata implementation plus closely-coupled hydration/materialization helpers. The target file exists and the old `client.rs` is now only the coordinator type. Further subdivision can happen later, but is not needed for crate consolidation.
+- Empty `sync/tests.rs` and `server/tests.rs` files were not created. Existing cloud tests remain in their relevant modules, and adding empty files would only satisfy the diagram cosmetically.
+- Several optional `components/shared/*.rs` wrappers from the target diagram were not created where there was no real code to move. Existing shared UI with real behavior now lives in `command_palette.rs`, `context_menu.rs`, `error_banner.rs`, `loading.rs`, `menus.rs`, `root_surface.rs`, `sidebar.rs`, and `sync_status.rs`.
+- `components/viewer/controls.rs` was not created because the plan explicitly called it optional and the real viewer controls are already split across `toolbar.rs`, `page_controls.rs`, `zoom.rs`, and `find_bar.rs`.
+- `library/view/sidebar.rs` still owns library-mode sidebar composition. Reusable sidebar chrome moved to `components/shared/sidebar.rs`, and folder tree/inspector/dialog/import-status UI lives under `components/library/`; the remaining code is library-mode composition and can reasonably stay.
+
+Next agent should start at **Phase 7**:
+
+1. Confirm stale crate-name searches across `crates`, `docs`, `packaging`, root manifests, and lockfile.
+2. Confirm the root workspace members are exactly the six target crates.
+3. Inspect packaging files for standalone old-crate references.
+4. Inspect docs for old crate-layout descriptions.
+5. Run final gates, in this order unless failures require focused repair: `cargo fmt --check`, `cargo check --workspace`, `cargo clippy --workspace --all-targets`, `cargo test --workspace`.
+6. Only mark the persistent goal complete after the Phase 7 audit proves every checklist item or documented judgment call above is satisfied.
+
 ## 0. Current vs. target shape, in one picture
 
 Current workspace has **12 members**:
