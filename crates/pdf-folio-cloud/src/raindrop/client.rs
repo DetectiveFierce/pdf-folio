@@ -1,9 +1,11 @@
 //! Raindrop.io HTTP client and remote response model.
 
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use reqwest::header::AUTHORIZATION;
+use reqwest::header::{AUTHORIZATION, LOCATION};
 use serde::Deserialize;
 use url::Url;
 
@@ -11,6 +13,10 @@ use super::{
     RaindropPdfCandidate, API_BASE, MAX_PER_PAGE, ZIP_DOWNLOADED_PROGRESS_BASIS_POINTS,
     ZIP_PREPARING_PROGRESS_BASIS_POINTS,
 };
+
+const MAX_PDF_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_PDF_REDIRECTS: usize = 10;
+const PDF_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 impl RaindropPdfCandidate {
     pub(crate) fn to_raindrop(&self) -> Raindrop {
@@ -49,6 +55,7 @@ pub(crate) fn zip_download_progress_basis_points(downloaded: u64, total: u64) ->
 
 pub(crate) struct RaindropClient {
     http: reqwest::Client,
+    download_http: reqwest::Client,
     token: String,
 }
 
@@ -57,6 +64,10 @@ impl RaindropClient {
         Ok(Self {
             http: reqwest::Client::builder()
                 .user_agent("PDF-Folio Raindrop Import")
+                .build()?,
+            download_http: reqwest::Client::builder()
+                .user_agent("PDF-Folio Raindrop Import")
+                .redirect(reqwest::redirect::Policy::none())
                 .build()?,
             token,
         })
@@ -115,14 +126,48 @@ impl RaindropClient {
     }
 
     pub(crate) async fn download_pdf(&self, link: &str) -> Result<Vec<u8>> {
-        let mut request = self.http.get(link).header("Accept", "application/pdf,*/*");
-        if download_requires_raindrop_auth(link) {
-            request = request.header(AUTHORIZATION, format!("Bearer {}", self.token));
+        tokio::time::timeout(PDF_DOWNLOAD_TIMEOUT, self.download_pdf_with_guards(link))
+            .await
+            .with_context(|| format!("Timed out downloading PDF from {link}."))?
+    }
+
+    async fn download_pdf_with_guards(&self, link: &str) -> Result<Vec<u8>> {
+        let mut url = validated_pdf_download_url(link).await?;
+
+        for redirects in 0..=MAX_PDF_REDIRECTS {
+            let mut request = self
+                .download_http
+                .get(url.clone())
+                .header("Accept", "application/pdf,*/*");
+            if download_requires_raindrop_auth(url.as_str()) {
+                request = request.header(AUTHORIZATION, format!("Bearer {}", self.token));
+            }
+            let response = request.send().await?;
+
+            if response.status().is_redirection() {
+                if redirects == MAX_PDF_REDIRECTS {
+                    bail!("Too many redirects while downloading PDF from {link}.");
+                }
+                let location = response
+                    .headers()
+                    .get(LOCATION)
+                    .and_then(|location| location.to_str().ok())
+                    .ok_or_else(|| {
+                        anyhow!("Redirect while downloading PDF from {link} did not include a location.")
+                    })?;
+                let next_url = url.join(location).with_context(|| {
+                    format!("Redirect while downloading PDF from {link} had an invalid location.")
+                })?;
+                validate_pdf_download_url(&next_url).await?;
+                url = next_url;
+                continue;
+            }
+
+            let response = response.error_for_status()?;
+            return read_limited_pdf_response(url.as_str(), response).await;
         }
-        let response = request.send().await?.error_for_status()?;
-        let bytes = response.bytes().await?.to_vec();
-        ensure_pdf_response(link, &bytes)?;
-        Ok(bytes)
+
+        unreachable!("redirect loop exits by returning or bailing")
     }
 
     pub(crate) async fn download_pdf_for_raindrop(&self, raindrop: &Raindrop) -> Result<Vec<u8>> {
@@ -207,6 +252,132 @@ fn download_requires_raindrop_auth(link: &str) -> bool {
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned))
         .is_some_and(|host| host == "raindrop.io" || host.ends_with(".raindrop.io"))
+}
+
+pub(super) async fn validated_pdf_download_url(link: &str) -> Result<Url> {
+    let url = Url::parse(link).with_context(|| format!("Invalid PDF download URL: {link}"))?;
+    validate_pdf_download_url(&url).await?;
+    Ok(url)
+}
+
+async fn validate_pdf_download_url(url: &Url) -> Result<()> {
+    match url.scheme() {
+        "http" | "https" => {}
+        scheme => bail!("Refusing to download PDF from unsupported URL scheme: {scheme}."),
+    }
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow!("Refusing to download PDF from a URL without a host."))?;
+    if host.eq_ignore_ascii_case("localhost") || host.to_ascii_lowercase().ends_with(".localhost") {
+        bail!("Refusing to download PDF from local host: {host}.");
+    }
+
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| anyhow!("Could not determine port for PDF download URL: {url}"))?;
+    let addresses = tokio::net::lookup_host((host, port))
+        .await
+        .with_context(|| format!("Could not resolve PDF download host: {host}"))?;
+    let mut resolved_any = false;
+    for address in addresses {
+        resolved_any = true;
+        let ip = address.ip();
+        if is_blocked_download_address(ip) {
+            bail!("Refusing to download PDF from local or private address: {ip}.");
+        }
+    }
+    if !resolved_any {
+        bail!("PDF download host did not resolve: {host}.");
+    }
+
+    Ok(())
+}
+
+pub(super) fn is_blocked_download_address(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => is_blocked_ipv4_address(ip),
+        IpAddr::V6(ip) => is_blocked_ipv6_address(ip),
+    }
+}
+
+fn is_blocked_ipv4_address(ip: Ipv4Addr) -> bool {
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.is_unspecified()
+        || is_shared_ipv4_address(ip)
+        || is_benchmark_ipv4_address(ip)
+        || is_reserved_ipv4_address(ip)
+}
+
+fn is_blocked_ipv6_address(ip: Ipv6Addr) -> bool {
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || is_unique_local_ipv6(ip)
+        || is_unicast_link_local_ipv6(ip)
+        || is_documentation_ipv6(ip)
+}
+
+fn is_unique_local_ipv6(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xfe00) == 0xfc00
+}
+
+fn is_unicast_link_local_ipv6(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfe80
+}
+
+fn is_documentation_ipv6(ip: Ipv6Addr) -> bool {
+    ip.segments()[0] == 0x2001 && ip.segments()[1] == 0x0db8
+}
+
+fn is_shared_ipv4_address(ip: Ipv4Addr) -> bool {
+    let [first, second, _, _] = ip.octets();
+    first == 100 && (second & 0xc0) == 64
+}
+
+fn is_benchmark_ipv4_address(ip: Ipv4Addr) -> bool {
+    let [first, second, _, _] = ip.octets();
+    first == 198 && (second == 18 || second == 19)
+}
+
+fn is_reserved_ipv4_address(ip: Ipv4Addr) -> bool {
+    ip.octets()[0] >= 240
+}
+
+async fn read_limited_pdf_response(link: &str, mut response: reqwest::Response) -> Result<Vec<u8>> {
+    if let Some(content_length) = response.content_length() {
+        if content_length > MAX_PDF_DOWNLOAD_BYTES {
+            bail!(
+                "Downloaded PDF from {link} is larger than the {} MiB limit.",
+                MAX_PDF_DOWNLOAD_BYTES / 1024 / 1024
+            );
+        }
+    }
+
+    let mut bytes = Vec::with_capacity(
+        response
+            .content_length()
+            .and_then(|length| length.try_into().ok())
+            .unwrap_or_default(),
+    );
+    while let Some(chunk) = response.chunk().await? {
+        let next_len = (bytes.len() as u64).saturating_add(chunk.len() as u64);
+        if next_len > MAX_PDF_DOWNLOAD_BYTES {
+            bail!(
+                "Downloaded PDF from {link} is larger than the {} MiB limit.",
+                MAX_PDF_DOWNLOAD_BYTES / 1024 / 1024
+            );
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+
+    ensure_pdf_response(link, &bytes)?;
+    Ok(bytes)
 }
 
 pub(crate) fn ensure_pdf_response(link: &str, bytes: &[u8]) -> Result<()> {

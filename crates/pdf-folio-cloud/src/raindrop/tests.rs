@@ -1,5 +1,6 @@
 use super::client::{
-    zip_download_progress_basis_points, Raindrop, RaindropCollection, RaindropFile, RaindropRef,
+    is_blocked_download_address, validated_pdf_download_url, zip_download_progress_basis_points,
+    Raindrop, RaindropCollection, RaindropFile, RaindropRef,
 };
 use super::import::{
     mirror_collections, zip_extract_progress_basis_points, zip_import_progress_basis_points,
@@ -9,6 +10,7 @@ use super::matching::{choose_import_strategy, RaindropImportStrategy, ZipMatchIn
 use super::*;
 use pdf_folio_core::Db;
 use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[test]
 fn import_strategy_uses_zip_only_for_large_uploaded_file_batches() {
@@ -75,6 +77,50 @@ fn zip_download_progress_fills_middle_quarter() {
         zip_download_progress_basis_points(100, 100),
         ZIP_DOWNLOADED_PROGRESS_BASIS_POINTS
     );
+}
+
+#[test]
+fn raindrop_pdf_download_blocks_local_network_addresses() {
+    assert!(is_blocked_download_address(IpAddr::V4(Ipv4Addr::new(
+        127, 0, 0, 1
+    ))));
+    assert!(is_blocked_download_address(IpAddr::V4(Ipv4Addr::new(
+        10, 0, 0, 8
+    ))));
+    assert!(is_blocked_download_address(IpAddr::V4(Ipv4Addr::new(
+        169, 254, 10, 20
+    ))));
+    assert!(is_blocked_download_address(IpAddr::V4(Ipv4Addr::new(
+        100, 64, 0, 1
+    ))));
+    assert!(is_blocked_download_address(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    assert!(is_blocked_download_address(IpAddr::V6(
+        "fc00::1".parse().unwrap()
+    )));
+    assert!(is_blocked_download_address(IpAddr::V6(
+        "fe80::1".parse().unwrap()
+    )));
+    assert!(!is_blocked_download_address(IpAddr::V4(Ipv4Addr::new(
+        93, 184, 216, 34
+    ))));
+    assert!(!is_blocked_download_address(IpAddr::V6(
+        "2606:2800:220:1:248:1893:25c8:1946".parse().unwrap()
+    )));
+}
+
+#[tokio::test]
+async fn raindrop_pdf_download_rejects_localhost_and_unsupported_schemes() {
+    let localhost_error = validated_pdf_download_url("http://localhost/file.pdf")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(localhost_error.contains("local host"));
+
+    let scheme_error = validated_pdf_download_url("file:///tmp/file.pdf")
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(scheme_error.contains("unsupported URL scheme"));
 }
 
 #[test]
