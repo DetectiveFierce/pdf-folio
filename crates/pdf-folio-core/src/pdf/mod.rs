@@ -8,7 +8,12 @@
 //! [`pdfium-render`]: https://docs.rs/pdfium-render
 
 pub mod document;
+pub mod geometry;
 pub mod renderer;
 
-pub use document::{OutlineNode, PageTextChar, PageTextLayer, PdfDoc, RenderedPage, TextRect};
+pub use document::{OutlineNode, PageTextChar, PageTextLayer, PdfDoc, RenderedPage};
+pub use geometry::TextRect;
 pub use renderer::{TileCache, TileKey};
+
+#[cfg(test)]
+mod tests;

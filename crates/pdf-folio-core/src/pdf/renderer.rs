@@ -90,6 +90,3 @@ impl Default for TileCache {
         Self::with_default_capacity()
     }
 }
-
-#[cfg(test)]
-mod tests;

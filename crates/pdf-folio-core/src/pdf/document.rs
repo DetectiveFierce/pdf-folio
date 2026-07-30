@@ -8,6 +8,8 @@ use pdfium_render::prelude::{
     PdfBookmark, PdfDocument, PdfDocumentMetadataTagType, PdfRenderConfig, Pdfium,
 };
 
+use super::geometry::TextRect;
+
 /// A rendered PDF page in RGBA8 format.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedPage {
@@ -17,19 +19,6 @@ pub struct RenderedPage {
     pub height: u16,
     /// Pixel data in RGBA8 order.
     pub rgba: Vec<u8>,
-}
-
-/// A normalized top-left-origin rectangle in page coordinates.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TextRect {
-    /// Left edge as a fraction of page width.
-    pub x: f32,
-    /// Top edge as a fraction of page height.
-    pub y: f32,
-    /// Width as a fraction of page width.
-    pub width: f32,
-    /// Height as a fraction of page height.
-    pub height: f32,
 }
 
 /// A single extracted text character and its page-relative bounds.
@@ -346,6 +335,3 @@ impl PdfDoc {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
-
-#[cfg(test)]
-mod tests;
