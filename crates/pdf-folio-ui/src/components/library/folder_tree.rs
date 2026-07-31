@@ -153,7 +153,8 @@ pub(crate) fn file_tree_row<'a>(
     let normal_style = file_tree_style.resolve(ComponentState::Normal);
     let active_style = file_tree_style.resolve(ComponentState::Active);
     let content_background = normal_style.background.unwrap_or(tokens.surface);
-    let indent = (depth as f32 * tokens.primitives.file_tree_indent_width)
+    // Base inset so depth-0 rows aren't flush; deeper rows step by indent_width.
+    let indent = (Spacing::XS + depth as f32 * tokens.primitives.file_tree_indent_width)
         .min(tokens.primitives.file_tree_max_indent);
     let fold_width = fold_button_layout.width.unwrap_or(16.0);
     let meta_width = meta.as_ref().map_or(0.0, |value| {

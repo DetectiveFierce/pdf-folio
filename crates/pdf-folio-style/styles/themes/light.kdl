@@ -1,18 +1,19 @@
 theme "light" {
-    color "background" "#F1EFE9"
-    color "surface" "#FCFAF5"
-    color "surface_raised" "#F6F2EA"
-    color "text_primary" "#261E14"
-    color "text_secondary" "#745F46"
-    color "accent" "#9C732B"
-    color "border" "#D8CEBC"
+    // Soft paper light with clear surface steps
+    color "background" "#EDE9E1"
+    color "surface" "#FBF9F4"
+    color "surface_raised" "#FFFFFF"
+    color "text_primary" "#1F1810"
+    color "text_secondary" "#6E5A42"
+    color "accent" "#A67C2E"
+    color "border" "#D4CBB8"
     color "error" "#B03040"
-    color "canvas" "#E8E2D8"
-    color "placeholder" "#E0D8CA"
-    color "focus" "#9C732B"
-    color "shadow" "#00000029"
+    color "canvas" "#E4DDD2"
+    color "placeholder" "#E8E0D2"
+    color "focus" "#A67C2E"
+    color "shadow" "#1F181029"
 
-    primitive "page_shadow_offset_x" 2
-    primitive "page_shadow_offset_y" 2
+    primitive "page_shadow_offset_x" 0
+    primitive "page_shadow_offset_y" 3
     primitive "progress_girth" 3
 }

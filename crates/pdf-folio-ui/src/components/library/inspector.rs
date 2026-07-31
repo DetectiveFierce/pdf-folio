@@ -117,9 +117,9 @@ fn view_library_summary_inspector(
 
     container(
         scrollable(content)
-            .direction(sidebar_scroll_direction(tokens))
+            .direction(inspector_scroll_direction(tokens))
             .height(Length::Fill)
-            .style(move |_, status| sidebar_scrollable_style(tokens, status)),
+            .style(move |_, status| scrollable_style(tokens, Class::SidebarDetailPanel, status)),
     )
     .height(Length::Fill)
     .style(move |_| container_style(tokens, Class::SidebarDetailPanel))
@@ -164,9 +164,9 @@ fn view_tag_inspector<'a>(
 
     container(
         scrollable(content)
-            .direction(sidebar_scroll_direction(tokens))
+            .direction(inspector_scroll_direction(tokens))
             .height(Length::Fill)
-            .style(move |_, status| sidebar_scrollable_style(tokens, status)),
+            .style(move |_, status| scrollable_style(tokens, Class::SidebarDetailPanel, status)),
     )
     .height(Length::Fill)
     .style(move |_| container_style(tokens, Class::SidebarDetailPanel))

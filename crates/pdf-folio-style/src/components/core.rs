@@ -122,10 +122,14 @@ pub fn empty_state<'a, Message: 'a>(
     let content = container(
         text(label.into())
             .size(FontSize::HEADING)
-            .font(display_font(FontWeight::MEDIUM)),
+            .font(display_font(FontWeight::MEDIUM))
+            .color(tokens.text_secondary)
+            .align_x(TextAlignment::Center.horizontal()),
     )
+    .padding(Spacing::XL)
     .center(Length::Fill)
     .height(Length::Fill)
+    .width(Length::Fill)
     .style(move |_| container_style(tokens, Class::EmptyState));
     with_normal_side_border(content, tokens, Class::EmptyState)
 }

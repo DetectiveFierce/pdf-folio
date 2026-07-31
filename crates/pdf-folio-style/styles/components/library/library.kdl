@@ -13,7 +13,7 @@ primitive "folder_parent_icon_height" 22
 primitive "folder_icon_size" 22
 primitive "folder_icon_container_width" 38
 primitive "folder_icon_container_height" 28
-primitive "folder_icon_background_mix" 0.18
+primitive "folder_icon_background_mix" 0.22
 primitive "library_switcher_sidebar_icon_size" 22
 primitive "library_switcher_sidebar_icon_slot" 30
 primitive "library_switcher_sidebar_button_height" 34
@@ -26,7 +26,7 @@ primitive "file_tree_max_indent" 72
 primitive "file_tree_meta_char_width" 6
 primitive "file_tree_meta_min_width" 52
 primitive "file_tree_meta_max_width" 128
-primitive "file_tree_row_padding_y" 3
+primitive "file_tree_row_padding_y" 4
 primitive "raindrop_tree_indent_width" 14
 primitive "raindrop_tree_max_indent" 70
 primitive "raindrop_tree_fold_width" 20
@@ -38,252 +38,253 @@ component "LibraryVirtualization" {
 }
 
 component "LibraryControlBar" {
-    normal background="#160F07" text="#C8B89A" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
-    normal background="#F7F3EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
+    normal background="#1A140E" text="#D8C9B0" border="#C8B89A28" border_width=1 radius=10 theme="espresso"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=10 theme="light"
 }
 
 component "LibrarySearchInput" {
-    normal background="#1B1208" text="#DDD0BA" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
-    focused background="#23180C" text="#DDD0BA" border="#D4A853" theme="espresso"
-    hovered background="#23180C" text="#DDD0BA" border="#D4A85359" theme="espresso"
+    normal background="#120E09" text="#F0E6D4" border="#C8B89A38" border_width=1 radius=8 theme="espresso"
+    focused background="#1E1610" text="#F0E6D4" border="#E0B45A" theme="espresso"
+    hovered background="#1A140E" text="#F0E6D4" border="#E0B45A55" theme="espresso"
 
-    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
-    focused background="#FFFFFF" text="#261E14" border="#9C732B" theme="light"
-    hovered background="#FFFFFF" text="#261E14" border="#9C732B66" theme="light"
+    normal background="#F5F1E8" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    focused background="#FFFFFF" text="#1F1810" border="#A67C2E" theme="light"
+    hovered background="#FFFFFF" text="#1F1810" border="#A67C2E66" theme="light"
 }
 
 component "LibrarySortDropdown" {
-    layout width=190 padding_x=9 padding_y=6
+    layout width=190 padding_x=10 padding_y=6
 
-    normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
-    hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
-    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+    normal background="#1E1610" text="#D8C9B0" border="#C8B89A30" border_width=1 radius=8 theme="espresso"
+    hovered background="#2A2014" text="#F0E6D4" border="#E0B45A55" theme="espresso"
+    pressed background="#352814" text="#E0B45A" border="#E0B45A" theme="espresso"
 
-    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
-    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
-    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    hovered background="#F0EAE0" text="#A67C2E" border="#A67C2E66" theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E" theme="light"
 }
 
 component "LibraryViewToggle" {
     layout width=34 height=34 padding=0
 
-    normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
-    hovered background="#2B1D0E" text="#C8B89A" border="#D4A85359" theme="espresso"
-    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+    normal background="#1E1610" text="#D8C9B0" border="#C8B89A30" border_width=1 radius=8 theme="espresso"
+    hovered background="#2A2014" text="#F0E6D4" border="#E0B45A55" theme="espresso"
+    pressed background="#352814" text="#E0B45A" border="#E0B45A" theme="espresso"
 
-    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
-    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
-    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    hovered background="#F0EAE0" text="#A67C2E" border="#A67C2E66" theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E" theme="light"
 }
 
 component "LibraryImportButton" {
     layout padding_x=14 padding_y=6
 
-    normal background="#24180B" text="#C8B89A" border="#D4A85340" border_width=1 radius=6 theme="espresso"
-    hovered background="#30220F" text="#D4A853" border="#D4A85373" theme="espresso"
-    pressed background="#3A2912" text="#D4A853" border="#D4A853" theme="espresso"
+    // Primary-leaning action in the toolbar
+    normal background="#E0B45A22" text="#E0B45A" border="#E0B45A55" border_width=1 radius=8 theme="espresso"
+    hovered background="#E0B45A33" text="#F0C870" border="#E0B45A99" theme="espresso"
+    pressed background="#E0B45A44" text="#F0C870" border="#E0B45A" theme="espresso"
 
-    normal background="#EFE3CF" text="#261E14" border="#9C732B4D" border_width=1 radius=6 theme="light"
-    hovered background="#E7D5B8" text="#9C732B" border="#9C732B80" theme="light"
-    pressed background="#DEC69C" text="#9C732B" border="#9C732B" theme="light"
+    normal background="#A67C2E18" text="#8A6520" border="#A67C2E55" border_width=1 radius=8 theme="light"
+    hovered background="#A67C2E28" text="#A67C2E" border="#A67C2E88" theme="light"
+    pressed background="#A67C2E38" text="#A67C2E" border="#A67C2E" theme="light"
 }
 
 component "LibraryGridZoomSlider" {
     layout width=150
 
-    normal background="#201409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=999 theme="espresso"
-    hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
-    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+    normal background="#1E1610" text="#D8C9B0" border="#C8B89A30" border_width=1 radius=999 theme="espresso"
+    hovered background="#2A2014" text="#E0B45A" border="#E0B45A55" theme="espresso"
+    pressed background="#352814" text="#E0B45A" border="#E0B45A" theme="espresso"
 
-    normal background="#FCFAF5" text="#745F46" border="#D8CEBC" border_width=1 radius=999 theme="light"
-    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
-    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+    normal background="#FFFFFF" text="#6E5A42" border="#D4CBB8" border_width=1 radius=999 theme="light"
+    hovered background="#F0EAE0" text="#A67C2E" border="#A67C2E66" theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E" theme="light"
 }
 
 component "LibraryCard" {
     layout columns=2 width=210 row_height=415 content_width=182 title_width=182 info_height=138 media_max_height=277.2 thumbnail_width=128 masonry_gap=18 scrollbar_gutter=10
 
-    normal background="#23180C" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
+    normal background="#1E1610" text="#F0E6D4" border="#C8B89A28" border_width=1 radius=10 theme="espresso"
     normal theme="espresso" {
-        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+        shadow color="#00000040" offset_x=0 offset_y=2 blur=8
     }
-    hovered background="#2B1D0E" text="#DDD0BA" border="#C8B89A2E" theme="espresso"
+    hovered background="#2A2014" text="#F0E6D4" border="#C8B89A45" theme="espresso"
     hovered theme="espresso" {
-        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+        shadow color="#00000066" offset_x=0 offset_y=6 blur=16
     }
-    selected background="#30230F" text="#DDD0BA" border="#D4A853" border_width=1.5 theme="espresso"
+    selected background="#332616" text="#F0E6D4" border="#E0B45A" border_width=1.5 theme="espresso"
     selected theme="espresso" {
-        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+        shadow color="#E0B45A22" offset_x=0 offset_y=2 blur=12
     }
-    pressed background="#352511" border="#D4A853" theme="espresso"
-    active background="#23180C" text="#DDD0BA" border="#D4A853" border_width=1 radius=8 theme="espresso"
+    pressed background="#3A2C18" border="#E0B45A" theme="espresso"
+    active background="#1E1610" text="#F0E6D4" border="#E0B45A" border_width=1 radius=10 theme="espresso"
     active theme="espresso" {
         shadow color="$shadow" offset_x=0 offset_y=10 blur=18
     }
-    disabled background="#120C05" text="#8B6E52" border="#1E160B" border_width=1 radius=8 theme="espresso"
+    disabled background="#14100B" text="#A89072" border="#1E1610" border_width=1 radius=10 theme="espresso"
 
-    normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=10 theme="light"
     normal theme="light" {
-        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+        shadow color="#1F181014" offset_x=0 offset_y=1 blur=6
     }
-    hovered background="#FCFAF5" text="#261E14" border="#C8B89A" theme="light"
+    hovered background="#FBF9F4" text="#1F1810" border="#C4B89E" theme="light"
     hovered theme="light" {
-        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+        shadow color="#1F181024" offset_x=0 offset_y=5 blur=14
     }
-    selected background="#EFE3CF" text="#261E14" border="#9C732B" theme="light"
+    selected background="#F3E8D4" text="#1F1810" border="#A67C2E" theme="light"
     selected theme="light" {
-        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+        shadow color="#A67C2E22" offset_x=0 offset_y=2 blur=10
     }
-    pressed background="#E8D8BD" border="#9C732B" theme="light"
-    active background="#F6F2EA" text="#261E14" border="#9C732B" border_width=1 radius=8 theme="light"
+    pressed background="#EDE0CC" border="#A67C2E" theme="light"
+    active background="#FFFFFF" text="#1F1810" border="#A67C2E" border_width=1 radius=10 theme="light"
     active theme="light" {
         shadow color="$shadow" offset_x=0 offset_y=10 blur=18
     }
-    disabled background="#EFECE5" text="#745F46" border="#E1D8C9" border_width=1 radius=8 theme="light"
+    disabled background="#F0EBE3" text="#6E5A42" border="#E1D8C9" border_width=1 radius=10 theme="light"
 }
 
 component "LibraryFolderCard" {
     layout row_height=86
 
-    normal background="#211609" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
+    normal background="#1C1610" text="#F0E6D4" border="#C8B89A28" border_width=1 radius=10 theme="espresso"
     normal theme="espresso" {
-        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+        shadow color="#00000033" offset_x=0 offset_y=1 blur=6
     }
-    hovered background="#2B1D0E" text="#D4A853" border="#D4A85359" theme="espresso"
+    hovered background="#2A2014" text="#E0B45A" border="#E0B45A55" theme="espresso"
     hovered theme="espresso" {
-        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+        shadow color="#00000055" offset_x=0 offset_y=5 blur=14
     }
-    selected background="#30230F" text="#D4A853" border="#D4A853" border_width=1.5 theme="espresso"
+    selected background="#332616" text="#E0B45A" border="#E0B45A" border_width=1.5 theme="espresso"
     selected theme="espresso" {
-        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+        shadow color="#E0B45A22" offset_x=0 offset_y=2 blur=10
     }
     active theme="espresso" {
         shadow color="$shadow" offset_x=0 offset_y=10 blur=18
     }
-    disabled background="#120C05" text="#8B6E52" border="#1E160B" border_width=1 radius=8 theme="espresso"
+    disabled background="#14100B" text="#A89072" border="#1E1610" border_width=1 radius=10 theme="espresso"
 
-    normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=8 theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=10 theme="light"
     normal theme="light" {
-        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+        shadow color="#1F181014" offset_x=0 offset_y=1 blur=6
     }
-    hovered background="#FCFAF5" text="#9C732B" border="#9C732B66" theme="light"
+    hovered background="#FBF9F4" text="#A67C2E" border="#A67C2E66" theme="light"
     hovered theme="light" {
-        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+        shadow color="#1F181024" offset_x=0 offset_y=5 blur=14
     }
-    selected background="#EFE3CF" text="#9C732B" border="#9C732B" border_width=1.5 theme="light"
+    selected background="#F3E8D4" text="#A67C2E" border="#A67C2E" border_width=1.5 theme="light"
     selected theme="light" {
-        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+        shadow color="#A67C2E22" offset_x=0 offset_y=2 blur=10
     }
     active theme="light" {
         shadow color="$shadow" offset_x=0 offset_y=10 blur=18
     }
-    disabled background="#EFECE5" text="#745F46" border="#E1D8C9" border_width=1 radius=8 theme="light"
+    disabled background="#F0EBE3" text="#6E5A42" border="#E1D8C9" border_width=1 radius=10 theme="light"
 }
 
 component "LibraryRow" {
     layout row_height=78 folder_row_height=50 title_width=520 thumbnail_width=46 progress_width=120
 
-    normal background="#1B1208" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=6 theme="espresso"
+    normal background="#1A140E" text="#F0E6D4" border="#C8B89A24" border_width=1 radius=8 theme="espresso"
     normal theme="espresso" {
-        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+        shadow color="#00000028" offset_x=0 offset_y=1 blur=5
     }
-    hovered background="#23180C" text="#DDD0BA" border="#C8B89A2E" theme="espresso"
+    hovered background="#241A10" text="#F0E6D4" border="#C8B89A40" theme="espresso"
     hovered theme="espresso" {
-        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+        shadow color="#0000004D" offset_x=0 offset_y=4 blur=12
     }
-    selected background="#30230F" text="#DDD0BA" border="#D4A853" border_width=1.5 theme="espresso"
+    selected background="#332616" text="#F0E6D4" border="#E0B45A" border_width=1.5 theme="espresso"
     selected theme="espresso" {
-        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+        shadow color="#E0B45A1A" offset_x=0 offset_y=2 blur=8
     }
-    active background="#23180C" text="#DDD0BA" border="#D4A853" border_width=1 radius=6 theme="espresso"
+    active background="#241A10" text="#F0E6D4" border="#E0B45A" border_width=1 radius=8 theme="espresso"
     active theme="espresso" {
         shadow color="$shadow" offset_x=0 offset_y=10 blur=18
     }
-    disabled background="#120C05" text="#8B6E52" border="#1E160B" border_width=1 radius=6 theme="espresso"
+    disabled background="#14100B" text="#A89072" border="#1E1610" border_width=1 radius=8 theme="espresso"
 
-    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
     normal theme="light" {
-        shadow color="#00000033" offset_x=0 offset_y=1 blur=7
+        shadow color="#1F181012" offset_x=0 offset_y=1 blur=5
     }
-    hovered background="#F6F2EA" text="#261E14" border="#C8B89A" theme="light"
+    hovered background="#F5F1E8" text="#1F1810" border="#C4B89E" theme="light"
     hovered theme="light" {
-        shadow color="#0000004D" offset_x=0 offset_y=5 blur=14
+        shadow color="#1F181022" offset_x=0 offset_y=4 blur=12
     }
-    selected background="#EFE3CF" text="#261E14" border="#9C732B" theme="light"
+    selected background="#F3E8D4" text="#1F1810" border="#A67C2E" theme="light"
     selected theme="light" {
-        shadow color="#0000003D" offset_x=0 offset_y=2 blur=9
+        shadow color="#A67C2E1A" offset_x=0 offset_y=2 blur=8
     }
-    active background="#FCFAF5" text="#261E14" border="#9C732B" border_width=1 radius=6 theme="light"
+    active background="#FFFFFF" text="#1F1810" border="#A67C2E" border_width=1 radius=8 theme="light"
     active theme="light" {
         shadow color="$shadow" offset_x=0 offset_y=10 blur=18
     }
-    disabled background="#EFECE5" text="#745F46" border="#E1D8C9" border_width=1 radius=6 theme="light"
+    disabled background="#F0EBE3" text="#6E5A42" border="#E1D8C9" border_width=1 radius=8 theme="light"
 }
 
 component "TagPill" {
-    normal background="#33240D" text="#C79B49" border="#D4A8534D" border_width=1 radius=10 theme="espresso"
-    hovered background="#3E2B0F" text="#D4A853" border="#D4A85380" theme="espresso"
-    active background="#483314" text="#E0B766" border="#D4A853" theme="espresso"
+    normal background="#3A2A12" text="#E0B45A" border="#E0B45A4D" border_width=1 radius=999 theme="espresso"
+    hovered background="#463316" text="#F0C870" border="#E0B45A80" theme="espresso"
+    active background="#52401C" text="#F0C870" border="#E0B45A" theme="espresso"
 
-    normal background="#E5D2AE" text="#8B6425" border="#9C732B66" border_width=1 radius=10 theme="light"
-    hovered background="#DBC394" text="#9C732B" border="#9C732B99" theme="light"
-    active background="#D1B579" text="#A97D31" border="#9C732B" theme="light"
+    normal background="#F0E2C4" text="#8A6520" border="#A67C2E55" border_width=1 radius=999 theme="light"
+    hovered background="#E8D5A8" text="#A67C2E" border="#A67C2E88" theme="light"
+    active background="#DEC690" text="#8A6520" border="#A67C2E" theme="light"
 }
 
 component "EmptyState" {
-    normal background="#23180C" text="#8B6E52" border="#C8B89A1A" border_width=1 radius=8 theme="espresso"
-    normal background="#FCFAF5" text="#745F46" border="#D8CEBC" border_width=1 radius=8 theme="light"
+    normal background="#1A140E" text="#A89072" border="#C8B89A28" border_width=1 radius=12 theme="espresso"
+    normal background="#FFFFFF" text="#6E5A42" border="#D4CBB8" border_width=1 radius=12 theme="light"
 }
 
 component "DragInsertionMarker" {
     layout preview_grid_x_offset=20 preview_grid_y_offset=16 preview_list_x_offset=18 preview_list_y_offset=14 placeholder_content_alpha=0.42
 
-    normal background="#D4A853" text="#1A1208" border="#D4A853" border_width=0 radius=4 theme="espresso"
-    normal background="#9C732B" text="#FCFAF5" border="#9C732B" border_width=0 radius=4 theme="light"
+    normal background="#E0B45A" text="#17110A" border="#E0B45A" border_width=0 radius=4 theme="espresso"
+    normal background="#A67C2E" text="#FFFFFF" border="#A67C2E" border_width=0 radius=4 theme="light"
 }
 
 component "SelectionCheckbox" {
     layout width=24 height=24 padding=0
 
-    normal background="#160F07CC" text="#DDD0BA" border="#D4A85366" border_width=1 radius=5 theme="espresso"
-    hovered background="#24180B" text="#D4A853" border="#D4A853" theme="espresso"
-    pressed background="#30220F" text="#D4A853" border="#D4A853" theme="espresso"
+    normal background="#160F07CC" text="#F0E6D4" border="#E0B45A66" border_width=1 radius=6 theme="espresso"
+    hovered background="#241A10" text="#E0B45A" border="#E0B45A" theme="espresso"
+    pressed background="#332616" text="#E0B45A" border="#E0B45A" theme="espresso"
 
-    normal background="#FCFAF5DD" text="#261E14" border="#9C732B66" border_width=1 radius=5 theme="light"
-    hovered background="#EFE3CF" text="#9C732B" border="#9C732B" theme="light"
-    pressed background="#DEC69C" text="#9C732B" border="#9C732B" theme="light"
+    normal background="#FFFFFFDD" text="#1F1810" border="#A67C2E66" border_width=1 radius=6 theme="light"
+    hovered background="#F3E8D4" text="#A67C2E" border="#A67C2E" theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E" theme="light"
 }
 
 component "MasterCheckbox" {
     layout width=24 height=24 padding=0
 
-    normal background="#201409" text="#DDD0BA" border="#C8B89A66" border_width=1 radius=5 theme="espresso"
-    hovered background="#2B1D0E" text="#D4A853" border="#D4A853" theme="espresso"
-    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+    normal background="#1E1610" text="#F0E6D4" border="#C8B89A66" border_width=1 radius=6 theme="espresso"
+    hovered background="#2A2014" text="#E0B45A" border="#E0B45A" theme="espresso"
+    pressed background="#352814" text="#E0B45A" border="#E0B45A" theme="espresso"
 
-    normal background="#FCFAF5" text="#261E14" border="#9C732B66" border_width=1 radius=5 theme="light"
-    hovered background="#EFE3CF" text="#9C732B" border="#9C732B" theme="light"
-    pressed background="#DEC69C" text="#9C732B" border="#9C732B" theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#A67C2E66" border_width=1 radius=6 theme="light"
+    hovered background="#F3E8D4" text="#A67C2E" border="#A67C2E" theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E" theme="light"
 }
 
 component "DragStackGhost" {
-    normal background="#24180BCC" text="#DDD0BA" border="#D4A853" border_width=1 radius=8 theme="espresso"
-    active background="#30230FE6" text="#D4A853" border="#D4A853" border_width=1.5 radius=8 theme="espresso"
+    normal background="#241A10CC" text="#F0E6D4" border="#E0B45A" border_width=1 radius=10 theme="espresso"
+    active background="#332616E6" text="#E0B45A" border="#E0B45A" border_width=1.5 radius=10 theme="espresso"
 
-    normal background="#FCFAF5DD" text="#261E14" border="#9C732B" border_width=1 radius=8 theme="light"
-    active background="#EFE3CFE6" text="#9C732B" border="#9C732B" border_width=1.5 radius=8 theme="light"
+    normal background="#FFFFFFDD" text="#1F1810" border="#A67C2E" border_width=1 radius=10 theme="light"
+    active background="#F3E8D4E6" text="#A67C2E" border="#A67C2E" border_width=1.5 radius=10 theme="light"
 }
 
 component "FolderDropTarget" {
-    normal background="#30230F" text="#D4A853" border="#D4A853" border_width=2 radius=8 theme="espresso"
-    active background="#3A2912" text="#D4A853" border="#D4A853" border_width=2 radius=8 theme="espresso"
+    normal background="#332616" text="#E0B45A" border="#E0B45A" border_width=2 radius=10 theme="espresso"
+    active background="#3A2C18" text="#E0B45A" border="#E0B45A" border_width=2 radius=10 theme="espresso"
 
-    normal background="#EFE3CF" text="#9C732B" border="#9C732B" border_width=2 radius=8 theme="light"
-    active background="#E7D5B8" text="#9C732B" border="#9C732B" border_width=2 radius=8 theme="light"
+    normal background="#F3E8D4" text="#A67C2E" border="#A67C2E" border_width=2 radius=10 theme="light"
+    active background="#EDE0CC" text="#A67C2E" border="#A67C2E" border_width=2 radius=10 theme="light"
 }
 
 component "SelectionToolbar" {
-    layout bulk_tag_input_width=150 bulk_tag_input_min_width=90 title_input_width=260 title_input_min_width=120 author_input_width=190 author_input_min_width=96 context_row_height=46 row_spacing=6 row_padding_x=9 row_padding_y=6 folder_row_padding_y=4 dropdown_base_x=137 single_dropdown_extra_x=88 folders_dropdown_offset_x=92 metadata_dropdown_offset_x=202 maintenance_dropdown_offset_x=330 icon_size=16 icon_slot_size=20 tooltip_delay_ms=400
+    layout bulk_tag_input_width=150 bulk_tag_input_min_width=90 title_input_width=260 title_input_min_width=120 author_input_width=190 author_input_min_width=96 context_row_height=46 row_spacing=6 row_padding_x=10 row_padding_y=6 folder_row_padding_y=4 dropdown_base_x=137 single_dropdown_extra_x=88 folders_dropdown_offset_x=92 metadata_dropdown_offset_x=202 maintenance_dropdown_offset_x=330 icon_size=16 icon_slot_size=20 tooltip_delay_ms=400
 
     labels {
         label "AddTag" "Add tag"

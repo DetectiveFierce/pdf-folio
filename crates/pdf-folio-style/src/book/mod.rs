@@ -1615,19 +1615,20 @@ fn set_layout_count(tokens: &mut AppLayoutTokens, token: &str, value: usize) -> 
 /// Built-in dark (espresso-like) palette used before styles load or as a last
 /// resort when the style book cannot provide an `espresso` theme.
 pub fn fallback_dark_tokens() -> ThemeTokens {
+    // Keep in sync with styles/themes/espresso.kdl
     let mut tokens = ThemeTokens {
-        background: Color::from_rgb8(26, 18, 8),
-        surface: Color::from_rgb8(15, 10, 4),
-        surface_raised: Color::from_rgb8(37, 26, 14),
-        text_primary: Color::from_rgb8(221, 208, 186),
-        text_secondary: Color::from_rgb8(139, 110, 82),
-        accent: Color::from_rgb8(212, 168, 83),
-        border: Color::from_rgba8(200, 184, 154, 0.18),
-        error: Color::from_rgb8(217, 64, 64),
-        canvas: Color::from_rgb8(24, 15, 5),
-        placeholder: Color::from_rgb8(46, 32, 16),
-        focus: Color::from_rgb8(212, 168, 83),
-        shadow: Color::from_rgba8(0, 0, 0, 0.62),
+        background: Color::from_rgb8(16, 12, 7),
+        surface: Color::from_rgb8(23, 17, 10),
+        surface_raised: Color::from_rgb8(36, 26, 16),
+        text_primary: Color::from_rgb8(240, 230, 212),
+        text_secondary: Color::from_rgb8(168, 144, 114),
+        accent: Color::from_rgb8(224, 180, 90),
+        border: Color::from_rgba8(200, 184, 154, 0.22),
+        error: Color::from_rgb8(232, 90, 90),
+        canvas: Color::from_rgb8(12, 9, 5),
+        placeholder: Color::from_rgb8(46, 34, 20),
+        focus: Color::from_rgb8(224, 180, 90),
+        shadow: Color::from_rgba8(0, 0, 0, 0.65),
         class_styles: [ClassStyle::EMPTY; Class::COUNT],
         primitives: PrimitiveTokens::default(),
     };
@@ -1638,19 +1639,20 @@ pub fn fallback_dark_tokens() -> ThemeTokens {
 /// Built-in light palette used before styles load or as a last resort when the
 /// style book cannot provide a `light` theme.
 pub fn fallback_light_tokens() -> ThemeTokens {
+    // Keep in sync with styles/themes/light.kdl
     let mut tokens = ThemeTokens {
-        background: Color::from_rgb8(241, 239, 233),
-        surface: Color::from_rgb8(252, 250, 245),
-        surface_raised: Color::from_rgb8(246, 242, 234),
-        text_primary: Color::from_rgb8(38, 30, 20),
-        text_secondary: Color::from_rgb8(116, 95, 70),
-        accent: Color::from_rgb8(156, 115, 43),
-        border: Color::from_rgb8(216, 206, 188),
+        background: Color::from_rgb8(237, 233, 225),
+        surface: Color::from_rgb8(251, 249, 244),
+        surface_raised: Color::from_rgb8(255, 255, 255),
+        text_primary: Color::from_rgb8(31, 24, 16),
+        text_secondary: Color::from_rgb8(110, 90, 66),
+        accent: Color::from_rgb8(166, 124, 46),
+        border: Color::from_rgb8(212, 203, 184),
         error: Color::from_rgb8(176, 48, 64),
-        canvas: Color::from_rgb8(232, 226, 216),
-        placeholder: Color::from_rgb8(224, 216, 202),
-        focus: Color::from_rgb8(156, 115, 43),
-        shadow: Color::from_rgba8(0, 0, 0, 0.16),
+        canvas: Color::from_rgb8(228, 221, 210),
+        placeholder: Color::from_rgb8(232, 224, 210),
+        focus: Color::from_rgb8(166, 124, 46),
+        shadow: Color::from_rgba8(31, 24, 16, 0.16),
         class_styles: [ClassStyle::EMPTY; Class::COUNT],
         primitives: PrimitiveTokens::default(),
     };

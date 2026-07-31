@@ -43,8 +43,8 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     };
     let context_row = view_library_breadcrumb_row(app, tokens, reorder_hint);
     let mut content = column![header, context_row,]
-        .spacing(Spacing::MD)
-        .padding(Spacing::LG);
+        .spacing(Spacing::SM)
+        .padding([Spacing::MD, Spacing::LG]);
     if let Some(progress) = app.library.bulk_operation_progress.as_ref() {
         content = content.push(bulk_operation_progress_banner(app, progress, tokens));
     }

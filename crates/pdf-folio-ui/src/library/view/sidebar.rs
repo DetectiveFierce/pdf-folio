@@ -148,10 +148,15 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
         .spacing(Spacing::XS)
         .align_y(iced::Alignment::Center),
     )
-    .padding(Spacing::MD);
+    .padding(iced::Padding {
+        top: Spacing::MD,
+        right: Spacing::MD,
+        // Keep Explorer close to the first nav section ("Library").
+        bottom: Spacing::XS,
+        left: Spacing::MD,
+    });
 
     let file_tree_component = tokens.class_styles[Class::FileTree.index()];
-    let file_tree_layout = file_tree_component.layout;
     let file_tree_style = file_tree_component.resolve(ComponentState::Normal);
     let content_background = file_tree_style.background.unwrap_or(tokens.surface);
     let body = view_stacked_library_navigation_sidebar(app, sidebar_width, tokens);
@@ -161,16 +166,7 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
         .height(Length::Fill)
         .style(move |_, status| sidebar_scrollable_style(tokens, status));
 
-    let padded_body = container(body_scroll)
-        .height(Length::Fill)
-        .padding(iced::Padding {
-            top: file_tree_layout.padding_top(0.0),
-            right: 0.0,
-            bottom: 0.0,
-            left: 0.0,
-        });
-
-    let tabbed_body = container(padded_body)
+    let tabbed_body = container(body_scroll)
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_| {
@@ -181,7 +177,7 @@ pub(crate) fn view_library_navigation_sidebar<'a>(
             style
         });
 
-    let mut content = column![heading].spacing(Spacing::SM).height(Length::Fill);
+    let mut content = column![heading].spacing(0.0).height(Length::Fill);
     content = content.push(tabbed_body);
 
     container(content).height(Length::Fill).into()
@@ -312,7 +308,7 @@ fn view_stacked_library_navigation_sidebar<'a>(
 
     content
         .padding(iced::Padding {
-            top: Spacing::SM,
+            top: 0.0,
             right: 0.0,
             bottom: Spacing::MD,
             left: 0.0,
@@ -320,14 +316,17 @@ fn view_stacked_library_navigation_sidebar<'a>(
         .into()
 }
 
+/// Shared left inset for Library / Folders / Tags section titles.
+const SIDEBAR_SECTION_TITLE_LEFT: f32 = Spacing::LG;
+
 /// Padded section title used above folder/tag/filter blocks in the nav sidebar.
 fn sidebar_section_heading(label: &str, tokens: ThemeTokens) -> Element<'_, Message> {
     container(section_heading(label, tokens))
         .padding(iced::Padding {
-            top: Spacing::SM,
+            top: Spacing::XS,
             right: Spacing::SM,
             bottom: Spacing::XS,
-            left: Spacing::SM,
+            left: SIDEBAR_SECTION_TITLE_LEFT,
         })
         .into()
 }
@@ -351,7 +350,7 @@ fn sidebar_section_heading_with_toggle(
         top: Spacing::SM,
         right: Spacing::SM,
         bottom: Spacing::XS,
-        left: Spacing::SM,
+        left: SIDEBAR_SECTION_TITLE_LEFT,
     })
     .into()
 }
@@ -394,6 +393,13 @@ pub(crate) fn trash_can_sidebar_row<'a>(
         tokens.primitives.file_tree_meta_min_width,
         tokens.primitives.file_tree_meta_max_width,
     );
+    // Match depth-0 file_tree_row leading layout so the trash icon lines up with
+    // "All PDFs" / other library labels (indent + fold chevron slot).
+    let indent = Spacing::XS.min(tokens.primitives.file_tree_max_indent);
+    let fold_width = tokens.class_styles[Class::FileTreeFoldButton.index()]
+        .layout
+        .width
+        .unwrap_or(16.0);
     let icon_slot = 16.0;
     let active_content_offset = if active {
         ACTIVE_TRASH_CAN_CONTENT_OFFSET
@@ -402,10 +408,12 @@ pub(crate) fn trash_can_sidebar_row<'a>(
     };
     let label_width = (sidebar_width
         - Spacing::SM * 2.0
+        - indent
+        - fold_width
         - icon_slot
         - meta_width
         - active_content_offset
-        - Spacing::XS * 3.0)
+        - Spacing::XS * 4.0)
         .max(42.0);
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(TRASH_CAN_SVG))
         .width(Length::Fixed(icon_slot))
@@ -414,7 +422,8 @@ pub(crate) fn trash_can_sidebar_row<'a>(
             color: Some(text_color),
         });
     let content = row![
-        container("").width(active_content_offset),
+        container("").width(indent + active_content_offset),
+        container("").width(fold_width),
         icon,
         text(file_tree_label("Trash Can", label_width, label_size))
             .size(label_size)
@@ -628,9 +637,9 @@ pub(crate) fn view_selected_folder_sidebar<'a>(
 
     container(
         scrollable(content)
-            .direction(sidebar_scroll_direction(tokens))
+            .direction(inspector_scroll_direction(tokens))
             .height(Length::Fill)
-            .style(move |_, status| sidebar_scrollable_style(tokens, status)),
+            .style(move |_, status| scrollable_style(tokens, Class::SidebarDetailPanel, status)),
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -693,10 +702,8 @@ fn tag_rename_row<'a>(
     let fold_button_layout = tokens.class_styles[Class::FileTreeFoldButton.index()].layout;
     let row_height = 34.0;
     let row_padding_y = 2.0;
-    let indent = tokens
-        .primitives
-        .file_tree_indent_width
-        .min(tokens.primitives.file_tree_max_indent);
+    // Match depth-0 file tree rows (base inset only).
+    let indent = Spacing::XS.min(tokens.primitives.file_tree_max_indent);
     let input_width = (sidebar_width
         - Spacing::SM * 2.0
         - indent
@@ -859,9 +866,9 @@ pub(crate) fn view_selected_pdf_sidebar<'a>(
 
     container(
         scrollable(content)
-            .direction(sidebar_scroll_direction(tokens))
+            .direction(inspector_scroll_direction(tokens))
             .height(Length::Fill)
-            .style(move |_, status| sidebar_scrollable_style(tokens, status)),
+            .style(move |_, status| scrollable_style(tokens, Class::SidebarDetailPanel, status)),
     )
     .width(Length::Fill)
     .height(Length::Fill)

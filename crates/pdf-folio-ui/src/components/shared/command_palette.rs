@@ -50,24 +50,34 @@ pub(crate) fn view_command_palette(app: &PDFolioApp, tokens: ThemeTokens) -> Ele
         .filter(|command| command_matches(command.spec, &app.chrome.command_palette_query))
         .collect::<Vec<_>>();
 
-    let input = text_input("Search commands", &app.chrome.command_palette_query)
+    // Slightly brighter than pure secondary so category/shortcut metadata stays
+    // readable on the raised menu panel without competing with the title.
+    let meta_color = mix_color(tokens.text_secondary, tokens.text_primary, 0.28);
+    let muted_meta = mix_color(tokens.text_secondary, tokens.surface_raised, 0.15);
+
+    let input = text_input("Search commands…", &app.chrome.command_palette_query)
         .on_input(Message::CommandPaletteQueryChanged)
         .on_submit(Message::CommandPaletteRunSelected)
-        .padding([Spacing::SM, Spacing::MD])
-        .size(FontSize::MD)
+        .padding([Spacing::SM + 1.0, Spacing::MD])
+        .size(FontSize::CONTROL)
         .font(ui_font(FontWeight::REGULAR))
-        .style(move |_, status| text_input_style(tokens, Class::LibrarySearchInput, status))
+        .style(move |_, status| text_input_style(tokens, Class::SearchInput, status))
         .width(Length::Fill);
 
     let mut list = column![].spacing(Spacing::XS).width(Length::Fill);
     for (index, command) in commands.iter().enumerate() {
         let selected = index == app.chrome.command_palette_selected_index;
-        let text_color = if selected {
+        let label_color = if selected {
             tokens.text_primary
         } else if command.spec.danger == CommandDanger::Destructive {
             tokens.error
         } else {
-            tokens.text_secondary
+            tokens.text_primary
+        };
+        let detail_color = if selected {
+            mix_color(tokens.text_secondary, tokens.text_primary, 0.45)
+        } else {
+            meta_color
         };
         let shortcut = command.spec.shortcut.unwrap_or("");
         let target_label = match command.spec.target {
@@ -81,49 +91,43 @@ pub(crate) fn view_command_palette(app: &PDFolioApp, tokens: ThemeTokens) -> Ele
             crate::shell::commands::CommandTargetKind::Viewer => "Viewer",
             crate::shell::commands::CommandTargetKind::Document => "Document",
         };
-        let icon_slot = if command.spec.icon.is_some() {
-            "•"
-        } else {
-            ""
+        let category_line = {
+            let category = command.spec.category.label();
+            if target_label.is_empty() {
+                category.to_owned()
+            } else {
+                format!("{category} · {target_label}")
+            }
         };
         let row_content = row![
-            text(icon_slot)
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::MEDIUM))
-                .color(tokens.text_secondary)
-                .width(Length::Fixed(app.layout().metric(
-                    "CommandPalette",
-                    "icon_slot_width",
-                    12.0,
-                ))),
             column![
                 text(command.spec.label)
-                    .size(FontSize::MD)
+                    .size(FontSize::CONTROL)
                     .font(ui_font(FontWeight::MEDIUM))
-                    .color(text_color)
+                    .color(label_color)
                     .wrapping(Wrapping::None),
-                text(
-                    format!("{} {}", command.spec.category.label(), target_label)
-                        .trim()
-                        .to_owned()
-                )
-                .size(FontSize::SM)
-                .font(ui_font(FontWeight::REGULAR))
-                .color(tokens.text_secondary)
-                .wrapping(Wrapping::None),
+                text(category_line)
+                    .size(FontSize::SM)
+                    .font(ui_font(FontWeight::REGULAR))
+                    .color(detail_color)
+                    .wrapping(Wrapping::None),
             ]
             .spacing(
                 app.layout()
-                    .metric("CommandPalette", "metadata_spacing", 1.0,)
+                    .metric("CommandPalette", "metadata_spacing", 2.0)
             )
             .width(Length::Fill),
             text(shortcut)
                 .size(FontSize::SM)
-                .font(ui_font(FontWeight::REGULAR))
-                .color(tokens.text_secondary)
+                .font(ui_font(FontWeight::MEDIUM))
+                .color(if selected {
+                    mix_color(tokens.accent, tokens.text_primary, 0.25)
+                } else {
+                    muted_meta
+                })
                 .wrapping(Wrapping::None),
         ]
-        .spacing(Spacing::SM)
+        .spacing(Spacing::MD)
         .align_y(iced::Alignment::Center);
         list = list.push(
             button(row_content)
@@ -131,24 +135,36 @@ pub(crate) fn view_command_palette(app: &PDFolioApp, tokens: ThemeTokens) -> Ele
                 .width(Length::Fill)
                 .on_press(Message::CommandPaletteRun(command.spec.id))
                 .style(move |_, status| {
-                    let class = if selected {
-                        Class::MenuButton
+                    // Selected rows use MenuItem + Active so they share the
+                    // panel’s selected fill instead of MenuButton chrome.
+                    let status = if selected && matches!(status, iced::widget::button::Status::Active)
+                    {
+                        iced::widget::button::Status::Hovered
                     } else {
-                        Class::MenuItem
+                        status
                     };
-                    button_style(tokens, class, status)
+                    button_style(tokens, Class::MenuItem, status)
                 }),
         );
     }
     if commands.is_empty() {
         list = list.push(
             container(
-                text("No commands found")
-                    .size(FontSize::MD)
-                    .font(ui_font(FontWeight::REGULAR))
-                    .color(tokens.text_secondary),
+                column![
+                    text("No matching commands")
+                        .size(FontSize::CONTROL)
+                        .font(ui_font(FontWeight::MEDIUM))
+                        .color(tokens.text_primary),
+                    text("Try a different search, or press Esc to close")
+                        .size(FontSize::SM)
+                        .font(ui_font(FontWeight::REGULAR))
+                        .color(meta_color),
+                ]
+                .spacing(Spacing::XS),
             )
-            .padding(Spacing::MD),
+            .padding([Spacing::LG, Spacing::MD])
+            .width(Length::Fill)
+            .center_x(Length::Fill),
         );
     }
 
@@ -157,19 +173,25 @@ pub(crate) fn view_command_palette(app: &PDFolioApp, tokens: ThemeTokens) -> Ele
             Scrollbar::new()
                 .width(tokens.primitives.scrollbar_width)
                 .scroller_width(tokens.primitives.scrollbar_scroller_width)
-                .anchor(Anchor::End),
+                .anchor(Anchor::Start),
         ))
         .height(list_height)
         .width(Length::Fill)
         .style(move |_, status| scrollable_style(tokens, Class::MenuPanel, status));
 
+    let hint = text("↑↓ navigate  ·  Enter run  ·  Esc close")
+        .size(FontSize::SM)
+        .font(ui_font(FontWeight::REGULAR))
+        .color(muted_meta);
+
     let panel = column![
         text("Command Palette")
             .size(FontSize::HEADING)
-            .font(display_font(FontWeight::MEDIUM))
+            .font(display_font(FontWeight::SEMIBOLD))
             .color(tokens.text_primary),
         input,
         list_scroll,
+        hint,
     ]
     .spacing(Spacing::MD)
     .padding(Spacing::LG)

@@ -160,7 +160,7 @@ fn view_library_header(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Mes
     .any(|id| command_visible(app, id, CommandSurface::ImportMenu));
     if import_available {
         controls_row = controls_row
-            .push(library_header_button("Import", tokens).on_press(Message::OpenImportMenu));
+            .push(library_import_button("Import", tokens).on_press(Message::OpenImportMenu));
     }
     let has_more_commands = [
         CommandId::RefreshLibrary,
@@ -175,8 +175,8 @@ fn view_library_header(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Mes
     .into_iter()
     .any(|id| command_visible(app, id, CommandSurface::HeaderMore));
     if has_more_commands {
-        controls_row = controls_row
-            .push(library_header_button("More", tokens).on_press(Message::OpenCommandPalette));
+        controls_row =
+            controls_row.push(toolbar_button("More", tokens).on_press(Message::OpenCommandPalette));
     }
     controls_row = controls_row
         .spacing(Spacing::MD)
@@ -233,7 +233,7 @@ fn view_library_selection_toolbar(app: &PDFolioApp, tokens: ThemeTokens) -> Elem
             Message::MasterCheckboxClicked,
         ),
         text(label)
-            .size(FontSize::MD)
+            .size(FontSize::CONTROL)
             .font(ui_font(FontWeight::SEMIBOLD))
             .color(tokens.text_primary)
             .wrapping(Wrapping::None),
@@ -243,7 +243,7 @@ fn view_library_selection_toolbar(app: &PDFolioApp, tokens: ThemeTokens) -> Elem
     .width(Length::Fill);
 
     let mut actions = row![selection_label]
-        .spacing(Spacing::MD)
+        .spacing(Spacing::SM)
         .align_y(iced::Alignment::Center)
         .width(Length::Fill);
 
@@ -265,7 +265,7 @@ fn view_library_selection_toolbar(app: &PDFolioApp, tokens: ThemeTokens) -> Elem
         CommandSurface::SelectionToolbar,
     ) {
         actions = actions.push(
-            toolbar_button("Refresh Metadata", tokens).on_press(
+            toolbar_button("Refresh", tokens).on_press(
                 command_message(app, CommandId::RefreshMetadata)
                     .unwrap_or(Message::BulkRefreshPdfMetadata),
             ),
@@ -287,41 +287,79 @@ fn view_library_selection_toolbar(app: &PDFolioApp, tokens: ThemeTokens) -> Elem
 
     if app.library.trash_view_active {
         actions = actions
-            .push(toolbar_button("Restore", tokens).on_press(Message::RestoreSelectedFromTrash))
             .push(
-                toolbar_button("Delete", tokens).on_press(Message::RequestConfirmation(
-                    ConfirmationAction::PermanentlyDeleteFromTrash,
-                )),
+                selection_emphasis_button("Restore", tokens, Class::SelectionRestoreButton)
+                    .on_press(Message::RestoreSelectedFromTrash),
+            )
+            .push(
+                selection_emphasis_button("Delete", tokens, Class::SelectionDangerButton).on_press(
+                    Message::RequestConfirmation(ConfirmationAction::PermanentlyDeleteFromTrash),
+                ),
             );
     } else {
-        actions = actions.push(toolbar_button("Trash", tokens).on_press(
-            Message::RequestConfirmation(ConfirmationAction::BulkDeleteFromLibrary),
-        ));
+        actions = actions.push(
+            selection_emphasis_button("Trash", tokens, Class::SelectionDangerButton).on_press(
+                Message::RequestConfirmation(ConfirmationAction::BulkDeleteFromLibrary),
+            ),
+        );
     }
     actions =
         actions.push(toolbar_button("Clear", tokens).on_press(Message::ClearLibrarySelection));
 
     container(actions)
         .width(Length::Fill)
-        .padding(Spacing::SM)
+        .padding([Spacing::SM, Spacing::MD])
         .style(move |_| container_style(tokens, Class::LibraryControlBar))
         .into()
 }
 
-/// Styled secondary header/toolbar button with `label` text (import-button class).
-fn library_header_button<'a>(
+/// Primary Import action — accent-tinted so it stands out from toolbar chrome.
+fn library_import_button<'a>(
     label: &'a str,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
+    let layout = tokens.class_styles[Class::LibraryImportButton.index()].layout;
+    let accent = tokens.class_styles[Class::LibraryImportButton.index()]
+        .resolve(ComponentState::Normal)
+        .text_color
+        .unwrap_or(tokens.accent);
+    button(
+        text(label)
+            .size(FontSize::CONTROL)
+            .font(ui_font(FontWeight::MEDIUM))
+            .color(accent)
+            .wrapping(Wrapping::None),
+    )
+    .padding([
+        layout.padding_y(Spacing::SM),
+        layout.padding_x(Spacing::LG),
+    ])
+    .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
+}
+
+/// Emphasized selection action (restore / trash / permanent delete).
+fn selection_emphasis_button<'a>(
+    label: &'a str,
+    tokens: ThemeTokens,
+    class: Class,
+) -> iced::widget::Button<'a, Message> {
+    let layout = tokens.class_styles[class.index()].layout;
+    let color = tokens.class_styles[class.index()]
+        .resolve(ComponentState::Normal)
+        .text_color
+        .unwrap_or(tokens.text_primary);
     button(
         text(label)
             .size(FontSize::MD)
             .font(ui_font(FontWeight::MEDIUM))
-            .color(tokens.text_secondary)
+            .color(color)
             .wrapping(Wrapping::None),
     )
-    .padding([Spacing::SM, Spacing::LG])
-    .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
+    .padding([
+        layout.padding_y(Spacing::SM),
+        layout.padding_x(Spacing::MD),
+    ])
+    .style(move |_, status| button_style(tokens, class, status))
 }
 
 /// Folder path breadcrumbs plus reorder/filter context for the library toolbar.
@@ -350,10 +388,10 @@ pub(crate) fn view_library_breadcrumb_row<'a>(
     for (index, (label, folder_id)) in breadcrumbs.into_iter().enumerate() {
         if index > 0 {
             trail = trail.push(
-                text(">")
+                text("/")
                     .size(FontSize::SM)
                     .font(ui_font(FontWeight::REGULAR))
-                    .color(tokens.text_secondary),
+                    .color(mix_color(tokens.text_secondary, tokens.border, 0.35)),
             );
         }
 
@@ -513,7 +551,7 @@ pub(crate) fn library_new_folder_button<'a>(
         text(if compact { "New" } else { "New folder" })
             .size(FontSize::MD)
             .font(ui_font(FontWeight::MEDIUM))
-            .color(tokens.text_secondary)
+            .color(tokens.text_primary)
             .wrapping(Wrapping::None),
     )
     .padding(if compact {
@@ -521,7 +559,7 @@ pub(crate) fn library_new_folder_button<'a>(
     } else {
         [Spacing::SM, Spacing::LG]
     })
-    .style(move |_, status| button_style(tokens, Class::LibraryImportButton, status))
+    .style(move |_, status| button_style(tokens, Class::ToolbarButton, status))
 }
 
 /// Undo or redo icon button reflecting library organization history.
@@ -652,7 +690,7 @@ pub(crate) fn breadcrumb_button<'a>(
             .color(if active {
                 tokens.text_primary
             } else {
-                tokens.accent
+                tokens.text_secondary
             })
             .wrapping(Wrapping::None),
     )

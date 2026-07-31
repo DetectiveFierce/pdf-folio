@@ -18,13 +18,29 @@
 use crate::*;
 use iced::widget::scrollable::{Anchor, Direction, Scrollbar};
 
-/// Vertical scrollbar configuration shared by library and viewer sidebar panes.
+/// Vertical scrollbar for the **left** navigation sidebar.
+///
+/// Uses `Anchor::End` so the iced-widget-patch places the rail on the left
+/// edge of the pane (alongside the tree).
 pub(crate) fn sidebar_scroll_direction(tokens: ThemeTokens) -> Direction {
     Direction::Vertical(
         Scrollbar::new()
             .width(tokens.primitives.sidebar_scrollbar_width)
             .scroller_width(tokens.primitives.sidebar_scrollbar_scroller_width)
             .anchor(Anchor::End),
+    )
+}
+
+/// Vertical scrollbar for the **right** inspector panel.
+///
+/// Uses the default right-edge rail (`Anchor::Start`) and main content
+/// scrollbar metrics so the inspector does not share the left-sidebar rail.
+pub(crate) fn inspector_scroll_direction(tokens: ThemeTokens) -> Direction {
+    Direction::Vertical(
+        Scrollbar::new()
+            .width(tokens.primitives.scrollbar_width)
+            .scroller_width(tokens.primitives.scrollbar_scroller_width)
+            .anchor(Anchor::Start),
     )
 }
 
@@ -113,18 +129,25 @@ pub(crate) fn chevron_button<'a>(
     .into()
 }
 
-/// Compact text action button for sidebar toolbars.
+/// Full-width action button for inspector / sidebar toolbars.
 pub(crate) fn sidebar_action_button<'a>(
     label: impl Into<String>,
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
+    let color = tokens.class_styles[Class::SidebarActionButton.index()]
+        .resolve(ComponentState::Normal)
+        .text_color
+        .unwrap_or_else(|| sidebar_detail_primary_color(tokens));
     button(
         text(label.into())
             .size(FontSize::MD)
             .font(ui_font(FontWeight::MEDIUM))
-            .color(sidebar_detail_primary_color(tokens)),
+            .color(color)
+            .width(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Center),
     )
     .padding([Spacing::SM, Spacing::LG])
+    .width(Length::Fill)
     .style(move |_, status| crate::style::button_style(tokens, Class::SidebarActionButton, status))
 }
 

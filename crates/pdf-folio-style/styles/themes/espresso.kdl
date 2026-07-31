@@ -1,18 +1,19 @@
 theme "espresso" {
-    color "background" "#0F0A04"
-    color "surface" "#0E0904"
-    color "surface_raised" "#23180C"
-    color "text_primary" "#DDD0BA"
-    color "text_secondary" "#8B6E52"
-    color "accent" "#D4A853"
-    color "border" "#C8B89A2E"
-    color "error" "#D94040"
-    color "canvas" "#170E05"
-    color "placeholder" "#2B1D0E"
-    color "focus" "#D4A853"
-    color "shadow" "#0000009E"
+    // Layered warm dark: canvas → panel → raised chrome
+    color "background" "#100C07"
+    color "surface" "#17110A"
+    color "surface_raised" "#241A10"
+    color "text_primary" "#F0E6D4"
+    color "text_secondary" "#A89072"
+    color "accent" "#E0B45A"
+    color "border" "#C8B89A38"
+    color "error" "#E85A5A"
+    color "canvas" "#0C0905"
+    color "placeholder" "#2E2214"
+    color "focus" "#E0B45A"
+    color "shadow" "#000000A6"
 
-    primitive "page_shadow_offset_x" 2
-    primitive "page_shadow_offset_y" 3
+    primitive "page_shadow_offset_x" 0
+    primitive "page_shadow_offset_y" 4
     primitive "progress_girth" 3
 }

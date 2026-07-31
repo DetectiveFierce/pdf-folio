@@ -1,35 +1,35 @@
 component "Sidebar" {
     layout width=270 min_width=210 max_width=340 resize_handle_width=8 resize_handle_visual_width=2
 
-    normal background="#0E0904" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=0 theme="espresso"
-    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=0 theme="light"
+    normal background="#14100B" text="#F0E6D4" border="#C8B89A24" border_width=1 radius=0 theme="espresso"
+    normal background="#F7F3EA" text="#1F1810" border="#D4CBB8" border_width=1 radius=0 theme="light"
 }
 
 component "SidebarSection" {
-    normal background="#201409" text="#8B6E52" border="#C8B89A1A" border_width=1 radius=0 theme="espresso"
-    normal background="#FCFAF5" text="#745F46" border="#D8CEBC" border_width=1 radius=0 theme="light"
+    normal background="#00000000" text="#A89072" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal background="#00000000" text="#6E5A42" border="#00000000" border_width=0 radius=0 theme="light"
 }
 
 component "SidebarRow" {
-    normal background="#0E0904" text="#8B6E52" border="#00000000" border_width=0 radius=0 theme="espresso"
-    hovered background="#160F07" text="#DDD0BA" border="#00000000" theme="espresso"
-    selected background="#211609" text="#D4A853" border="#D4A853" border_width=1 theme="espresso"
-    active background="#201409" text="#D4A853" border="#D4A853" border_width=1 theme="espresso"
+    normal background="#00000000" text="#C8B89A" border="#00000000" border_width=0 radius=0 theme="espresso"
+    hovered background="#241A10" text="#F0E6D4" border="#00000000" theme="espresso"
+    selected background="#E0B45A22" text="#E0B45A" border="#00000000" border_width=0 theme="espresso"
+    active background="#E0B45A28" text="#E0B45A" border="#00000000" border_width=0 theme="espresso"
 
-    normal background="#FCFAF5" text="#745F46" border="#00000000" border_width=0 radius=0 theme="light"
-    hovered background="#F6F2EA" text="#261E14" border="#00000000" theme="light"
-    selected background="#EAE0CF" text="#9C732B" border="#9C732B" border_width=1 theme="light"
-    active background="#EAE0CF" text="#9C732B" border="#9C732B" border_width=1 theme="light"
+    normal background="#00000000" text="#6E5A42" border="#00000000" border_width=0 radius=0 theme="light"
+    hovered background="#EDE5D6" text="#1F1810" border="#00000000" theme="light"
+    selected background="#E8D5A8" text="#8A6520" border="#00000000" border_width=0 theme="light"
+    active background="#E8D5A8" text="#8A6520" border="#00000000" border_width=0 theme="light"
 }
 
 component "SidebarToggleButton" {
-    normal background="#00000000" text="#C8B89A" border="#00000000" border_width=0 radius=4 theme="espresso"
-    hovered background="#211609" text="#DDD0BA" border="#C8B89A2E" border_width=1 theme="espresso"
-    pressed background="#30230F" text="#D4A853" border="#D4A85359" border_width=1 theme="espresso"
+    normal background="#00000000" text="#C8B89A" border="#00000000" border_width=0 radius=6 theme="espresso"
+    hovered background="#241A10" text="#F0E6D4" border="#C8B89A30" border_width=1 theme="espresso"
+    pressed background="#2E2214" text="#E0B45A" border="#E0B45A55" border_width=1 theme="espresso"
 
-    normal background="#00000000" text="#745F46" border="#00000000" border_width=0 radius=4 theme="light"
-    hovered background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 theme="light"
-    pressed background="#EAE0CF" text="#9C732B" border="#9C732B66" border_width=1 theme="light"
+    normal background="#00000000" text="#6E5A42" border="#00000000" border_width=0 radius=6 theme="light"
+    hovered background="#EDE5D6" text="#1F1810" border="#D4CBB8" border_width=1 theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E66" border_width=1 theme="light"
 }
 
 component "SidebarTab" {
@@ -44,86 +44,86 @@ component "SidebarTab" {
     }
 
     normal theme="espresso" {
-        colors background="#090602" text="#725A42" border="#00000000"
+        colors background="#100C07" text="#8A7358" border="#00000000"
         border width=0 color="#00000000"
-        radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
+        radius top_left=6 top_right=6 bottom_right=0 bottom_left=0
     }
     hovered theme="espresso" {
-        colors background="#191006" text="#9F805E" border="#00000000"
+        colors background="#1E1610" text="#C8B89A" border="#00000000"
         border width=0 color="#00000000"
-        radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
+        radius top_left=6 top_right=6 bottom_right=0 bottom_left=0
     }
     pressed theme="espresso" {
-        colors background="#251607" text="#AA8A64" border="#00000000"
+        colors background="#241A10" text="#D8C9B0" border="#00000000"
         border width=0 color="#00000000"
-        radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
+        radius top_left=6 top_right=6 bottom_right=0 bottom_left=0
     }
     active theme="espresso" {
-        colors background="#201409" text="#B0926D" border="#00000000"
+        colors background="#1A140E" text="#E0B45A" border="#00000000"
         border width=0 color="#00000000"
-        radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
+        radius top_left=6 top_right=6 bottom_right=0 bottom_left=0
     }
 
     normal theme="light" {
-        colors background="#F2F0EB" text="$text_secondary" border="#00000000"
+        colors background="#EDE9E1" text="$text_secondary" border="#00000000"
         border width=0 color="#00000000"
-        radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
+        radius top_left=6 top_right=6 bottom_right=0 bottom_left=0
     }
     hovered theme="light" {
-        colors background="#EAE5DD" text="$text_primary" border="#00000000"
+        colors background="#E6DFD2" text="$text_primary" border="#00000000"
         border width=0 color="#00000000"
-        radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
+        radius top_left=6 top_right=6 bottom_right=0 bottom_left=0
     }
     pressed theme="light" {
-        colors background="#E1D9CD" text="$text_primary" border="#00000000"
+        colors background="#DDD4C4" text="$text_primary" border="#00000000"
         border width=0 color="#00000000"
-        radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
+        radius top_left=6 top_right=6 bottom_right=0 bottom_left=0
     }
     active theme="light" {
-        colors background="#F7F5F0" text="$text_primary" border="#00000000"
+        colors background="#F7F3EA" text="$text_primary" border="#00000000"
         border width=0 color="#00000000"
-        radius top_left=5 top_right=5 bottom_right=0 bottom_left=0
+        radius top_left=6 top_right=6 bottom_right=0 bottom_left=0
     }
 }
 
 component "FileTree" {
-    layout height=26 padding_top=8
+    layout height=28 padding_top=0
     text size=14 weight="medium"
 
     normal theme="espresso" {
-        colors background="#201409" text="$text_secondary" border="#00000000"
+        colors background="#00000000" text="$text_secondary" border="#00000000"
         border width=0 color="#00000000"
         radius 0
     }
     hovered theme="espresso" {
-        colors background="#2A1B0B" text="$text_primary" border="#00000000"
+        colors background="#241A10" text="$text_primary" border="#00000000"
         border width=0 color="#00000000"
-        radius 3
+        radius 0
     }
     active theme="espresso" {
-        colors background="#4A3515" text="$text_primary" border="#00000000"
+        colors background="#E0B45A22" text="$text_primary" border="#00000000"
         border width=0 color="#00000000" {
-            left width=6 color="$accent"
+            left width=3 color="$accent"
         }
         radius 0
     }
 
     normal theme="light" {
-        colors background="#F7F5F0" text="$text_secondary" border="#00000000"
+        colors background="#00000000" text="$text_secondary" border="#00000000"
         border width=0 color="#00000000"
         radius 0
     }
     hovered theme="light" {
-        colors background="#EFE8DC" text="$text_primary" border="#00000000"
+        colors background="#EDE5D6" text="$text_primary" border="#00000000"
         border width=0 color="#00000000"
-        radius 3
+        radius 0
     }
     active theme="light" {
-        colors background="#E6D9C7" text="$text_primary" border="#00000000"
+        colors background="#E8D5A8" text="$text_primary" border="#00000000"
         border width=0 color="#00000000" {
-            left width=12 color="$accent"
+            left width=3 color="$accent"
         }
-        radius 3
+        radius 0
     }
 }
 
@@ -133,91 +133,91 @@ component "FileTreeFoldButton" {
     normal theme="espresso" {
         colors background="#00000000" text="$text_secondary" border="#00000000"
         border width=0 color="#00000000"
-        radius 3
+        radius 4
     }
     hovered theme="espresso" {
-        colors background="#2A1B0B" text="$text_primary" border="#00000000"
+        colors background="#241A10" text="$text_primary" border="#00000000"
         border width=0 color="#00000000"
-        radius 3
+        radius 4
     }
     pressed theme="espresso" {
-        colors background="#4A3515" text="$text_primary" border="#00000000"
+        colors background="#332616" text="$text_primary" border="#00000000"
         border width=0 color="#00000000"
-        radius 3
+        radius 4
     }
 
     normal theme="light" {
         colors background="#00000000" text="$text_secondary" border="#00000000"
         border width=0 color="#00000000"
-        radius 3
+        radius 4
     }
     hovered theme="light" {
-        colors background="#EFE8DC" text="$text_primary" border="#00000000"
+        colors background="#EDE5D6" text="$text_primary" border="#00000000"
         border width=0 color="#00000000"
-        radius 3
+        radius 4
     }
     pressed theme="light" {
-        colors background="#E6D9C7" text="$text_primary" border="#00000000"
+        colors background="#E6D9C4" text="$text_primary" border="#00000000"
         border width=0 color="#00000000"
-        radius 3
+        radius 4
     }
 }
 
 component "SidebarDetailPanel" {
-    normal background="#201409" text="#B99C78" border="#00000000" border_width=0 radius=0 theme="espresso"
-    normal background="#FCFAF5" text="#261E14" border="#00000000" border_width=0 radius=0 theme="light"
+    normal background="#17110A" text="#D8C9B0" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal background="#FBF9F4" text="#1F1810" border="#00000000" border_width=0 radius=0 theme="light"
 }
 
 component "SidebarDetailRow" {
-    normal background="#160F07" text="#B99C78" border="#C8B89A14" border_width=1 radius=6 theme="espresso"
-    hovered background="#1B1208" text="#C6AD8D" border="#C8B89A26" theme="espresso"
+    normal background="#1E1610" text="#D8C9B0" border="#C8B89A22" border_width=1 radius=8 theme="espresso"
+    hovered background="#241A10" text="#E8DCC8" border="#C8B89A38" theme="espresso"
 
-    normal background="#F6F2EA" text="#261E14" border="#D8CEBC80" border_width=1 radius=5 theme="light"
-    hovered background="#FCFAF5" text="#261E14" border="#C8B89A" theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    hovered background="#F5F1E8" text="#1F1810" border="#C4B89E" theme="light"
 }
 
 component "SidebarFolderCard" {
-    normal background="#160F07" text="#A88A66" border="#C8B89A14" border_width=1 radius=6 theme="espresso"
-    hovered background="#1B1208" text="#B99C78" border="#C8B89A26" theme="espresso"
+    normal background="#1E1610" text="#C8B89A" border="#C8B89A22" border_width=1 radius=8 theme="espresso"
+    hovered background="#241A10" text="#D8C9B0" border="#C8B89A38" theme="espresso"
 
-    normal background="#F6F2EA" text="#261E14" border="#D8CEBC80" border_width=1 radius=6 theme="light"
-    hovered background="#FCFAF5" text="#261E14" border="#C8B89A" theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    hovered background="#F5F1E8" text="#1F1810" border="#C4B89E" theme="light"
 }
 
 component "SidebarFolderCardTitle" {
-    normal background="#00000000" text="#83684B" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal background="#00000000" text="#A89072" border="#00000000" border_width=0 radius=0 theme="espresso"
 
-    normal background="#00000000" text="#745F46" border="#00000000" border_width=0 radius=0 theme="light"
+    normal background="#00000000" text="#6E5A42" border="#00000000" border_width=0 radius=0 theme="light"
 }
 
 component "SidebarFolderTextInput" {
-    normal background="#120C06" text="#947657" border="#C8B89A24" border_width=1 radius=7 theme="espresso"
-    hovered background="#171007" text="#A88A66" border="#C8B89A34" border_width=1 radius=7 theme="espresso"
-    focused background="#1A1108" text="#A88A66" border="#A9823D80" border_width=1 radius=7 theme="espresso"
+    normal background="#120E09" text="#D8C9B0" border="#C8B89A30" border_width=1 radius=8 theme="espresso"
+    hovered background="#1A140E" text="#E8DCC8" border="#C8B89A45" border_width=1 radius=8 theme="espresso"
+    focused background="#1E1610" text="#F0E6D4" border="#E0B45A" border_width=1 radius=8 theme="espresso"
 
-    normal background="#F6F2EA" text="#4B3A28" border="#D8CEBC" border_width=1 radius=7 theme="light"
-    hovered background="#FCFAF5" text="#4B3A28" border="#C8B89A" border_width=1 radius=7 theme="light"
-    focused background="#FCFAF5" text="#4B3A28" border="#9C732B66" border_width=1 radius=7 theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    hovered background="#FBF9F4" text="#1F1810" border="#C4B89E" border_width=1 radius=8 theme="light"
+    focused background="#FFFFFF" text="#1F1810" border="#A67C2E" border_width=1 radius=8 theme="light"
 }
 
 component "SidebarFolderActionButton" {
-    normal background="#1E1409" text="#A98B67" border="#C8B89A26" border_width=1 radius=6 theme="espresso"
-    hovered background="#2B1D0E" text="#B99C78" border="#D4A85340" theme="espresso"
-    pressed background="#352511" text="#C49C4E" border="#D4A85399" theme="espresso"
-    disabled background="#181008" text="#6E563C" border="#C8B89A18" border_width=1 radius=6 theme="espresso"
+    normal background="#1E1610" text="#D8C9B0" border="#C8B89A30" border_width=1 radius=8 theme="espresso"
+    hovered background="#2A2014" text="#F0E6D4" border="#E0B45A55" theme="espresso"
+    pressed background="#352814" text="#E0B45A" border="#E0B45A99" theme="espresso"
+    disabled background="#16120C" text="#6E5A48" border="#C8B89A18" border_width=1 radius=8 theme="espresso"
 
-    normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
-    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
-    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
-    disabled background="#F0EAE0" text="#9B8A72" border="#D8CEBC80" border_width=1 radius=6 theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    hovered background="#F0EAE0" text="#A67C2E" border="#A67C2E66" theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E" theme="light"
+    disabled background="#F0EBE3" text="#A89884" border="#D4CBB880" border_width=1 radius=8 theme="light"
 }
 
 component "SidebarActionButton" {
-    normal background="#1E1409" text="#B99C78" border="#C8B89A26" border_width=1 radius=6 theme="espresso"
-    hovered background="#2B1D0E" text="#CDB893" border="#D4A85340" theme="espresso"
-    pressed background="#352511" text="#D4A853" border="#D4A853B3" theme="espresso"
+    normal background="#1E1610" text="#E0B45A" border="#E0B45A40" border_width=1 radius=8 theme="espresso"
+    hovered background="#2A2014" text="#F0C870" border="#E0B45A80" theme="espresso"
+    pressed background="#352814" text="#F0C870" border="#E0B45A" theme="espresso"
 
-    normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
-    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
-    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+    normal background="#FFFFFF" text="#8A6520" border="#A67C2E55" border_width=1 radius=8 theme="light"
+    hovered background="#F0EAE0" text="#A67C2E" border="#A67C2E88" theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E" theme="light"
 }

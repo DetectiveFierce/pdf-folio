@@ -99,7 +99,7 @@ fn viewer_library_back_button<'a>(
         tokens,
         Class::ViewerToolbarButton,
         ComponentState::Normal,
-        tokens.text_secondary,
+        tokens.text_primary,
     );
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(CHEVRON_LEFT_SVG))
         .width(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))

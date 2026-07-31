@@ -13,30 +13,30 @@ primitive "auto_scroll_radius" 999
 primitive "auto_scroll_shadow_blur" 4
 
 component "ViewerToolbar" {
-    layout height=46 spacing=6 padding_x=9 padding_y=6 title_min_width=28 title_max_width=360 selection_width=116
+    layout height=48 spacing=6 padding_x=10 padding_y=6 title_min_width=28 title_max_width=360 selection_width=116
 
-    normal background="#0E0904" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=0 theme="espresso"
-    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=0 theme="light"
+    normal background="#17110A" text="#F0E6D4" border="#C8B89A24" border_width=1 radius=0 theme="espresso"
+    normal background="#FBF9F4" text="#1F1810" border="#D4CBB8" border_width=1 radius=0 theme="light"
 }
 
 component "ViewerToolbarButton" {
-    layout spacing=4 padding_x=14 padding_y=6
-    text size=14 weight="medium"
+    layout spacing=4 padding_x=12 padding_y=6
+    text size=13 weight="medium"
 
-    normal background="#1E1409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
-    hovered background="#2B1D0E" text="#DDD0BA" border="#D4A85359" theme="espresso"
-    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+    normal background="#1E1610" text="#D8C9B0" border="#C8B89A30" border_width=1 radius=8 theme="espresso"
+    hovered background="#2A2014" text="#F0E6D4" border="#E0B45A55" theme="espresso"
+    pressed background="#352814" text="#E0B45A" border="#E0B45A" theme="espresso"
 
-    normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
-    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
-    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    hovered background="#F0EAE0" text="#A67C2E" border="#A67C2E66" theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E" theme="light"
 }
 
 component "ViewerToolbarTitle" {
     text size=14 weight="medium"
 
-    normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="espresso"
-    normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="light"
+    normal background="#00000000" text="$text_primary" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal background="#00000000" text="$text_primary" border="#00000000" border_width=0 radius=0 theme="light"
 }
 
 component "ViewerPageControl" {
@@ -48,109 +48,109 @@ component "ViewerPageControl" {
 }
 
 component "ViewerZoomControl" {
-    layout control_width=98 menu_width=118 menu_row_height=22 input_width=58 button_size=28 button_padding=0 icon_size=16 menu_padding=0
+    layout control_width=98 menu_width=118 menu_row_height=24 input_width=58 button_size=28 button_padding=0 icon_size=16 menu_padding=0
 
     normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="espresso"
     normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="light"
 }
 
 component "ViewerZoomMenu" {
-    normal background="#23180C" text="$text_primary" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
-    normal background="#F6F2EA" text="$text_primary" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    normal background="#241A10" text="$text_primary" border="#C8B89A40" border_width=1 radius=10 theme="espresso"
+    normal background="#FFFFFF" text="$text_primary" border="#D4CBB8" border_width=1 radius=10 theme="light"
 }
 
 component "ViewerZoomMenuItem" {
-    layout padding_x=6 padding_y=0
+    layout padding_x=8 padding_y=2
 
-    normal background="#23180C" text="$text_primary" border="#00000000" border_width=0 radius=0 theme="espresso"
-    hovered background="#2B1D0E" text="$accent" border="#D4A85340" border_width=1 theme="espresso"
-    pressed background="#352511" text="$accent" border="#D4A853" theme="espresso"
+    normal background="#00000000" text="$text_primary" border="#00000000" border_width=0 radius=6 theme="espresso"
+    hovered background="#332616" text="$accent" border="#00000000" border_width=0 theme="espresso"
+    pressed background="#3A2C18" text="$accent" border="#00000000" theme="espresso"
 
-    normal background="#F6F2EA" text="$text_primary" border="#00000000" border_width=0 radius=0 theme="light"
-    hovered background="#EAE0CF" text="$accent" border="#9C732B66" border_width=1 theme="light"
-    pressed background="#DED1BC" text="$accent" border="#9C732B" theme="light"
+    normal background="#00000000" text="$text_primary" border="#00000000" border_width=0 radius=6 theme="light"
+    hovered background="#F0EAE0" text="$accent" border="#00000000" border_width=0 theme="light"
+    pressed background="#E6D9C4" text="$accent" border="#00000000" theme="light"
 }
 
 component "ViewerSidebar" {
     layout width=228
 
-    normal background="#0E0904" text="#DDD0BA" border="#C8B89A1A" border_width=1 radius=0 theme="espresso"
-    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=0 theme="light"
+    normal background="#14100B" text="#F0E6D4" border="#C8B89A24" border_width=1 radius=0 theme="espresso"
+    normal background="#F7F3EA" text="#1F1810" border="#D4CBB8" border_width=1 radius=0 theme="light"
 }
 
 component "ViewerSidebarTab" {
-    normal background="#0E0904" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="espresso"
-    hovered background="#160F07" text="$text_primary" border="#00000000" theme="espresso"
-    active background="#201409" text="$accent" border="$accent" border_width=1 theme="espresso"
+    normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=6 theme="espresso"
+    hovered background="#241A10" text="$text_primary" border="#00000000" theme="espresso"
+    active background="#E0B45A22" text="$accent" border="#00000000" border_width=0 theme="espresso"
 
-    normal background="#FCFAF5" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="light"
-    hovered background="#F6F2EA" text="$text_primary" border="#00000000" theme="light"
-    active background="#EAE0CF" text="$accent" border="$accent" border_width=1 theme="light"
+    normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=6 theme="light"
+    hovered background="#EDE5D6" text="$text_primary" border="#00000000" theme="light"
+    active background="#E8D5A8" text="$accent" border="#00000000" border_width=0 theme="light"
 }
 
 component "ViewerOutlineEntry" {
-    normal background="#0E0904" text="$text_secondary" border="#00000000" border_width=0 radius=4 theme="espresso"
-    hovered background="#160F07" text="$text_primary" theme="espresso"
-    pressed background="#211609" text="$accent" theme="espresso"
+    normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=6 theme="espresso"
+    hovered background="#241A10" text="$text_primary" theme="espresso"
+    pressed background="#2E2214" text="$accent" theme="espresso"
 
-    normal background="#FCFAF5" text="$text_secondary" border="#00000000" border_width=0 radius=4 theme="light"
-    hovered background="#F6F2EA" text="$text_primary" theme="light"
-    pressed background="#EAE0CF" text="$accent" theme="light"
+    normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=6 theme="light"
+    hovered background="#EDE5D6" text="$text_primary" theme="light"
+    pressed background="#E6D9C4" text="$accent" theme="light"
 }
 
 component "ViewerThumbnail" {
     layout width_px=128
 
-    normal background="#211609" text="$text_secondary" border="#C8B89A1A" border_width=1 radius=6 theme="espresso"
-    normal background="#F6F2EA" text="$text_secondary" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    normal background="#1E1610" text="$text_secondary" border="#C8B89A28" border_width=1 radius=8 theme="espresso"
+    normal background="#FFFFFF" text="$text_secondary" border="#D4CBB8" border_width=1 radius=8 theme="light"
 }
 
 component "ViewerFindBar" {
-    layout width=600 height=42 input_width=140 counter_width=44 button_size=30 button_padding=0 icon_size=16 checkbox_size=16
+    layout width=600 height=44 input_width=140 counter_width=44 button_size=30 button_padding=0 icon_size=16 checkbox_size=16
 
-    normal background="#23180C" text="#DDD0BA" border="#D4A85359" border_width=1 radius=8 theme="espresso"
+    normal background="#241A10" text="#F0E6D4" border="#E0B45A55" border_width=1 radius=10 theme="espresso"
     normal theme="espresso" {
-        radius top_left=8 top_right=0 bottom_right=0 bottom_left=0
-        shadow color="$shadow" offset_x=0 offset_y=8 blur=18
+        radius top_left=10 top_right=0 bottom_right=0 bottom_left=0
+        shadow color="$shadow" offset_x=0 offset_y=10 blur=22
     }
-    normal background="#FCFAF5" text="#261E14" border="#9C732B66" border_width=1 radius=8 theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#A67C2E66" border_width=1 radius=10 theme="light"
     normal theme="light" {
-        radius top_left=8 top_right=0 bottom_right=0 bottom_left=0
+        radius top_left=10 top_right=0 bottom_right=0 bottom_left=0
         shadow color="$shadow" offset_x=0 offset_y=8 blur=18
     }
 }
 
 component "ViewerFindInput" {
-    normal background="#1B1208" text="#DDD0BA" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
-    focused background="#23180C" text="#DDD0BA" border="#D4A853" theme="espresso"
-    hovered background="#23180C" text="#DDD0BA" border="#D4A85359" theme="espresso"
+    normal background="#1A140E" text="#F0E6D4" border="#C8B89A38" border_width=1 radius=8 theme="espresso"
+    focused background="#1E1610" text="#F0E6D4" border="#E0B45A" theme="espresso"
+    hovered background="#1E1610" text="#F0E6D4" border="#E0B45A55" theme="espresso"
 
-    normal background="#FCFAF5" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
-    focused background="#FFFFFF" text="#261E14" border="#9C732B" theme="light"
-    hovered background="#FFFFFF" text="#261E14" border="#9C732B66" theme="light"
+    normal background="#F5F1E8" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    focused background="#FFFFFF" text="#1F1810" border="#A67C2E" theme="light"
+    hovered background="#FFFFFF" text="#1F1810" border="#A67C2E66" theme="light"
 }
 
 component "ViewerFindButton" {
-    normal background="#1E1409" text="#C8B89A" border="#C8B89A2E" border_width=1 radius=6 theme="espresso"
-    hovered background="#2B1D0E" text="#DDD0BA" border="#D4A85359" theme="espresso"
-    pressed background="#352511" text="#D4A853" border="#D4A853" theme="espresso"
+    normal background="#1E1610" text="#D8C9B0" border="#C8B89A30" border_width=1 radius=8 theme="espresso"
+    hovered background="#2A2014" text="#F0E6D4" border="#E0B45A55" theme="espresso"
+    pressed background="#352814" text="#E0B45A" border="#E0B45A" theme="espresso"
 
-    normal background="#F6F2EA" text="#261E14" border="#D8CEBC" border_width=1 radius=6 theme="light"
-    hovered background="#EAE0CF" text="#9C732B" border="#9C732B66" theme="light"
-    pressed background="#DED1BC" text="#9C732B" border="#9C732B" theme="light"
+    normal background="#FFFFFF" text="#1F1810" border="#D4CBB8" border_width=1 radius=8 theme="light"
+    hovered background="#F0EAE0" text="#A67C2E" border="#A67C2E66" theme="light"
+    pressed background="#E6D9C4" text="#A67C2E" border="#A67C2E" theme="light"
 }
 
 component "ViewerCanvas" {
-    normal background="#170E05" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
-    normal background="#E8E2D8" text="#261E14" border="#00000000" border_width=0 radius=0 theme="light"
+    normal background="#0C0905" text="#F0E6D4" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal background="#E4DDD2" text="#1F1810" border="#00000000" border_width=0 radius=0 theme="light"
 }
 
 component "ViewerPagePlaceholder" {
-    normal background="#211609" text="#8B6E52" border="#C8B89A1A" border_width=1 radius=6 theme="espresso"
-    normal background="#F6F2EA" text="#745F46" border="#D8CEBC" border_width=1 radius=6 theme="light"
+    normal background="#1E1610" text="#A89072" border="#C8B89A28" border_width=1 radius=8 theme="espresso"
+    normal background="#F0EAE0" text="#6E5A42" border="#D4CBB8" border_width=1 radius=8 theme="light"
 }
 
 component "ViewerPresentationOverlay" {
-    normal background="#170E05B8" text="#DDD0BA" border="#00000000" border_width=0 radius=0 theme="espresso"
-    normal background="#E8E2D8B8" text="#261E14" border="#00000000" border_width=0 radius=0 theme="light"
+    normal background="#0C0905B8" text="#F0E6D4" border="#00000000" border_width=0 radius=0 theme="espresso"
+    normal background="#E4DDD2B8" text="#1F1810" border="#00000000" border_width=0 radius=0 theme="light"
 }
