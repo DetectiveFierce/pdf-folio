@@ -364,9 +364,45 @@ fn page_mode_wheel_requires_accumulated_delta_before_turning() {
     // Accumulated -dy of 50px crosses the 48px threshold → next page.
     assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), Some(1));
 
-    // Momentum within cooldown is absorbed.
+    // Long momentum stream after the turn stays locked (one turn per gesture).
     assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
     assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
+}
+
+#[test]
+fn page_mode_wheel_stays_locked_for_continuous_momentum_after_cooldown_window() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.viewer.viewer_scroll_mode = ViewerScrollMode::Page;
+
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -50.0), Some(1));
+    assert!(app.viewer.page_mode_wheel_gesture_consumed);
+
+    // Simulate events that continue well after the old 220ms cooldown would
+    // have expired, but still form one continuous gesture (gaps < idle).
+    for _ in 0..8 {
+        app.viewer.page_mode_wheel_last_event_at =
+            Some(Instant::now() - std::time::Duration::from_millis(100));
+        assert_eq!(
+            app.take_page_mode_wheel_turn(0.0, -80.0),
+            None,
+            "continuous momentum must not turn another page after cooldown-length gaps"
+        );
+    }
+}
+
+#[test]
+fn page_mode_wheel_rearms_after_gesture_idle_gap() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.viewer.viewer_scroll_mode = ViewerScrollMode::Page;
+
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -50.0), Some(1));
+
+    // Idle longer than PAGE_MODE_GESTURE_IDLE_MS ends the gesture.
+    app.viewer.page_mode_wheel_last_event_at =
+        Some(Instant::now() - std::time::Duration::from_millis(200));
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -50.0), Some(1));
+    assert!(app.viewer.page_mode_wheel_gesture_consumed);
 }
 
 #[test]

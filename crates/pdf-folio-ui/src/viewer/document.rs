@@ -122,6 +122,8 @@ pub struct ViewerRuntime {
     /// Accumulates trackpad/momentum micro-events until a page-turn threshold is
     /// reached so one gesture does not skip multiple pages.
     pub page_mode_wheel_accum: f32,
-    /// When the last page-mode page turn was applied (momentum cooldown).
-    pub page_mode_wheel_turned_at: Option<Instant>,
+    /// When the most recent page-mode wheel event was observed (gesture idle detect).
+    pub page_mode_wheel_last_event_at: Option<Instant>,
+    /// True after a page turn until wheel input goes idle (one turn per gesture).
+    pub page_mode_wheel_gesture_consumed: bool,
 }

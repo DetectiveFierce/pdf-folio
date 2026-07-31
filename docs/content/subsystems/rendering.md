@@ -132,7 +132,7 @@ Find loads text layers **progressively**: the current viewport (+ margin) first,
 
 Text-layer completions carry `document_generation`. Opening a different PDF bumps that counter so in-flight extraction from the previous file cannot insert layers, update find matches, or surface errors on the newly open document.
 
-**Page scroll mode** does not turn a page on every raw wheel event. Deltas accumulate until ~48 logical pixels of motion, then one turn fires and a short cooldown (~220 ms) absorbs trackpad momentum tails.
+**Page scroll mode** does not turn a page on every raw wheel event. Deltas accumulate until ~48 logical pixels of motion, then **one** turn fires for the continuous gesture. Further events are ignored until wheel input goes idle (~160 ms gap before the next event), so long trackpad momentum cannot multi-skip after a fixed cooldown would have expired.
 
 Sidebar **thumbnails** only rasterize a window of pages around the current reading position (~12 on each side), so large documents do not schedule every thumbnail at once.
 

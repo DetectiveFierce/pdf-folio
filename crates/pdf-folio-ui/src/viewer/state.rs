@@ -581,7 +581,8 @@ impl PDFolioApp {
                 find_text_generation: 0,
                 document_generation: 0,
                 page_mode_wheel_accum: 0.0,
-                page_mode_wheel_turned_at: None,
+                page_mode_wheel_last_event_at: None,
+                page_mode_wheel_gesture_consumed: false,
             },
             library: LibraryRuntime {
                 compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),
@@ -844,7 +845,8 @@ impl PDFolioApp {
         // Invalidate in-flight text extraction from the previous document.
         self.viewer.document_generation = self.viewer.document_generation.wrapping_add(1);
         self.viewer.page_mode_wheel_accum = 0.0;
-        self.viewer.page_mode_wheel_turned_at = None;
+        self.viewer.page_mode_wheel_last_event_at = None;
+        self.viewer.page_mode_wheel_gesture_consumed = false;
 
         Task::batch([
             self.request_visible_pages(),
@@ -1222,18 +1224,26 @@ impl PDFolioApp {
 
     /// Applies a wheel delta in page-scroll mode, returning a turn direction if any.
     ///
-    /// Accumulates micro-events until [`PAGE_MODE_WHEEL_THRESHOLD_PX`] is reached
-    /// and enforces a short cooldown after each turn so trackpad momentum does
-    /// not skip multiple pages for one gesture. Returns `Some(±1)` when a page
-    /// turn should fire, or `None` when the event was only absorbed.
+    /// Accumulates micro-events until [`PAGE_MODE_WHEEL_THRESHOLD_PX`] is reached,
+    /// then fires **at most one** page turn for the continuous gesture stream.
+    /// Further events are ignored until input goes idle for
+    /// [`PAGE_MODE_GESTURE_IDLE_MS`] (detected as a gap before the next event),
+    /// so long trackpad momentum cannot skip multiple pages after a fixed
+    /// cooldown would have expired.
     pub(crate) fn take_page_mode_wheel_turn(&mut self, delta_x: f32, delta_y: f32) -> Option<i16> {
         let now = Instant::now();
-        if self
-            .viewer
-            .page_mode_wheel_turned_at
-            .is_some_and(|at| now.saturating_duration_since(at).as_millis() < PAGE_MODE_WHEEL_COOLDOWN_MS)
-        {
-            // Absorb residual momentum without advancing further pages.
+
+        // A quiet gap means the previous gesture ended; re-arm for a new turn.
+        if let Some(last) = self.viewer.page_mode_wheel_last_event_at {
+            if now.saturating_duration_since(last).as_millis() >= PAGE_MODE_GESTURE_IDLE_MS {
+                self.viewer.page_mode_wheel_accum = 0.0;
+                self.viewer.page_mode_wheel_gesture_consumed = false;
+            }
+        }
+        self.viewer.page_mode_wheel_last_event_at = Some(now);
+
+        // Already turned once in this continuous stream — absorb momentum.
+        if self.viewer.page_mode_wheel_gesture_consumed {
             return None;
         }
 
@@ -1255,7 +1265,7 @@ impl PDFolioApp {
             -1
         };
         self.viewer.page_mode_wheel_accum = 0.0;
-        self.viewer.page_mode_wheel_turned_at = Some(now);
+        self.viewer.page_mode_wheel_gesture_consumed = true;
         Some(direction)
     }
 
@@ -1871,8 +1881,8 @@ const FIND_TEXT_LAYER_MARGIN: u16 = 4;
 const FIND_TEXT_LAYER_BATCH: usize = 8;
 /// Accumulated wheel pixels required before a page-mode turn fires.
 const PAGE_MODE_WHEEL_THRESHOLD_PX: f32 = 48.0;
-/// Minimum time between page-mode turns (absorbs trackpad momentum tails).
-const PAGE_MODE_WHEEL_COOLDOWN_MS: u128 = 220;
+/// Idle gap (no wheel events) that ends a page-mode gesture and re-arms turns.
+const PAGE_MODE_GESTURE_IDLE_MS: u128 = 160;
 
 /// Inclusive character range for the word containing `char_index`.
 pub(crate) fn word_char_range(layer: &PageTextLayer, char_index: usize) -> (usize, usize) {
