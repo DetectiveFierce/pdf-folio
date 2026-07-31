@@ -92,10 +92,12 @@ component "ViewerOutlineEntry" {
     normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=6 theme="espresso"
     hovered background="#241A10" text="$text_primary" theme="espresso"
     pressed background="#2E2214" text="$accent" theme="espresso"
+    active background="#E0B45A22" text="$accent" border="#00000000" border_width=0 radius=6 theme="espresso"
 
     normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=6 theme="light"
     hovered background="#EDE5D6" text="$text_primary" theme="light"
     pressed background="#E6D9C4" text="$accent" theme="light"
+    active background="#E8D5A8" text="$accent" border="#00000000" border_width=0 radius=6 theme="light"
 }
 
 component "ViewerThumbnail" {
@@ -106,7 +108,7 @@ component "ViewerThumbnail" {
 }
 
 component "ViewerFindBar" {
-    layout width=600 height=44 input_width=140 counter_width=44 button_size=30 button_padding=0 icon_size=16 checkbox_size=16
+    layout width=420 height=44 input_width=160 counter_width=56 button_size=30 button_padding=0 icon_size=16 checkbox_size=16
 
     normal background="#241A10" text="#F0E6D4" border="#E0B45A55" border_width=1 radius=10 theme="espresso"
     normal theme="espresso" {

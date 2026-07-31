@@ -108,6 +108,7 @@ fn view_outline_body(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Messa
             0,
             Vec::new(),
             &app.viewer.expanded_outline_paths,
+            app.current_page(),
             tokens,
         ))
         .direction(sidebar_scroll_direction(tokens))

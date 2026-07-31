@@ -357,11 +357,16 @@ fn initial_window_size() -> [f32; 2] {
         .window_size()
 }
 
+/// Idle delay before a debounced session snapshot is written to disk.
+const SESSION_SAVE_DEBOUNCE_MS: u64 = 400;
+
 /// Persists a snapshot of the current app session on a background thread.
 ///
 /// Emits [`Message::SessionSaved`] on success or [`Message::LibraryError`] if
 /// serialization or disk write fails. Call after navigation, zoom, or library
-/// layout changes that should survive relaunch.
+/// layout changes that should survive relaunch. Prefer
+/// [`schedule_session_save`] on continuous scroll paths so disk I/O does not
+/// run every frame.
 pub(crate) fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
     let session = app.snapshot_session();
     Task::perform(
@@ -376,12 +381,38 @@ pub(crate) fn save_app_session_task(app: &PDFolioApp) -> Task<Message> {
     )
 }
 
-/// Batches an arbitrary task with a session snapshot save.
+/// Schedules a debounced session snapshot; stale generations are ignored.
+///
+/// Bumps [`PDFolioApp::session_save_generation`] and emits
+/// [`Message::SessionSaveSettled`] after [`SESSION_SAVE_DEBOUNCE_MS`]. Use on
+/// high-frequency paths such as `ViewportChanged`; keep
+/// [`save_app_session_task`] / [`with_session_save`] for discrete actions.
+pub(crate) fn schedule_session_save(app: &mut PDFolioApp) -> Task<Message> {
+    app.session_save_generation = app.session_save_generation.wrapping_add(1);
+    let generation = app.session_save_generation;
+    Task::perform(
+        async move {
+            tokio::time::sleep(Duration::from_millis(SESSION_SAVE_DEBOUNCE_MS)).await;
+            generation
+        },
+        Message::SessionSaveSettled,
+    )
+}
+
+/// Batches an arbitrary task with an immediate session snapshot save.
 ///
 /// Convenience for update handlers that both produce work and mutate
 /// restorable UI state (mode, document position, filters, etc.).
 pub(crate) fn with_session_save(task: Task<Message>, app: &PDFolioApp) -> Task<Message> {
     Task::batch([task, save_app_session_task(app)])
+}
+
+/// Batches an arbitrary task with a debounced session snapshot save.
+pub(crate) fn with_session_save_debounced(
+    task: Task<Message>,
+    app: &mut PDFolioApp,
+) -> Task<Message> {
+    Task::batch([task, schedule_session_save(app)])
 }
 
 /// Opens the OS file manager at `path`, optionally revealing the file itself.

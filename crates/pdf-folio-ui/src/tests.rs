@@ -1,6 +1,7 @@
 use crate::library::drag::folder_drop_target_ready;
 use crate::viewer::state::ViewerTextAnchor;
 use crate::*;
+use pdf_folio_core::{PageTextChar, TextRect};
 
 fn test_db(label: &str) -> Db {
     let nanos = SystemTime::now()
@@ -213,11 +214,11 @@ fn selected_render_key_returns_none_without_same_page_image() {
 fn prefetch_page_order_prioritizes_visible_then_directional_margin() {
     assert_eq!(
         prefetch_page_order_for_range(4..6, 10, true),
-        vec![4, 5, 3, 6, 7, 8]
+        vec![4, 5, 3, 6, 7, 8, 9]
     );
     assert_eq!(
         prefetch_page_order_for_range(4..6, 10, false),
-        vec![4, 5, 3, 6, 2, 1]
+        vec![4, 5, 3, 6, 2, 1, 0, 7]
     );
     assert_eq!(prefetch_page_order_for_range(0..1, 2, false), vec![0, 1]);
 }
@@ -305,6 +306,103 @@ fn stale_page_render_completion_is_discarded() {
     assert!(!app.viewer.rendered_pages.contains_key(&key));
     assert!(app.viewer.cache.is_empty());
     assert!(!app.viewer.pending_renders.contains_key(&key));
+}
+
+#[test]
+fn stale_text_layer_completion_is_discarded_after_document_change() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.viewer.document_generation = 2;
+    app.viewer.pending_text_layers.insert(0);
+    app.viewer.viewer_find.open = true;
+    app.viewer.viewer_find.query = String::from("hello");
+
+    let layer = Arc::new(PageTextLayer {
+        page: 0,
+        width_points: 100.0,
+        height_points: 100.0,
+        chars: vec![PageTextChar {
+            index: 0,
+            text: String::from("h"),
+            bounds: TextRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.1,
+                height: 0.1,
+            },
+        }],
+    });
+
+    let _ = update(
+        &mut app,
+        Message::ViewerTextLayerLoaded {
+            page: 0,
+            layer: Arc::clone(&layer),
+            document_generation: 1,
+        },
+    );
+
+    assert!(
+        !app.viewer.viewer_text_layers.contains_key(&0),
+        "stale text layer from previous document must not be stored"
+    );
+    assert!(
+        app.viewer.pending_text_layers.contains(&0),
+        "pending markers for the new document should stay until its own tasks finish"
+    );
+    assert!(app.viewer.viewer_find.matches.is_empty());
+}
+
+#[test]
+fn page_mode_wheel_requires_accumulated_delta_before_turning() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.viewer.viewer_scroll_mode = ViewerScrollMode::Page;
+
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
+    // Accumulated -dy of 50px crosses the 48px threshold → next page.
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), Some(1));
+
+    // Long momentum stream after the turn stays locked (one turn per gesture).
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
+}
+
+#[test]
+fn page_mode_wheel_stays_locked_for_continuous_momentum_after_cooldown_window() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.viewer.viewer_scroll_mode = ViewerScrollMode::Page;
+
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -50.0), Some(1));
+    assert!(app.viewer.page_mode_wheel_gesture_consumed);
+
+    // Simulate events that continue well after the old 220ms cooldown would
+    // have expired, but still form one continuous gesture (gaps < idle).
+    for _ in 0..8 {
+        app.viewer.page_mode_wheel_last_event_at =
+            Some(Instant::now() - std::time::Duration::from_millis(100));
+        assert_eq!(
+            app.take_page_mode_wheel_turn(0.0, -80.0),
+            None,
+            "continuous momentum must not turn another page after cooldown-length gaps"
+        );
+    }
+}
+
+#[test]
+fn page_mode_wheel_rearms_after_gesture_idle_gap() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.viewer.viewer_scroll_mode = ViewerScrollMode::Page;
+
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -50.0), Some(1));
+
+    // Idle longer than PAGE_MODE_GESTURE_IDLE_MS ends the gesture.
+    app.viewer.page_mode_wheel_last_event_at =
+        Some(Instant::now() - std::time::Duration::from_millis(200));
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -50.0), Some(1));
+    assert!(app.viewer.page_mode_wheel_gesture_consumed);
 }
 
 #[test]

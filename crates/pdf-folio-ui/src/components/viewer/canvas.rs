@@ -24,12 +24,17 @@ use std::time::Instant;
 /// Pointer movement (logical px) after an empty press before the click is
 /// treated as a drag rather than a selection-clear click.
 const EMPTY_CANVAS_CLICK_DRAG_THRESHOLD: f32 = 4.0;
+/// Max time between clicks that count as multi-click word/line selection.
+const MULTI_CLICK_MS: u128 = 400;
+/// Max pointer travel between multi-clicks (logical px).
+const MULTI_CLICK_DISTANCE: f32 = 6.0;
 
 /// Continuous PDF page surface painted via iced canvas.
 ///
 /// Implements pointer wheel (Ctrl-zoom / horizontal scroll modes), text
-/// selection start/update, and context-menu open. Draw path composites
-/// rendered page tiles from the viewer cache.
+/// selection start/update (including double-click word and triple-click line),
+/// and context-menu open. Draw path composites rendered page tiles from the
+/// viewer cache.
 #[derive(Debug)]
 pub(crate) struct ViewerCanvas<'a> {
     /// Shared app state providing document layout, tiles, and modifiers.
@@ -39,12 +44,24 @@ pub(crate) struct ViewerCanvas<'a> {
 /// Per-widget interaction state for [`ViewerCanvas`].
 ///
 /// Tracks a provisional empty-canvas press so a short click can clear text
-/// selection while a drag past the threshold is ignored as a clear.
+/// selection while a drag past the threshold is ignored as a clear. Also
+/// tracks multi-click timing for word/line selection expand.
 #[derive(Debug, Default)]
 pub(crate) struct ViewerCanvasState {
     /// Cursor position of a left press that did not hit a character; cleared
     /// once movement exceeds [`EMPTY_CANVAS_CLICK_DRAG_THRESHOLD`] or on release.
     pending_empty_click: Option<Point>,
+    /// Last successful character click used to detect double/triple clicks.
+    last_char_click: Option<MultiClickState>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MultiClickState {
+    at: Instant,
+    position: Point,
+    page: u16,
+    char_index: usize,
+    count: u8,
 }
 
 /// Transparent overlay that draws active text-selection highlights over pages.
@@ -83,9 +100,18 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
     ) -> Option<canvas::Action<Message>> {
         match event {
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                if !self.app.viewer.modifiers.control()
-                    && self.app.viewer.viewer_scroll_mode != ViewerScrollMode::Horizontal
-                {
+                // Capture wheel for Ctrl-zoom, page-mode turns, and horizontal
+                // scrolling. Continuous vertical scrolling stays with iced's
+                // scrollable (return None) so momentum/trackpad feel natural.
+                //
+                // Page mode always captures so momentum micro-events can be
+                // accumulated in the updater without leaking into the scrollable.
+                let capture_wheel = self.app.viewer.modifiers.control()
+                    || matches!(
+                        self.app.viewer.viewer_scroll_mode,
+                        ViewerScrollMode::Horizontal | ViewerScrollMode::Page
+                    );
+                if !capture_wheel {
                     return None;
                 }
 
@@ -111,17 +137,29 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
                 let position = cursor.position_in(bounds)?;
                 state.pending_empty_click = None;
                 if let Some(anchor) = char_at_position(self.app, bounds, position) {
+                    let now = Instant::now();
+                    let expand = multi_click_expand(state, now, position, anchor.page, anchor.char_index);
+                    state.last_char_click = Some(MultiClickState {
+                        at: now,
+                        position,
+                        page: anchor.page,
+                        char_index: anchor.char_index,
+                        count: expand,
+                    });
                     Some(
                         canvas::Action::publish(Message::ViewerTextSelectionStarted {
                             page: anchor.page,
                             char_index: anchor.char_index,
+                            expand,
                         })
                         .and_capture(),
                     )
                 } else if self.app.viewer.viewer_text_selection.is_some() {
+                    state.last_char_click = None;
                     state.pending_empty_click = Some(position);
                     Some(canvas::Action::capture())
                 } else {
+                    state.last_char_click = None;
                     None
                 }
             }
@@ -594,6 +632,28 @@ pub(crate) fn scroll_delta_pixels(
         mouse::ScrollDelta::Lines { x, y } => (x * line_scroll_pixels, y * line_scroll_pixels),
         mouse::ScrollDelta::Pixels { x, y } => (x, y),
     }
+}
+
+/// Resolves multi-click expand level (1 = char, 2 = word, 3 = line).
+fn multi_click_expand(
+    state: &ViewerCanvasState,
+    now: Instant,
+    position: Point,
+    page: u16,
+    _char_index: usize,
+) -> u8 {
+    let Some(previous) = state.last_char_click else {
+        return 1;
+    };
+    let elapsed = now.saturating_duration_since(previous.at).as_millis();
+    if elapsed > MULTI_CLICK_MS
+        || point_distance(previous.position, position) > MULTI_CLICK_DISTANCE
+        || previous.page != page
+    {
+        return 1;
+    }
+    // Same glyph neighborhood: cycle 1 → 2 → 3 → 3.
+    previous.count.saturating_add(1).min(3)
 }
 
 /// Unit tests for selection highlight geometry helpers.

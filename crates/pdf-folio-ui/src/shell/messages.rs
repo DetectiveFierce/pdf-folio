@@ -393,14 +393,29 @@ pub enum Message {
     /// Open the jump-to-page overlay.
     OpenJumpDialog,
     /// A page text layer was extracted.
+    ///
+    /// `document_generation` must match [`crate::ViewerRuntime::document_generation`]
+    /// or the result is discarded (stale work from a previously open PDF).
     ViewerTextLayerLoaded {
         page: u16,
         layer: Arc<PageTextLayer>,
+        document_generation: u64,
     },
     /// A page text-layer extraction failed.
-    ViewerTextLayerError { page: u16, error: String },
+    ViewerTextLayerError {
+        page: u16,
+        error: String,
+        document_generation: u64,
+    },
     /// Start selecting PDF text at the character under the cursor.
-    ViewerTextSelectionStarted { page: u16, char_index: usize },
+    /// Begin a text selection (`expand`: 1 = char, 2 = word, 3 = line).
+    ViewerTextSelectionStarted {
+        page: u16,
+        char_index: usize,
+        expand: u8,
+    },
+    /// Continue progressive find text-layer extraction when `generation` is current.
+    ViewerFindTextLayersContinue(u64),
     /// Extend PDF text selection to the character under the cursor.
     ViewerTextSelectionChanged { page: u16, char_index: usize },
     /// Finish the active PDF text selection drag.
@@ -476,6 +491,14 @@ pub enum Message {
     LibraryPreferencesSaved,
     /// Last app session was persisted.
     SessionSaved,
+    /// Debounced session snapshot should be written if `generation` is still current.
+    SessionSaveSettled(u64),
+    /// Debounced reading progress should be written if `generation` is still current.
+    ProgressSaveSettled {
+        generation: u64,
+        entry_id: EntryId,
+        page: u16,
+    },
     /// Library entries loaded.
     LibraryLoaded {
         entries: Vec<LibraryEntry>,
@@ -976,6 +999,14 @@ pub enum Shortcut {
     FineScroll(i16),
     /// Pan horizontally by a small number of logical pixels.
     HorizontalPan(i16),
+    /// Jump to the first page / start of the document.
+    DocumentStart,
+    /// Jump to the last page / end of the document.
+    DocumentEnd,
+    /// Advance to the next find-in-document match.
+    FindNext,
+    /// Move to the previous find-in-document match.
+    FindPrevious,
     /// Select all visible library entries.
     SelectAll,
     /// Open the selected library entry.

@@ -105,4 +105,25 @@ pub struct ViewerRuntime {
     pub page_input_editing: bool,
     /// Jump / page input text (1-based page number as typed).
     pub jump_input: String,
+    /// Monotonic generation for debounced reading-progress writes.
+    pub progress_save_generation: u64,
+    /// Last page index written (or accepted) for library reading progress.
+    pub last_saved_progress_page: Option<u16>,
+    /// Monotonic generation for progressive find text-layer loading.
+    pub find_text_generation: u64,
+    /// Monotonic generation for the open document identity.
+    ///
+    /// Bumped whenever a new PDF is installed so in-flight text-layer tasks
+    /// from a previous document cannot mutate the new document's find/selection
+    /// state when they complete.
+    pub document_generation: u64,
+    /// Residual signed wheel delta for page-mode turns (positive = next page).
+    ///
+    /// Accumulates trackpad/momentum micro-events until a page-turn threshold is
+    /// reached so one gesture does not skip multiple pages.
+    pub page_mode_wheel_accum: f32,
+    /// When the most recent page-mode wheel event was observed (gesture idle detect).
+    pub page_mode_wheel_last_event_at: Option<Instant>,
+    /// True after a page turn until wheel input goes idle (one turn per gesture).
+    pub page_mode_wheel_gesture_consumed: bool,
 }

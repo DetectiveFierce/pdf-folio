@@ -96,6 +96,12 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
                 (key, text) if is_ctrl_character(key, text, modifiers, "f") => {
                     Some(Message::ShortcutPressed(Shortcut::FocusSearch))
                 }
+                (&keyboard::Key::Named(keyboard::key::Named::F3), _) if modifiers.shift() => {
+                    Some(Message::ShortcutPressed(Shortcut::FindPrevious))
+                }
+                (&keyboard::Key::Named(keyboard::key::Named::F3), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::FindNext))
+                }
                 (_, Some("i") | Some("I")) if status != event::Status::Captured => {
                     Some(Message::ShortcutPressed(Shortcut::ToggleLibraryInspector))
                 }
@@ -124,6 +130,18 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
                 }
                 (&keyboard::Key::Named(keyboard::key::Named::Space), _) => {
                     Some(Message::ShortcutPressed(Shortcut::PageDown))
+                }
+                (&keyboard::Key::Named(keyboard::key::Named::PageDown), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::PageDown))
+                }
+                (&keyboard::Key::Named(keyboard::key::Named::PageUp), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::PageUp))
+                }
+                (&keyboard::Key::Named(keyboard::key::Named::Home), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::DocumentStart))
+                }
+                (&keyboard::Key::Named(keyboard::key::Named::End), _) => {
+                    Some(Message::ShortcutPressed(Shortcut::DocumentEnd))
                 }
                 (&keyboard::Key::Named(keyboard::key::Named::ArrowDown), _) => {
                     Some(Message::ShortcutPressed(Shortcut::FineScroll(64)))
@@ -206,43 +224,116 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
     match shortcut {
         Shortcut::In => {
             app.viewer.active_zoom_preset = None;
-            app.zoom_to_width(
-                app.viewer.zoom_width.saturating_add(100),
-                None,
-                ZoomRenderPolicy::Immediate,
+            with_session_save(
+                app.zoom_to_width(
+                    crate::viewer::rendering::zoom_in_width(app.viewer.zoom_width),
+                    None,
+                    ZoomRenderPolicy::Immediate,
+                ),
+                app,
             )
         }
         Shortcut::Out => {
             app.viewer.active_zoom_preset = None;
-            app.zoom_to_width(
-                app.viewer.zoom_width.saturating_sub(100),
-                None,
-                ZoomRenderPolicy::Immediate,
+            with_session_save(
+                app.zoom_to_width(
+                    crate::viewer::rendering::zoom_out_width(app.viewer.zoom_width),
+                    None,
+                    ZoomRenderPolicy::Immediate,
+                ),
+                app,
             )
         }
         Shortcut::Reset => {
             app.viewer.active_zoom_preset = Some(ZoomPreset::Automatic);
             let width = ZoomPreset::Automatic.width_for(app);
-            app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate)
+            with_session_save(
+                app.zoom_to_width(width, None, ZoomRenderPolicy::Immediate),
+                app,
+            )
         }
         Shortcut::ToggleTheme => {
             app.appearance.theme = app.appearance.theme.toggled();
             Task::none()
         }
         Shortcut::ReloadStyles => Task::done(Message::ReloadStyles),
-        Shortcut::PageDown => app.scroll_by(app.viewer.viewer_viewport_height * 0.86),
-        Shortcut::PageUp => app.scroll_by(-(app.viewer.viewer_viewport_height * 0.86)),
+        Shortcut::PageDown => {
+            if app.mode == AppMode::Viewer
+                && app.viewer.viewer_scroll_mode == ViewerScrollMode::Page
+            {
+                let task = app.scroll_page_mode_by(1);
+                return Task::batch([
+                    with_session_save_debounced(task, app),
+                    app.schedule_reading_progress_save(),
+                ]);
+            }
+            let task = app.scroll_by(app.viewer.viewer_viewport_height * 0.86);
+            Task::batch([
+                with_session_save_debounced(task, app),
+                app.schedule_reading_progress_save(),
+            ])
+        }
+        Shortcut::PageUp => {
+            if app.mode == AppMode::Viewer
+                && app.viewer.viewer_scroll_mode == ViewerScrollMode::Page
+            {
+                let task = app.scroll_page_mode_by(-1);
+                return Task::batch([
+                    with_session_save_debounced(task, app),
+                    app.schedule_reading_progress_save(),
+                ]);
+            }
+            let task = app.scroll_by(-(app.viewer.viewer_viewport_height * 0.86));
+            Task::batch([
+                with_session_save_debounced(task, app),
+                app.schedule_reading_progress_save(),
+            ])
+        }
+        Shortcut::DocumentStart => {
+            if app.mode != AppMode::Viewer || app.viewer.doc.is_none() {
+                return Task::none();
+            }
+            let task = app.jump_to_page(0);
+            Task::batch([
+                with_session_save(task, app),
+                app.schedule_reading_progress_save(),
+            ])
+        }
+        Shortcut::DocumentEnd => {
+            let Some(doc) = app.viewer.doc.as_ref() else {
+                return Task::none();
+            };
+            if app.mode != AppMode::Viewer {
+                return Task::none();
+            }
+            let last = doc.page_count().saturating_sub(1);
+            let task = app.jump_to_page(last);
+            Task::batch([
+                with_session_save(task, app),
+                app.schedule_reading_progress_save(),
+            ])
+        }
         Shortcut::FineScroll(delta) => {
             if app.viewer.viewer_scroll_mode == ViewerScrollMode::Horizontal {
-                app.pan_horizontally_by(f32::from(delta));
-                Task::none()
+                let task = app.pan_horizontally_by(f32::from(delta));
+                Task::batch([
+                    with_session_save_debounced(task, app),
+                    app.schedule_reading_progress_save(),
+                ])
             } else {
-                app.scroll_by(f32::from(delta))
+                let task = app.scroll_by(f32::from(delta));
+                Task::batch([
+                    with_session_save_debounced(task, app),
+                    app.schedule_reading_progress_save(),
+                ])
             }
         }
         Shortcut::HorizontalPan(delta) => {
-            app.pan_horizontally_by(f32::from(delta));
-            Task::none()
+            let task = app.pan_horizontally_by(f32::from(delta));
+            Task::batch([
+                with_session_save_debounced(task, app),
+                app.schedule_reading_progress_save(),
+            ])
         }
         Shortcut::SelectAll => {
             if app.mode == AppMode::Library {
@@ -267,6 +358,23 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 return app.open_viewer_find();
             }
             Task::none()
+        }
+        Shortcut::FindNext => {
+            if app.mode != AppMode::Viewer || app.viewer.doc.is_none() {
+                return Task::none();
+            }
+            if !app.viewer.viewer_find.open {
+                return app.open_viewer_find();
+            }
+            app.viewer.viewer_find.select_next();
+            app.scroll_to_selected_viewer_find_match()
+        }
+        Shortcut::FindPrevious => {
+            if app.mode != AppMode::Viewer || !app.viewer.viewer_find.open {
+                return Task::none();
+            }
+            app.viewer.viewer_find.select_previous();
+            app.scroll_to_selected_viewer_find_match()
         }
         Shortcut::RenameSelected => {
             if app.mode == AppMode::Library && app.library.selected_library_entries.len() == 1 {
@@ -410,8 +518,12 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 app.library.export_dialog = None;
                 app.library.export_progress = None;
                 app.library.last_export_summary = None;
-            } else {
+            } else if app.mode == AppMode::Viewer && app.viewer.toc_open {
                 app.viewer.toc_open = false;
+                app.viewer.viewer_viewport_width = app.estimated_viewer_viewport_width();
+                return with_session_save(app.apply_active_dimension_zoom(), app);
+            } else if app.mode == AppMode::Viewer && app.viewer.doc.is_some() {
+                return Task::done(Message::BackToLibrary);
             }
             Task::none()
         }

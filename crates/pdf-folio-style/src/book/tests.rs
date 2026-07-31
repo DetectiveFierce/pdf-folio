@@ -61,7 +61,7 @@ fn bundled_viewer_styles_are_independent_from_global_toolbar() {
 
     assert_eq!(viewer_toolbar, global_toolbar);
     assert!(viewer_find.is_some());
-    assert_eq!(style_book.layout().viewer_find_bar_width, 600.0);
+    assert_eq!(style_book.layout().viewer_find_bar_width, 420.0);
 }
 
 #[test]

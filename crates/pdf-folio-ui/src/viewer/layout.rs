@@ -71,21 +71,23 @@ pub(crate) fn prefetch_page_order_for_range(
         push_unique_page(&mut pages, page, page_count);
     }
 
+    // Immediate neighbors first, then a deeper directional margin for smooth scroll.
     if start > 0 {
         push_unique_page(&mut pages, start - 1, page_count);
     }
     push_unique_page(&mut pages, end, page_count);
 
     if scrolling_forward {
-        push_unique_page(&mut pages, end.saturating_add(1), page_count);
-        push_unique_page(&mut pages, end.saturating_add(2), page_count);
+        for ahead in 1..=4 {
+            push_unique_page(&mut pages, end.saturating_add(ahead), page_count);
+        }
     } else {
-        if start > 1 {
-            push_unique_page(&mut pages, start - 2, page_count);
+        for behind in 2..=4 {
+            if start >= behind {
+                push_unique_page(&mut pages, start - behind, page_count);
+            }
         }
-        if start > 2 {
-            push_unique_page(&mut pages, start - 3, page_count);
-        }
+        push_unique_page(&mut pages, end.saturating_add(1), page_count);
     }
 
     pages

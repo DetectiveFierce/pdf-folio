@@ -44,7 +44,10 @@ Defined in [`viewer/document.rs`](../api/pdf-folio-ui/viewer/document.md) (and r
 | Viewport | scroll offset, zoom width, spread/scroll mode |
 | Text | text layers, selection, find bar state |
 | Outline | TOC tree + selection |
+| Progress | `progress_save_generation`, `last_saved_progress_page` (debounced `last_page` writes) |
 | Errors | document error banner state |
+
+App-level `session_save_generation` debounces session JSON writes during continuous scroll (see [Rendering pipeline](../subsystems/rendering.md#session-and-reading-progress-debounced)).
 
 Deep dive: [Rendering pipeline](../subsystems/rendering.md). API: [`PdfDoc`](../api/pdf-folio-core/pdf/document.md) · [`TileCache`](../api/pdf-folio-core/pdf/renderer.md).  
 API: [viewer document](../api/pdf-folio-ui/viewer/document.md) · [viewer state](../api/pdf-folio-ui/viewer/state.md)
