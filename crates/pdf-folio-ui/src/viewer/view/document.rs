@@ -64,7 +64,7 @@ pub(crate) fn view_viewer_document(app: &PDFolioApp, tokens: ThemeTokens) -> Ele
         let find_width = app
             .layout()
             .viewer_find_bar_width
-            .min((app.viewer.viewer_viewport_width - Spacing::MD * 2.0).max(320.0));
+            .min((app.viewer.viewer_viewport_width - Spacing::MD * 2.0).max(280.0));
         viewer_stack = viewer_stack.push(viewer_find_anchor(app, tokens, find_width));
     }
 

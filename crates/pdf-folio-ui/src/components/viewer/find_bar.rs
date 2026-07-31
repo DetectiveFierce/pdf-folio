@@ -1,8 +1,9 @@
 //! # Find-in-document bar
 //!
 //! Floating find chrome under `components::viewer::find_bar`. Provides the
-//! search field, match counter, previous/next buttons, highlight-all and
-//! case/diacritic toggles, and dismiss control while a document is open.
+//! search field, match counter, previous/next buttons, compact option toggles
+//! (highlight all / case / diacritics), and dismiss control while a document
+//! is open.
 //!
 //! ## Ownership
 //!
@@ -34,11 +35,18 @@ pub(crate) fn viewer_find_anchor(
         .into()
 }
 
-/// Find bar body: query field, match fraction, prev/next, and option toggles.
+/// Find bar body: query field, match fraction, prev/next, and compact toggles.
 fn view_viewer_find_bar(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> Element<'_, Message> {
     let current = app.viewer.viewer_find.selected.map_or(0, |index| index + 1);
     let total = app.viewer.viewer_find.matches.len();
-    let fraction = format!("{current}/{total}");
+    let layers_pending = !app.viewer.pending_text_layers.is_empty();
+    let fraction = if layers_pending && total == 0 && !app.viewer.viewer_find.query.is_empty() {
+        String::from("…")
+    } else if layers_pending {
+        format!("{current}/{total}…")
+    } else {
+        format!("{current}/{total}")
+    };
 
     let content = row![
         search_input_with_class(
@@ -53,7 +61,7 @@ fn view_viewer_find_bar(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> El
         .width(Length::Fixed(app.layout().metric(
             "ViewerFindBar",
             "input_width",
-            140.0
+            160.0
         ),)),
         text(fraction)
             .size(FontSize::SM)
@@ -63,27 +71,36 @@ fn view_viewer_find_bar(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> El
             .width(Length::Fixed(app.layout().metric(
                 "ViewerFindBar",
                 "counter_width",
-                44.0
+                56.0
             ),)),
-        viewer_find_icon_button(app.layout(), CHEVRON_UP_SVG, "Previous match", tokens)
+        viewer_find_icon_button(app.layout(), CHEVRON_UP_SVG, "Previous match (Shift+F3)", tokens)
             .on_press(Message::ViewerFindPrevious),
-        viewer_find_icon_button(app.layout(), CHEVRON_DOWN_SVG, "Next match", tokens)
+        viewer_find_icon_button(app.layout(), CHEVRON_DOWN_SVG, "Next match (F3)", tokens)
             .on_press(Message::ViewerFindNext),
-        checkbox(app.viewer.viewer_find.highlight_all)
-            .label("Highlight All")
-            .on_toggle(Message::ViewerFindHighlightAllToggled)
-            .size(app.layout().metric("ViewerFindBar", "checkbox_size", 16.0))
-            .text_size(FontSize::SM),
-        checkbox(app.viewer.viewer_find.match_case)
-            .label("Match Case")
-            .on_toggle(Message::ViewerFindMatchCaseToggled)
-            .size(app.layout().metric("ViewerFindBar", "checkbox_size", 16.0))
-            .text_size(FontSize::SM),
-        checkbox(app.viewer.viewer_find.match_diacritics)
-            .label("Match Diacritics")
-            .on_toggle(Message::ViewerFindMatchDiacriticsToggled)
-            .size(app.layout().metric("ViewerFindBar", "checkbox_size", 16.0))
-            .text_size(FontSize::SM),
+        find_option_toggle(
+            "All",
+            "Highlight all matches",
+            app.viewer.viewer_find.highlight_all,
+            tokens,
+            Message::ViewerFindHighlightAllToggled(!app.viewer.viewer_find.highlight_all),
+            app.layout(),
+        ),
+        find_option_toggle(
+            "Aa",
+            "Match case",
+            app.viewer.viewer_find.match_case,
+            tokens,
+            Message::ViewerFindMatchCaseToggled(!app.viewer.viewer_find.match_case),
+            app.layout(),
+        ),
+        find_option_toggle(
+            "á",
+            "Match diacritics",
+            app.viewer.viewer_find.match_diacritics,
+            tokens,
+            Message::ViewerFindMatchDiacriticsToggled(!app.viewer.viewer_find.match_diacritics),
+            app.layout(),
+        ),
         icon_button("x", tokens)
             .on_press(Message::CloseViewerFind)
             .width(Length::Fixed(app.layout().metric(
@@ -107,6 +124,53 @@ fn view_viewer_find_bar(app: &PDFolioApp, tokens: ThemeTokens, width: f32) -> El
         .height(Length::Fixed(app.layout().viewer_find_bar_height))
         .style(move |_| container_style(tokens, Class::ViewerFindBar))
         .into()
+}
+
+/// Compact labeled toggle used for find options (saves horizontal space vs checkboxes).
+fn find_option_toggle<'a>(
+    label: &'static str,
+    tooltip_label: &'static str,
+    active: bool,
+    tokens: ThemeTokens,
+    message: Message,
+    layout: &crate::style::AppLayoutTokens,
+) -> Element<'a, Message> {
+    let size = layout.metric("ViewerFindBar", "button_size", 30.0);
+    let content = container(
+        text(label)
+            .size(FontSize::SM)
+            .font(ui_font(if active {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::MEDIUM
+            }))
+            .color(if active {
+                tokens.accent
+            } else {
+                tokens.text_secondary
+            })
+            .wrapping(Wrapping::None),
+    )
+    .center(Length::Fill);
+
+    button(
+        tooltip(content, tooltip_label, tooltip::Position::Top)
+            .style(move |_| container_style(tokens, Class::Tooltip)),
+    )
+    .width(Length::Fixed(size))
+    .height(Length::Fixed(size))
+    .padding(layout.metric("ViewerFindBar", "button_padding", 0.0))
+    .on_press(message)
+    .style(move |_, status| {
+        let mut style = crate::style::button_style(tokens, Class::ViewerFindButton, status);
+        if active {
+            let active_style = tokens.class_styles[Class::ViewerFindButton.index()]
+                .resolve(ComponentState::Pressed);
+            style = style.with_visual_override(active_style);
+        }
+        style
+    })
+    .into()
 }
 
 /// Icon button with tooltip used for find-bar prev/next and option controls.

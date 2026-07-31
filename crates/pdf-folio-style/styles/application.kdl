@@ -111,7 +111,7 @@ component "ErrorBannerAction" {
 }
 
 component "ViewerToolbarChrome" {
-    layout fixed_width=470 library_button_width=70 open_button_width=87 zoom_step_button_width=30 selection_button_width=76 icon_size=16
+    layout fixed_width=620 library_button_width=70 open_button_width=87 zoom_step_button_width=30 selection_button_width=76 icon_size=16
 }
 
 component "AppMenu" {

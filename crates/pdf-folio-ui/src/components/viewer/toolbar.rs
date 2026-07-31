@@ -73,6 +73,18 @@ pub(crate) fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
     }
 
     let toolbar = toolbar
+        .push(toolbar_button("Find", tokens).on_press(Message::OpenViewerFind))
+        .push(
+            toolbar_button(
+                if app.viewer.toc_open {
+                    "Hide Contents"
+                } else {
+                    "Contents"
+                },
+                tokens,
+            )
+            .on_press(Message::ToggleSidebar),
+        )
         .push(toolbar_button(theme_label, tokens).on_press(Message::ThemeToggled))
         .spacing(toolbar_layout.spacing.unwrap_or(Spacing::SM))
         .padding([

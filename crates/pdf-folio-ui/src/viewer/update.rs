@@ -16,11 +16,12 @@
 //! - Render completion: `PageRendered` (and related text-layer loads)
 //!
 //! Many arms persist session state via [`crate::with_session_save`] or
-//! [`crate::save_app_session_task`]. Prefer adding new viewer messages here
-//! rather than in shell update.
+//! [`crate::schedule_session_save`] (debounced on scroll). Prefer adding new
+//! viewer messages here rather than in shell update.
 //!
 //! Related: [`super::navigation`], [`super::tasks`], [`super::document`].
 
+use crate::viewer::rendering::{zoom_in_width, zoom_out_width};
 use crate::*;
 
 /// Handles viewer-domain messages; returns `None` if another reducer should try.
@@ -53,7 +54,11 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         Message::OpenViewerFind => Some(app.open_viewer_find()),
         Message::CloseViewerFind => {
             app.viewer.viewer_find.open = false;
+            app.viewer.find_text_generation = app.viewer.find_text_generation.wrapping_add(1);
             Some(save_app_session_task(app))
+        }
+        Message::ViewerFindTextLayersContinue(generation) => {
+            Some(app.continue_find_text_layers(*generation))
         }
         Message::ViewerFindQueryChanged(query) => Some(with_session_save(
             app.set_viewer_find_query(query.clone()),
@@ -104,16 +109,30 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         }
         Message::SubmitJump => {
             if let Ok(page) = app.viewer.jump_input.parse::<u16>() {
-                return Some(app.jump_to_page(page.saturating_sub(1)));
+                let task = app.jump_to_page(page.saturating_sub(1));
+                return Some(Task::batch([
+                    with_session_save(task, app),
+                    app.schedule_reading_progress_save(),
+                ]));
             }
             app.viewer.page_input_editing = false;
             app.viewer.jump_input.clear();
             Some(Task::none())
         }
-        Message::JumpToPage(page) => Some(with_session_save(app.jump_to_page(*page), app)),
+        Message::JumpToPage(page) => {
+            let task = app.jump_to_page(*page);
+            Some(Task::batch([
+                with_session_save(task, app),
+                app.schedule_reading_progress_save(),
+            ]))
+        }
         Message::PreviousPage => {
             let page = app.current_page().saturating_sub(1);
-            Some(with_session_save(app.jump_to_page(page), app))
+            let task = app.jump_to_page(page);
+            Some(Task::batch([
+                with_session_save(task, app),
+                app.schedule_reading_progress_save(),
+            ]))
         }
         Message::NextPage => {
             if let Some(doc) = &app.viewer.doc {
@@ -121,7 +140,11 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                     .current_page()
                     .saturating_add(1)
                     .min(doc.page_count().saturating_sub(1));
-                return Some(with_session_save(app.jump_to_page(page), app));
+                let task = app.jump_to_page(page);
+                return Some(Task::batch([
+                    with_session_save(task, app),
+                    app.schedule_reading_progress_save(),
+                ]));
             }
             Some(Task::none())
         }
@@ -161,8 +184,12 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             app.viewer.document_error = Some(error.clone());
             Some(Task::none())
         }
-        Message::ViewerTextSelectionStarted { page, char_index } => {
-            app.start_viewer_text_selection(*page, *char_index);
+        Message::ViewerTextSelectionStarted {
+            page,
+            char_index,
+            expand,
+        } => {
+            app.start_viewer_text_selection(*page, *char_index, *expand);
             Some(Task::none())
         }
         Message::ViewerTextSelectionChanged { page, char_index } => {
@@ -194,7 +221,8 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             Some(Task::batch([
                 app.apply_active_dimension_zoom(),
                 app.request_visible_pages(),
-                save_app_session_task(app),
+                schedule_session_save(app),
+                app.schedule_reading_progress_save(),
             ]))
         }
         Message::ViewportWheelScrolled {
@@ -216,12 +244,13 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                 } else {
                     -*delta_x
                 };
-                let step = if direction > 0.0 { 100 } else { -100 };
-                let width = (i32::from(app.viewer.zoom_width) + step)
-                    .clamp(i32::from(MIN_ZOOM_WIDTH), i32::from(MAX_ZOOM_WIDTH))
-                    as u16;
+                let width = if direction > 0.0 {
+                    zoom_in_width(app.viewer.zoom_width)
+                } else {
+                    zoom_out_width(app.viewer.zoom_width)
+                };
                 let task = app.zoom_to_width(width, Some(*cursor), ZoomRenderPolicy::Debounced);
-                return Some(with_session_save(task, app));
+                return Some(with_session_save_debounced(task, app));
             }
 
             if app.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
@@ -231,7 +260,10 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                     -1
                 };
                 let task = app.scroll_page_mode_by(direction);
-                return Some(with_session_save(task, app));
+                return Some(Task::batch([
+                    with_session_save_debounced(task, app),
+                    app.schedule_reading_progress_save(),
+                ]));
             }
 
             if app.viewer.viewer_scroll_mode == ViewerScrollMode::Horizontal {
@@ -241,7 +273,8 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                 return Some(Task::batch([
                     app.request_visible_pages(),
                     app.scroll_viewer_to_offsets_task(),
-                    save_app_session_task(app),
+                    schedule_session_save(app),
+                    app.schedule_reading_progress_save(),
                 ]));
             }
 
@@ -252,13 +285,18 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                 Some(Task::batch([
                     app.request_visible_pages(),
                     app.scroll_viewer_to_offsets_task(),
-                    save_app_session_task(app),
+                    schedule_session_save(app),
+                    app.schedule_reading_progress_save(),
                 ]))
             } else {
                 app.viewer.last_scroll_offset = app.viewer.scroll_offset;
                 app.viewer.scroll_offset =
                     (app.viewer.scroll_offset - *delta_y).clamp(0.0, app.max_scroll_offset());
-                Some(with_session_save(app.request_visible_pages(), app))
+                Some(Task::batch([
+                    app.request_visible_pages(),
+                    schedule_session_save(app),
+                    app.schedule_reading_progress_save(),
+                ]))
             }
         }
         Message::ModifiersChanged(modifiers) => {
@@ -274,7 +312,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         Message::ZoomIn => {
             app.viewer.active_zoom_preset = None;
             let task = app.zoom_to_width(
-                app.viewer.zoom_width.saturating_add(100),
+                zoom_in_width(app.viewer.zoom_width),
                 None,
                 ZoomRenderPolicy::Immediate,
             );
@@ -283,7 +321,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         Message::ZoomOut => {
             app.viewer.active_zoom_preset = None;
             let task = app.zoom_to_width(
-                app.viewer.zoom_width.saturating_sub(100),
+                zoom_out_width(app.viewer.zoom_width),
                 None,
                 ZoomRenderPolicy::Immediate,
             );

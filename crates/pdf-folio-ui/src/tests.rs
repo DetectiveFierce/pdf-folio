@@ -213,11 +213,11 @@ fn selected_render_key_returns_none_without_same_page_image() {
 fn prefetch_page_order_prioritizes_visible_then_directional_margin() {
     assert_eq!(
         prefetch_page_order_for_range(4..6, 10, true),
-        vec![4, 5, 3, 6, 7, 8]
+        vec![4, 5, 3, 6, 7, 8, 9]
     );
     assert_eq!(
         prefetch_page_order_for_range(4..6, 10, false),
-        vec![4, 5, 3, 6, 2, 1]
+        vec![4, 5, 3, 6, 2, 1, 0, 7]
     );
     assert_eq!(prefetch_page_order_for_range(0..1, 2, false), vec![0, 1]);
 }

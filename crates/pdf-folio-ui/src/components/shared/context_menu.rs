@@ -591,9 +591,9 @@ fn viewer_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuItemSpec>> {
             ),
         ],
         vec![
-            spec("Zoom In", "Ctrl++", true, ContextMenuAction::ZoomIn),
-            spec("Zoom Out", "Ctrl+-", true, ContextMenuAction::ZoomOut),
-            spec("Reset Zoom", "Ctrl+0", true, ContextMenuAction::ResetZoom),
+            spec("Zoom In", "+", true, ContextMenuAction::ZoomIn),
+            spec("Zoom Out", "-", true, ContextMenuAction::ZoomOut),
+            spec("Reset Zoom", "0", true, ContextMenuAction::ResetZoom),
         ],
         vec![
             spec(

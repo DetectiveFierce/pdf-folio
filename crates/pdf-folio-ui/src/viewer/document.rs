@@ -105,4 +105,10 @@ pub struct ViewerRuntime {
     pub page_input_editing: bool,
     /// Jump / page input text (1-based page number as typed).
     pub jump_input: String,
+    /// Monotonic generation for debounced reading-progress writes.
+    pub progress_save_generation: u64,
+    /// Last page index written (or accepted) for library reading progress.
+    pub last_saved_progress_page: Option<u16>,
+    /// Monotonic generation for progressive find text-layer loading.
+    pub find_text_generation: u64,
 }

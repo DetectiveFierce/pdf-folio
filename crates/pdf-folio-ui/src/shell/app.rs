@@ -109,6 +109,8 @@ pub struct PDFolioApp {
     pub startup_background_ready: bool,
     /// Last-run session waiting for library/document prerequisites to load.
     pub(crate) pending_session_restore: Option<AppSession>,
+    /// Monotonic generation for debounced session JSON writes (scroll hot path).
+    pub(crate) session_save_generation: u64,
 }
 
 /// Runtime state owned by the library manager surface.

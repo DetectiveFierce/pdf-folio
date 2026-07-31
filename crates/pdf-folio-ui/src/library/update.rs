@@ -2364,6 +2364,14 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             let db = Arc::clone(&app.db);
             let entry_id = entry_id.clone();
             let page = *page;
+            if let Some(entry) = app
+                .library
+                .library_entries
+                .iter_mut()
+                .find(|entry| entry.id == entry_id)
+            {
+                entry.last_page = page;
+            }
             Some(Task::perform(
                 async move {
                     tokio::task::spawn_blocking(move || db.update_last_page(&entry_id, page))

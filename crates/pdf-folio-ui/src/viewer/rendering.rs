@@ -24,10 +24,24 @@ const ACTUAL_SIZE_WIDTH: u16 = 800;
 pub(crate) const MIN_ZOOM_WIDTH: u16 = 240;
 /// Maximum allowed zoom page width in logical pixels.
 pub(crate) const MAX_ZOOM_WIDTH: u16 = 3200;
+/// Multiplicative zoom step for buttons, shortcuts, and Ctrl+wheel (~12% per notch).
+pub(crate) const ZOOM_STEP_RATIO: f32 = 1.12;
 /// Fraction of available canvas width used by [`ZoomPreset::Automatic`] (~comfortable reading).
 const READING_WIDTH_FILL: f32 = 0.86;
 /// Multiplier on available canvas height when height-capping automatic zoom.
 const READING_HEIGHT_MULTIPLIER: f32 = 1.75;
+
+/// Next zoom width one step larger than `width` (multiplicative, clamped).
+pub(crate) fn zoom_in_width(width: u16) -> u16 {
+    let next = ((f32::from(width) * ZOOM_STEP_RATIO).round() as u16).max(width.saturating_add(1));
+    next.clamp(MIN_ZOOM_WIDTH, MAX_ZOOM_WIDTH)
+}
+
+/// Next zoom width one step smaller than `width` (multiplicative, clamped).
+pub(crate) fn zoom_out_width(width: u16) -> u16 {
+    let next = ((f32::from(width) / ZOOM_STEP_RATIO).round() as u16).min(width.saturating_sub(1));
+    next.clamp(MIN_ZOOM_WIDTH, MAX_ZOOM_WIDTH)
+}
 
 /// Named zoom presets offered by the viewer zoom menu.
 ///
@@ -258,4 +272,23 @@ pub(crate) enum ZoomRenderPolicy {
     Immediate,
     /// Wait for wheel gesture idle before re-rasterizing (smooth live zoom).
     Debounced,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoom_steps_are_multiplicative_and_clamped() {
+        let mid = zoom_in_width(800);
+        assert!(mid > 800);
+        let down = zoom_out_width(mid);
+        assert!(down < mid);
+        // One step out from a step in should land near the original width.
+        assert!((i32::from(down) - 800).unsigned_abs() <= 2);
+
+        assert_eq!(zoom_in_width(MAX_ZOOM_WIDTH), MAX_ZOOM_WIDTH);
+        assert_eq!(zoom_out_width(MIN_ZOOM_WIDTH), MIN_ZOOM_WIDTH);
+        assert!(zoom_in_width(MIN_ZOOM_WIDTH) > MIN_ZOOM_WIDTH);
+    }
 }

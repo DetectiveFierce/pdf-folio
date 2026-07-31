@@ -1,10 +1,13 @@
 //! PDF viewer subsystem: open document runtime, render pipeline, and UI composition.
 //!
 //! Owns everything needed while a document is open: page tiles, zoom/scroll
-//! modes, text selection and find-in-document, outline expand state, and the
-//! async tasks that load PDFs and rasterize pages. The shell mounts
-//! [`document::ViewerRuntime`] on [`crate::PDFolioApp`] and delegates viewer
-//! messages here first via [`update`].
+//! modes, text selection and find-in-document, outline expand state, debounced
+//! reading progress, and the async tasks that load PDFs and rasterize pages.
+//! The shell mounts [`document::ViewerRuntime`] on [`crate::PDFolioApp`] and
+//! delegates viewer messages here first via [`update`].
+//!
+//! UX refinement plan: `scratch/viewer-ux-plan.md`. Pipeline notes:
+//! `docs/content/subsystems/rendering.md`.
 //!
 //! # Module map
 //!

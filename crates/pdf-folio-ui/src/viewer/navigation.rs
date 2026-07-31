@@ -152,10 +152,14 @@ impl PDFolioApp {
         ])
     }
 
-    /// Nudges horizontal scroll by `delta` pixels without scheduling a task.
-    pub(crate) fn pan_horizontally_by(&mut self, delta: f32) {
+    /// Nudges horizontal scroll by `delta` pixels and syncs the iced scrollable.
+    pub(crate) fn pan_horizontally_by(&mut self, delta: f32) -> Task<Message> {
         self.viewer.horizontal_offset =
             (self.viewer.horizontal_offset + delta).clamp(0.0, self.max_horizontal_offset());
+        Task::batch([
+            self.request_visible_pages(),
+            self.scroll_viewer_to_offsets_task(),
+        ])
     }
 
     /// Switches scroll mode, re-applying dimension zoom and jumping to the current page.

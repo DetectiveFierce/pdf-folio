@@ -576,6 +576,9 @@ impl PDFolioApp {
                 jump_dialog_open: false,
                 page_input_editing: false,
                 jump_input: String::new(),
+                progress_save_generation: 0,
+                last_saved_progress_page: None,
+                find_text_generation: 0,
             },
             library: LibraryRuntime {
                 compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),
@@ -717,6 +720,7 @@ impl PDFolioApp {
             last_sync_completed_at: None,
             startup_background_ready: false,
             pending_session_restore: None,
+            session_save_generation: 0,
         };
         app.rebuild_folder_smart_count_cache();
         app.set_active_library_preview_from_entries();
@@ -831,6 +835,9 @@ impl PDFolioApp {
         self.viewer.jump_dialog_open = false;
         self.viewer.page_input_editing = false;
         self.viewer.jump_input.clear();
+        self.viewer.progress_save_generation = self.viewer.progress_save_generation.wrapping_add(1);
+        self.viewer.last_saved_progress_page = None;
+        self.viewer.find_text_generation = self.viewer.find_text_generation.wrapping_add(1);
 
         Task::batch([
             self.request_visible_pages(),
@@ -840,12 +847,14 @@ impl PDFolioApp {
 
     /// Leaves viewer mode for the library, refreshing entries/folders/thumbnails.
     pub(crate) fn return_to_library(&mut self) -> Task<Message> {
+        let progress = self.flush_reading_progress();
         self.mode = AppMode::Library;
         self.viewer.document_error = None;
         self.viewer.jump_dialog_open = false;
         self.viewer.page_input_editing = false;
         self.viewer.jump_input.clear();
         Task::batch([
+            progress,
             self.refresh_library(),
             self.refresh_folders(),
             self.request_visible_thumbnails(),
@@ -896,6 +905,7 @@ impl PDFolioApp {
             self.viewer.scroll_offset = self.page_top(last_page);
         }
         self.clamp_scroll_offset();
+        self.viewer.last_saved_progress_page = Some(last_page);
         Task::batch([
             task,
             self.apply_pending_session_to_open_document(),
@@ -967,10 +977,18 @@ impl PDFolioApp {
             ));
         }
 
-        Task::batch([Task::batch(tasks), self.request_visible_text_layers()])
+        Task::batch([
+            Task::batch(tasks),
+            self.request_visible_text_layers(),
+            self.request_viewer_thumbnail_pages(),
+        ])
     }
 
-    /// Renders sidebar thumbnail-width tiles when the thumbnails tab is active.
+    /// Renders a window of sidebar thumbnail tiles around the current page.
+    ///
+    /// Avoids scheduling every page at once for large documents; placeholders
+    /// remain until the reading position (or tab focus) brings them into the
+    /// window. Window size is [`VIEWER_THUMBNAIL_WINDOW`].
     pub(crate) fn request_viewer_thumbnail_pages(&mut self) -> Task<Message> {
         if self.viewer.viewer_sidebar_tab != ViewerSidebarTab::Thumbnails {
             return Task::none();
@@ -980,8 +998,33 @@ impl PDFolioApp {
             return Task::none();
         };
 
+        let page_count = doc.page_count();
+        if page_count == 0 {
+            return Task::none();
+        }
+
+        let current = self.current_page().min(page_count.saturating_sub(1));
+        let start = current.saturating_sub(VIEWER_THUMBNAIL_WINDOW);
+        let end = current
+            .saturating_add(VIEWER_THUMBNAIL_WINDOW)
+            .saturating_add(1)
+            .min(page_count);
+
+        // Prefer the current page, then outward neighbors for faster rail feedback.
+        let mut order = vec![current];
+        for delta in 1..=VIEWER_THUMBNAIL_WINDOW {
+            if current >= delta {
+                order.push(current - delta);
+            }
+            let ahead = current.saturating_add(delta);
+            if ahead < page_count {
+                order.push(ahead);
+            }
+        }
+        order.retain(|page| (*page >= start) && (*page < end));
+
         let mut tasks = Vec::new();
-        for page in 0..doc.page_count() {
+        for page in order {
             let key = TileKey {
                 page,
                 width_px: self.layout().viewer_thumbnail_width_px,
@@ -1049,15 +1092,79 @@ impl PDFolioApp {
         self.request_text_layers(pages, doc)
     }
 
-    /// Extracts text layers for every page (used when find-in-document opens).
-    pub(crate) fn request_all_text_layers(&mut self) -> Task<Message> {
+    /// Starts progressive text-layer loading for find-in-document.
+    ///
+    /// Loads the current viewport (plus a small margin) immediately, then
+    /// schedules [`Message::ViewerFindTextLayersContinue`] batches until every
+    /// page is covered or find closes.
+    pub(crate) fn request_find_text_layers(&mut self) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
         };
-        let doc = Arc::clone(doc);
         let page_count = doc.page_count();
+        if page_count == 0 {
+            return Task::none();
+        }
 
-        self.request_text_layers(0..page_count, doc)
+        let doc = Arc::clone(doc);
+        let mut visible = self.visible_page_range();
+        if visible.start == visible.end {
+            let page = self.current_page().min(page_count.saturating_sub(1));
+            visible = page..page.saturating_add(1).min(page_count);
+        }
+        let start = visible.start.saturating_sub(FIND_TEXT_LAYER_MARGIN);
+        let end = visible
+            .end
+            .saturating_add(FIND_TEXT_LAYER_MARGIN)
+            .min(page_count);
+
+        self.viewer.find_text_generation = self.viewer.find_text_generation.wrapping_add(1);
+        let generation = self.viewer.find_text_generation;
+
+        Task::batch([
+            self.request_text_layers(start..end, doc),
+            schedule_find_text_layers_continue(generation),
+        ])
+    }
+
+    /// Loads the next batch of missing text layers while find is open.
+    pub(crate) fn continue_find_text_layers(&mut self, generation: u64) -> Task<Message> {
+        if generation != self.viewer.find_text_generation || !self.viewer.viewer_find.open {
+            return Task::none();
+        }
+        let Some(doc) = &self.viewer.doc else {
+            return Task::none();
+        };
+        let page_count = doc.page_count();
+        let mut batch = Vec::new();
+        for page in 0..page_count {
+            if self.viewer.viewer_text_layers.contains_key(&page)
+                || self.viewer.pending_text_layers.contains(&page)
+            {
+                continue;
+            }
+            batch.push(page);
+            if batch.len() >= FIND_TEXT_LAYER_BATCH {
+                break;
+            }
+        }
+
+        if batch.is_empty() {
+            return Task::none();
+        }
+
+        let doc = Arc::clone(doc);
+        let mut tasks = Vec::new();
+        for page in batch {
+            tasks.push(self.request_text_layers(page..page.saturating_add(1), Arc::clone(&doc)));
+        }
+        tasks.push(schedule_find_text_layers_continue(generation));
+        Task::batch(tasks)
+    }
+
+    /// Extracts text layers for every page (legacy full-document request).
+    pub(crate) fn request_all_text_layers(&mut self) -> Task<Message> {
+        self.request_find_text_layers()
     }
 
     /// Spawns text-layer extraction tasks for pages not already loaded or pending.
@@ -1111,7 +1218,7 @@ impl PDFolioApp {
         );
     }
 
-    /// Shows the find bar, loads all text layers, and focuses the query field.
+    /// Shows the find bar, starts progressive text-layer load, and focuses the query field.
     pub(crate) fn open_viewer_find(&mut self) -> Task<Message> {
         if self.mode != AppMode::Viewer || self.viewer.doc.is_none() {
             return Task::none();
@@ -1122,7 +1229,7 @@ impl PDFolioApp {
         self.refresh_viewer_find_matches();
 
         Task::batch([
-            self.request_all_text_layers(),
+            self.request_find_text_layers(),
             operation::focus(Id::new(VIEWER_FIND_INPUT_ID)),
         ])
     }
@@ -1130,13 +1237,13 @@ impl PDFolioApp {
     /// Updates the find-in-document query and refreshes match highlights.
     ///
     /// Stores `query` on `viewer_find`, recomputes matches from loaded text
-    /// layers, requests any remaining page text layers, and scrolls to the
+    /// layers, continues progressive text-layer loading, and scrolls to the
     /// selected match when one exists. Does not open/close the find bar.
     pub(crate) fn set_viewer_find_query(&mut self, query: String) -> Task<Message> {
         self.viewer.viewer_find.query = query;
         self.refresh_viewer_find_matches();
         Task::batch([
-            self.request_all_text_layers(),
+            self.request_find_text_layers(),
             self.scroll_to_selected_viewer_find_match(),
         ])
     }
@@ -1171,12 +1278,37 @@ impl PDFolioApp {
         ])
     }
 
-    /// Begins a drag text selection at the given character anchor.
-    pub(crate) fn start_viewer_text_selection(&mut self, page: u16, char_index: usize) {
+    /// Begins a text selection at the given character, optionally expanded.
+    ///
+    /// `expand` of 1 selects a single character (drag to extend). 2 expands to
+    /// a word; 3+ expands to the visual line. Word/line selections start with
+    /// `dragging = false` so a double/triple click is a complete gesture.
+    pub(crate) fn start_viewer_text_selection(
+        &mut self,
+        page: u16,
+        char_index: usize,
+        expand: u8,
+    ) {
+        self.viewer.viewer_copy_pending = false;
+        if expand >= 2 {
+            if let Some(layer) = self.viewer.viewer_text_layers.get(&page) {
+                let (start, end) = if expand >= 3 {
+                    line_char_range(layer, char_index)
+                } else {
+                    word_char_range(layer, char_index)
+                };
+                self.viewer.viewer_text_selection = Some(ViewerTextSelection {
+                    anchor: ViewerTextAnchor::new(page, start),
+                    focus: ViewerTextAnchor::new(page, end),
+                    dragging: false,
+                });
+                return;
+            }
+        }
+
         self.viewer.viewer_text_selection = Some(ViewerTextSelection::new(ViewerTextAnchor::new(
             page, char_index,
         )));
-        self.viewer.viewer_copy_pending = false;
     }
 
     /// Extends the active selection focus to another character while dragging.
@@ -1604,6 +1736,9 @@ impl PDFolioApp {
     }
 
     /// Best-effort current page index for toolbar display and progress writes.
+    ///
+    /// Continuous modes prefer the page containing the viewport center; falls
+    /// back to the first visible page when nothing intersects the center line.
     pub(crate) fn current_page(&self) -> u16 {
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
             return self.viewer.doc.as_ref().map_or(0, |doc| {
@@ -1613,8 +1748,133 @@ impl PDFolioApp {
             });
         }
 
+        let center = Point::new(
+            self.viewer.horizontal_offset + self.viewer.viewer_viewport_width.max(1.0) * 0.5,
+            self.viewer.scroll_offset + self.viewer.viewer_viewport_height.max(1.0) * 0.5,
+        );
+        for (page, rect) in self.viewer_page_rects_content(self.viewer.viewer_viewport_width) {
+            if center.x >= rect.x
+                && center.x <= rect.x + rect.width
+                && center.y >= rect.y
+                && center.y <= rect.y + rect.height
+            {
+                return page;
+            }
+        }
+
         self.visible_page_range().start
     }
+
+    /// Schedules a debounced library reading-progress write for the current page.
+    ///
+    /// No-op when the document was not opened from a library entry, or when the
+    /// page already matches the last saved progress. Completions arrive as
+    /// [`Message::ProgressSaveSettled`].
+    pub(crate) fn schedule_reading_progress_save(&mut self) -> Task<Message> {
+        let Some(entry_id) = self.viewer.current_entry_id.clone() else {
+            return Task::none();
+        };
+        let page = self.current_page();
+        if self.viewer.last_saved_progress_page == Some(page) {
+            return Task::none();
+        }
+
+        self.viewer.progress_save_generation = self.viewer.progress_save_generation.wrapping_add(1);
+        let generation = self.viewer.progress_save_generation;
+        Task::perform(
+            async move {
+                tokio::time::sleep(std::time::Duration::from_millis(PROGRESS_SAVE_DEBOUNCE_MS))
+                    .await;
+                (generation, entry_id, page)
+            },
+            |(generation, entry_id, page)| Message::ProgressSaveSettled {
+                generation,
+                entry_id,
+                page,
+            },
+        )
+    }
+
+    /// Immediately persists reading progress and invalidates pending debounced saves.
+    pub(crate) fn flush_reading_progress(&mut self) -> Task<Message> {
+        let Some(entry_id) = self.viewer.current_entry_id.clone() else {
+            return Task::none();
+        };
+        let page = self.current_page();
+        self.viewer.progress_save_generation = self.viewer.progress_save_generation.wrapping_add(1);
+        if self.viewer.last_saved_progress_page == Some(page) {
+            return Task::none();
+        }
+        self.viewer.last_saved_progress_page = Some(page);
+        Task::done(Message::ProgressUpdated { entry_id, page })
+    }
+}
+
+/// Idle delay before writing library reading progress during continuous scroll.
+const PROGRESS_SAVE_DEBOUNCE_MS: u64 = 500;
+/// Pages on each side of the current page to rasterize for the thumbnails rail.
+const VIEWER_THUMBNAIL_WINDOW: u16 = 12;
+/// Extra pages around the viewport loaded immediately when find opens.
+const FIND_TEXT_LAYER_MARGIN: u16 = 4;
+/// Pages requested per progressive find text-layer batch.
+const FIND_TEXT_LAYER_BATCH: usize = 8;
+
+/// Inclusive character range for the word containing `char_index`.
+pub(crate) fn word_char_range(layer: &PageTextLayer, char_index: usize) -> (usize, usize) {
+    if layer.chars.is_empty() {
+        return (0, 0);
+    }
+    let index = char_index.min(layer.chars.len() - 1);
+    if char_is_word_break(&layer.chars[index].text) {
+        return (index, index);
+    }
+    let mut start = index;
+    while start > 0 && !char_is_word_break(&layer.chars[start - 1].text) {
+        start -= 1;
+    }
+    let mut end = index;
+    while end + 1 < layer.chars.len() && !char_is_word_break(&layer.chars[end + 1].text) {
+        end += 1;
+    }
+    (start, end)
+}
+
+/// Inclusive character range for the visual line containing `char_index`.
+pub(crate) fn line_char_range(layer: &PageTextLayer, char_index: usize) -> (usize, usize) {
+    if layer.chars.is_empty() {
+        return (0, 0);
+    }
+    let index = char_index.min(layer.chars.len() - 1);
+    let target = &layer.chars[index];
+    let center_y = target.bounds.y + target.bounds.height * 0.5;
+    let threshold = (target.bounds.height * 0.65).max(0.008);
+    let mut start = index;
+    let mut end = index;
+    for (i, character) in layer.chars.iter().enumerate() {
+        let cy = character.bounds.y + character.bounds.height * 0.5;
+        if (cy - center_y).abs() <= threshold {
+            start = start.min(i);
+            end = end.max(i);
+        }
+    }
+    (start, end)
+}
+
+fn char_is_word_break(text: &str) -> bool {
+    text.chars()
+        .next()
+        .map_or(true, |ch| ch.is_whitespace() || ch.is_ascii_punctuation())
+}
+
+/// Schedules the next progressive find text-layer batch after a short idle.
+fn schedule_find_text_layers_continue(generation: u64) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            generation
+        },
+        Message::ViewerFindTextLayersContinue,
+    )
 }
 
 #[cfg(test)]
@@ -1655,6 +1915,31 @@ mod tests {
         assert_eq!(strict.len(), 1);
     }
 
+    #[test]
+    fn word_char_range_expands_to_whitespace_boundaries() {
+        let layer = text_layer(0, "hi world");
+        // indices: 0 h,1 i,2 space,3 w,4 o,5 r,6 l,7 d
+        assert_eq!(word_char_range(&layer, 0), (0, 1));
+        assert_eq!(word_char_range(&layer, 4), (3, 7));
+        assert_eq!(word_char_range(&layer, 2), (2, 2));
+    }
+
+    #[test]
+    fn line_char_range_groups_same_band() {
+        let layer = PageTextLayer {
+            page: 0,
+            width_points: 100.0,
+            height_points: 100.0,
+            chars: vec![
+                text_char_at(0, "A", 0.1, 0.10),
+                text_char_at(1, "B", 0.2, 0.10),
+                text_char_at(2, "C", 0.1, 0.40),
+            ],
+        };
+        assert_eq!(line_char_range(&layer, 0), (0, 1));
+        assert_eq!(line_char_range(&layer, 2), (2, 2));
+    }
+
     fn text_layer(page: u16, text: &str) -> PageTextLayer {
         PageTextLayer {
             page,
@@ -1663,17 +1948,21 @@ mod tests {
             chars: text
                 .chars()
                 .enumerate()
-                .map(|(index, character)| PageTextChar {
-                    index,
-                    text: character.to_string(),
-                    bounds: TextRect {
-                        x: index as f32 * 0.01,
-                        y: 0.1,
-                        width: 0.01,
-                        height: 0.05,
-                    },
-                })
+                .map(|(index, character)| text_char_at(index, &character.to_string(), index as f32 * 0.01, 0.1))
                 .collect(),
+        }
+    }
+
+    fn text_char_at(index: usize, text: &str, x: f32, y: f32) -> PageTextChar {
+        PageTextChar {
+            index,
+            text: text.to_owned(),
+            bounds: TextRect {
+                x,
+                y,
+                width: 0.01,
+                height: 0.05,
+            },
         }
     }
 }

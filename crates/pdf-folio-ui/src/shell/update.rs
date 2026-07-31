@@ -649,6 +649,24 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
             );
         }
         Message::LibraryPreferencesSaved | Message::SessionSaved => {}
+        Message::SessionSaveSettled(generation) => {
+            if generation == app.session_save_generation {
+                return save_app_session_task(app);
+            }
+        }
+        Message::ProgressSaveSettled {
+            generation,
+            entry_id,
+            page,
+        } => {
+            if generation == app.viewer.progress_save_generation {
+                if app.viewer.last_saved_progress_page == Some(page) {
+                    return Task::none();
+                }
+                app.viewer.last_saved_progress_page = Some(page);
+                return Task::done(Message::ProgressUpdated { entry_id, page });
+            }
+        }
         Message::CloseOverlay => {
             if app.chrome.command_palette_open {
                 app.chrome.command_palette_open = false;
