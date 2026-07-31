@@ -451,14 +451,19 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                 }
             ));
             let restore_task = app.apply_pending_session_to_loaded_library();
+            // Path-restored viewer docs may open before the library finishes
+            // loading; bind entry id by path and fetch annotations in the background.
+            let annotations_task = app.ensure_open_document_annotations_loaded();
             if !app.library.search_query.trim().is_empty() {
                 return Some(Task::batch([
                     restore_task,
+                    annotations_task,
                     Task::done(Message::SearchDebounced(app.library.search_query.clone())),
                 ]));
             }
             Some(Task::batch([
                 restore_task,
+                annotations_task,
                 app.request_visible_thumbnails(),
                 scroll_library_to_offset_task(app.library.library_scroll_offset),
             ]))

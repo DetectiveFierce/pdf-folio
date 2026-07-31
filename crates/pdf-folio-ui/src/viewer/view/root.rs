@@ -2,8 +2,9 @@
 //!
 //! Entry point for `AppMode::Viewer` content (chrome overlays such as the
 //! command palette are layered by the shared root surface). Layout is a
-//! toolbar row above a horizontal split of optional TOC/thumbnail sidebar and
-//! the main document column (error banner, jump dialog, canvas).
+//! toolbar row above a horizontal split of optional left TOC/thumbnail
+//! sidebar and the main document column. Annotations overlay the right edge of
+//! the document viewport (see document stack), not a discrete layout column.
 //!
 //! Related: [`super::document`] for the canvas stack,
 //! [`crate::components::viewer`] for toolbar/sidebar widgets.
@@ -18,11 +19,12 @@ use iced::widget::{column, row};
 
 /// Builds the full viewer-mode element tree for the current app state.
 ///
-/// Toolbar above a horizontal split of optional TOC/thumbnail sidebar and the
-/// main column (error banner, jump dialog, document canvas). Command-palette
-/// and other chrome overlays are composed by the shared root surface.
+/// Toolbar above a horizontal split of optional left Contents sidebar and the
+/// main column (error banner, jump dialog, document canvas with annotations
+/// overlay). Command-palette and other chrome overlays are composed by the
+/// shared root surface.
 pub(crate) fn view_viewer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Message> {
-    let sidebar: Element<'_, Message> = if app.viewer.toc_open {
+    let left_sidebar: Element<'_, Message> = if app.viewer.toc_open {
         view_sidebar(app)
     } else {
         container("").width(Length::Shrink).into()
@@ -44,7 +46,7 @@ pub(crate) fn view_viewer(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, 
 
     column![
         view_viewer_toolbar(app),
-        row![sidebar, main.width(Length::Fill)].height(Length::Fill)
+        row![left_sidebar, main.width(Length::Fill)].height(Length::Fill)
     ]
     .into()
 }

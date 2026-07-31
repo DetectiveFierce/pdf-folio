@@ -40,6 +40,7 @@ impl PDFolioApp {
     /// only one floating menu is open at a time.
     pub(crate) fn open_context_menu(&mut self, target: ContextMenuTarget) {
         self.viewer.zoom_menu_open = false;
+        self.viewer.visibility_menu_open = false;
 
         match &target {
             ContextMenuTarget::LibraryEntry(entry_id) => {
@@ -190,6 +191,7 @@ impl PDFolioApp {
                 Some(Message::LibrarySortChanged(LibrarySortMode::TitleAsc))
             }
             ContextMenuAction::CopyViewerSelection => Some(Message::CopyViewerTextSelection),
+            ContextMenuAction::AddAnnotation => Some(Message::StartAnnotationCompose),
             ContextMenuAction::FindInDocument => Some(Message::OpenViewerFind),
             ContextMenuAction::JumpToPage => Some(Message::OpenJumpDialog),
             ContextMenuAction::ZoomIn => Some(Message::ZoomIn),
@@ -568,7 +570,11 @@ fn tag_context_groups(app: &PDFolioApp, tag: &str) -> Vec<Vec<ContextMenuItemSpe
 
 /// Item groups for the viewer canvas (copy/find/jump, zoom, TOC, back to library).
 fn viewer_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuItemSpec>> {
-    let has_selection = app.viewer.viewer_text_selection.is_some();
+    let has_selection = app
+        .viewer
+        .viewer_text_selection
+        .is_some_and(|selection| !selection.dragging);
+    let can_annotate = has_selection && app.can_annotate();
     vec![
         vec![
             spec(
@@ -576,6 +582,12 @@ fn viewer_context_groups(app: &PDFolioApp) -> Vec<Vec<ContextMenuItemSpec>> {
                 "Ctrl+C",
                 has_selection,
                 ContextMenuAction::CopyViewerSelection,
+            ),
+            spec(
+                "Add Annotation",
+                "Ctrl+Alt+M",
+                can_annotate,
+                ContextMenuAction::AddAnnotation,
             ),
             spec(
                 "Find In Document",

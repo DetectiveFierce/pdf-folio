@@ -65,7 +65,8 @@ Created in `schema.rs` (migrations also `ALTER TABLE` for older DBs):
 | `tags` | `(entry_id, tag)` join |
 | `folders` | Nested via `parent_id`; soft-delete via `trashed_at` |
 | `entry_folders` | Membership + per-folder `manual_order` |
-| `bookmarks` | Local per-page landmarks |
+| `bookmarks` | Local per-page landmarks (schema reserved; UI pending) |
+| `annotations` | Text-anchored comments per entry (page/char ranges, quote snapshot, body; FK cascade on entry delete; not in PDF bytes) |
 | `library_preferences` | Key/value UI prefs (sort, layout, sidebar width, …) |
 | `import_sources` | Provenance roots (e.g. Raindrop account) |
 | `raindrop_collections` / `raindrop_entries` | Remote id ↔ local folder/entry maps |
@@ -90,6 +91,7 @@ Foreign keys use `ON DELETE CASCADE` so joins stay consistent without manual cle
 | `library.rs` | Insert/lookup/update entries, missing, trash restore/purge |
 | `organization.rs` | Folders, membership, tags, manual order gaps, org snapshots |
 | `metadata.rs` | Display fields, locks, preferences |
+| `annotations.rs` | Text-annotation CRUD for library PDFs |
 | `import.rs` | Hash, import, watcher, thumbnail paths |
 | `search.rs` | Tantivy wrapper |
 | `raindrop.rs` | Mapping CRUD (no HTTP) |

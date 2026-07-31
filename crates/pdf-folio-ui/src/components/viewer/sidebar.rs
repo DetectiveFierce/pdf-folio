@@ -1,15 +1,15 @@
 //! # Viewer sidebar shell
 //!
 //! Host container under `components::viewer::sidebar` for the open document’s
-//! secondary pane: Contents (outline) and Thumbnails tabs, with a hide
-//! control. Bodies scroll independently of the main canvas.
+//! left Contents/Thumbnails rail. Annotation UI is an overlay on the document
+//! surface (see [`super::annotations`]), not this sidebar.
 //!
 //! ## Ownership
 //!
 //! Reads `app.viewer.viewer_sidebar_tab`, outline expansion, and rendered
 //! thumbnail tiles. Emits tab selection, outline toggles, page jumps, and
 //! `ToggleSidebar`. Outline rows come from [`super::outline`]; thumbnails
-//! reuse placeholder previews from `components::library::cards`.
+//! reuse library card previews.
 //!
 //! Related: floating “show contents” control in [`super::toolbar`].
 
@@ -20,7 +20,7 @@ use iced::widget::{button, column, image, row, scrollable};
 use iced::ContentFit;
 use pdf_folio_core::TileKey;
 
-/// Compose the full viewer sidebar (tab strip + Contents or Thumbnails body).
+/// Compose the left viewer sidebar (tab strip + Contents / Thumbnails body).
 pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let heading = row![
@@ -39,8 +39,11 @@ pub(crate) fn view_sidebar(app: &PDFolioApp) -> Element<'_, Message> {
     ]
     .spacing(Spacing::XS)
     .align_y(iced::Alignment::Center);
+    // Annotations live in the right rail; never render them in this left strip.
     let body = match app.viewer.viewer_sidebar_tab {
-        ViewerSidebarTab::Contents => view_outline_body(app, tokens),
+        ViewerSidebarTab::Contents | ViewerSidebarTab::Annotations => {
+            view_outline_body(app, tokens)
+        }
         ViewerSidebarTab::Thumbnails => view_thumbnails_body(app, tokens),
     };
 

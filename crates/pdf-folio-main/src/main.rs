@@ -68,8 +68,46 @@ enum Command {
     Sync(SyncArgs),
 }
 
+/// Soft stack limit requested for the iced UI main thread (bytes).
+///
+/// `ThemeTokens` is ~140 KiB and is passed by value through deep library view
+/// builders. The default soft limit (~8 MiB) overflows on first paint with a
+/// populated folder tree.
+const UI_STACK_SOFT_LIMIT: u64 = 64 * 1024 * 1024;
+
+/// Raises the process soft stack limit so the main thread can grow past the
+/// default (~8 MiB) before iced builds the first frame.
+///
+/// No-ops on non-Unix targets or when the hard limit is already lower.
+fn raise_stack_limit() {
+    #[cfg(unix)]
+    {
+        // SAFETY: setrlimit is process-wide and only affects RLIMIT_STACK.
+        unsafe {
+            let mut limit = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            if libc::getrlimit(libc::RLIMIT_STACK, &mut limit) != 0 {
+                return;
+            }
+            let desired = UI_STACK_SOFT_LIMIT;
+            if limit.rlim_cur >= desired {
+                return;
+            }
+            limit.rlim_cur = desired.min(limit.rlim_max);
+            let _ = libc::setrlimit(libc::RLIMIT_STACK, &limit);
+        }
+    }
+}
+
 /// Process entry: install tracing, parse CLI, run UI or sync subcommand.
+///
+/// The iced UI must run on the main thread (winit). Stack limit is raised
+/// before the event loop so deep view builders do not overflow.
 fn main() -> Result<()> {
+    raise_stack_limit();
+
     let process_started_at = std::time::Instant::now();
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();

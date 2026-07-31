@@ -45,6 +45,7 @@ impl PDFolioApp {
         self.clear_library_transient_interactions();
         self.chrome.open_context_menu = None;
         self.viewer.zoom_menu_open = false;
+        self.viewer.visibility_menu_open = false;
         self.libraries.open_menu_library_id = None;
     }
 

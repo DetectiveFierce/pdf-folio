@@ -96,6 +96,14 @@ pub(crate) fn keyboard_event_message(event: Event, status: event::Status) -> Opt
                 (key, text) if is_ctrl_character(key, text, modifiers, "f") => {
                     Some(Message::ShortcutPressed(Shortcut::FocusSearch))
                 }
+                (key, text)
+                    if status != event::Status::Captured
+                        && modifiers.control()
+                        && modifiers.alt()
+                        && is_ctrl_character(key, text, modifiers, "m") =>
+                {
+                    Some(Message::ShortcutPressed(Shortcut::AddAnnotation))
+                }
                 (&keyboard::Key::Named(keyboard::key::Named::F3), _) if modifiers.shift() => {
                     Some(Message::ShortcutPressed(Shortcut::FindPrevious))
                 }
@@ -219,6 +227,24 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
             }
             _ => Task::none(),
         };
+    }
+
+    // Mockup: ↑ / ↓ step comments when notes exist (document still scrolls via wheel).
+    if app.mode == AppMode::Viewer
+        && !app.viewer.annotations.is_empty()
+        && app.viewer.annotation_compose.is_none()
+        && app.viewer.annotation_editing_id.is_none()
+        && !app.viewer.viewer_find.open
+    {
+        match shortcut {
+            Shortcut::FineScroll(delta) if delta > 0 => {
+                return app.annotation_select_next();
+            }
+            Shortcut::FineScroll(delta) if delta < 0 => {
+                return app.annotation_select_previous();
+            }
+            _ => {}
+        }
     }
 
     match shortcut {
@@ -478,12 +504,19 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 app.library.tag_rename_input.clear();
             } else if app.viewer.zoom_menu_open {
                 app.viewer.zoom_menu_open = false;
+            } else if app.viewer.visibility_menu_open {
+                app.viewer.visibility_menu_open = false;
             } else if app.viewer.zoom_editing {
                 app.viewer.zoom_editing = false;
                 app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);
             } else if app.viewer.page_input_editing {
                 app.viewer.page_input_editing = false;
                 app.viewer.jump_input.clear();
+            } else if app.mode == AppMode::Viewer
+                && (app.viewer.annotation_compose.is_some()
+                    || app.viewer.annotation_editing_id.is_some())
+            {
+                app.cancel_annotation_drafts();
             } else if app.mode == AppMode::Viewer && app.viewer.viewer_find.open {
                 app.viewer.viewer_find.open = false;
             } else if app.mode == AppMode::Viewer && app.viewer.viewer_text_selection.is_some() {
@@ -526,6 +559,13 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 return Task::done(Message::BackToLibrary);
             }
             Task::none()
+        }
+        Shortcut::AddAnnotation => {
+            if app.mode == AppMode::Viewer {
+                app.start_annotation_compose()
+            } else {
+                Task::none()
+            }
         }
     }
 }

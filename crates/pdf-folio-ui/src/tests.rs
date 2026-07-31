@@ -135,6 +135,38 @@ fn viewer_text_selection_orders_character_ranges_from_drag_endpoints() {
 }
 
 #[test]
+fn annotation_char_range_spans_pages_like_text_selection() {
+    use chrono::Utc;
+    use pdf_folio_core::{Annotation, AnnotationId, EntryId};
+
+    let annotation = Annotation {
+        id: AnnotationId::new("a1"),
+        entry_id: EntryId::new("entry"),
+        start_page: 1,
+        start_char: 3,
+        end_page: 2,
+        end_char: 9,
+        quote: "quote".into(),
+        body: "body".into(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+
+    assert_eq!(
+        crate::PDFolioApp::annotation_char_range_for_page(&annotation, 1, 12),
+        Some(3..=11)
+    );
+    assert_eq!(
+        crate::PDFolioApp::annotation_char_range_for_page(&annotation, 2, 12),
+        Some(0..=9)
+    );
+    assert_eq!(
+        crate::PDFolioApp::annotation_char_range_for_page(&annotation, 0, 12),
+        None
+    );
+}
+
+#[test]
 fn viewer_spread_groups_pair_odd_pages_on_left() {
     assert_eq!(
         viewer_spread_groups(5, ViewerSpreadMode::Odd),

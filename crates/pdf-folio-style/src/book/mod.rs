@@ -60,7 +60,7 @@ use kdl::{KdlDocument, KdlNode, KdlValue};
 
 use crate::classes::{mix_color, Class, ComponentState};
 use crate::tokens::{
-    AppLabelTokens, AppLayoutTokens, BorderSide, BoxShadow, BoxSpacing, ClassStyle,
+    AppLabelTokens, AppLayoutTokens, BorderSide, BoxShadow, BoxSpacing, ClassStyle, ClassStylesRef,
     ComponentLayout, ComponentTextStyle, CornerRadius, LabelSection, PrimitiveTokens, ThemeTokens,
     VisualBorder, VisualStyle,
 };
@@ -193,12 +193,16 @@ struct RawStyleBook {
     labels: AppLabelTokens,
 }
 
-/// One theme during parse: a full [`ThemeTokens`] value that may still receive
-/// component-state overrides scoped with `theme="…"`.
+/// One theme during parse: palette tokens plus a mutable working class-style table.
+///
+/// Class styles are interned into a [`ClassStylesRef`] only at [`RawStyleBook::compile`]
+/// so KDL load can mutate styles without copying a 140 KiB table on every pass.
 #[derive(Debug, Clone)]
 struct RawTheme {
-    /// Resolved palette, primitives, and class styles for this theme id.
+    /// Resolved palette and primitives for this theme id.
     tokens: ThemeTokens,
+    /// Working class-style table (interned when the book is finalized).
+    class_styles: Box<[ClassStyle; Class::COUNT]>,
 }
 
 impl RawStyleBook {
@@ -224,9 +228,9 @@ impl RawStyleBook {
 
     fn apply_theme_node(&mut self, name: &str, node: &KdlNode) -> Result<(), String> {
         let theme_name = node_string_arg(name, node, 0)?;
-        let mut tokens = match theme_name {
-            "light" => fallback_light_tokens(),
-            "espresso" | "dark" => fallback_dark_tokens(),
+        let mut raw_theme = match theme_name {
+            "light" => raw_theme_from_fallback(fallback_light_tokens()),
+            "espresso" | "dark" => raw_theme_from_fallback(fallback_dark_tokens()),
             other => {
                 return Err(format!("{name}: unknown theme `{other}`"));
             }
@@ -241,13 +245,13 @@ impl RawStyleBook {
                     let token = node_string_arg(name, child, 0)?;
                     let value = parse_color_literal(node_string_arg(name, child, 1)?)
                         .map_err(|error| format!("{name}: color `{token}`: {error}"))?;
-                    set_theme_color(&mut tokens, token, value)
+                    set_theme_color(&mut raw_theme.tokens, token, value)
                         .map_err(|error| format!("{name}: {error}"))?;
                 }
                 "primitive" => {
                     let token = node_string_arg(name, child, 0)?;
                     let value = node_f32_arg(name, child, 1)?;
-                    set_primitive(&mut tokens.primitives, token, value)
+                    set_primitive(&mut raw_theme.tokens.primitives, token, value)
                         .map_err(|error| format!("{name}: {error}"))?;
                 }
                 other => {
@@ -257,8 +261,7 @@ impl RawStyleBook {
                 }
             }
         }
-        self.themes
-            .insert(theme_name.to_owned(), RawTheme { tokens });
+        self.themes.insert(theme_name.to_owned(), raw_theme);
         Ok(())
     }
 
@@ -276,16 +279,15 @@ impl RawStyleBook {
                 "layout" => {
                     let layout = self.apply_class_component_layout_node(name, class, child)?;
                     for raw_theme in self.themes.values_mut() {
-                        let current = raw_theme.tokens.class_styles[class.index()].layout;
-                        raw_theme.tokens.class_styles[class.index()].layout =
-                            current.merged(layout);
+                        let current = raw_theme.class_styles[class.index()].layout;
+                        raw_theme.class_styles[class.index()].layout = current.merged(layout);
                     }
                 }
                 "text" => {
                     let text = parse_component_text(name, child)?;
                     for raw_theme in self.themes.values_mut() {
-                        let current = raw_theme.tokens.class_styles[class.index()].text;
-                        raw_theme.tokens.class_styles[class.index()].text = current.merged(text);
+                        let current = raw_theme.class_styles[class.index()].text;
+                        raw_theme.class_styles[class.index()].text = current.merged(text);
                     }
                 }
                 "labels" => {
@@ -307,8 +309,8 @@ impl RawStyleBook {
                             ));
                         };
                         let style = parse_visual_style(name, child, &raw_theme.tokens)?;
-                        raw_theme.tokens.class_styles[class.index()].states[state.index()] =
-                            raw_theme.tokens.class_styles[class.index()].states[state.index()]
+                        raw_theme.class_styles[class.index()].states[state.index()] =
+                            raw_theme.class_styles[class.index()].states[state.index()]
                                 .merged(style);
                     }
                 }
@@ -939,7 +941,13 @@ impl RawStyleBook {
 
     fn apply_primitive_node(&mut self, name: &str, node: &KdlNode) -> Result<(), String> {
         let primitive = node_string_arg(name, node, 0)?;
-        if matches!(primitive, "viewer_find_fill" | "viewer_find_selected_fill") {
+        if matches!(
+            primitive,
+            "viewer_find_fill"
+                | "viewer_find_selected_fill"
+                | "viewer_annotation_fill"
+                | "viewer_annotation_selected_fill"
+        ) {
             let value = parse_color_literal(node_string_arg(name, node, 1)?)
                 .map_err(|error| format!("{name}: primitive `{primitive}`: {error}"))?;
             for raw_theme in self.themes.values_mut() {
@@ -1010,7 +1018,15 @@ impl RawStyleBook {
         Ok(self
             .themes
             .into_iter()
-            .map(|(name, raw)| (name, raw.tokens))
+            .map(|(name, mut raw)| {
+                // Move working table into the intern registry; ThemeTokens stays Copy/small.
+                let styles = std::mem::replace(
+                    &mut raw.class_styles,
+                    Box::new([ClassStyle::EMPTY; Class::COUNT]),
+                );
+                raw.tokens.class_styles = ClassStylesRef::intern(*styles);
+                (name, raw.tokens)
+            })
             .collect())
     }
 }
@@ -1514,7 +1530,7 @@ fn set_primitive(tokens: &mut PrimitiveTokens, token: &str, value: f32) -> Resul
     Ok(())
 }
 
-/// Writes a color primitive (`viewer_find_fill`, `viewer_find_selected_fill`).
+/// Writes a color primitive (`viewer_find_fill`, annotation fills, …).
 fn set_primitive_color(
     tokens: &mut PrimitiveTokens,
     token: &str,
@@ -1523,6 +1539,8 @@ fn set_primitive_color(
     match token {
         "viewer_find_fill" => tokens.viewer_find_fill = value,
         "viewer_find_selected_fill" => tokens.viewer_find_selected_fill = value,
+        "viewer_annotation_fill" => tokens.viewer_annotation_fill = value,
+        "viewer_annotation_selected_fill" => tokens.viewer_annotation_selected_fill = value,
         other => return Err(format!("unknown primitive color `{other}`")),
     }
     Ok(())
@@ -1615,54 +1633,107 @@ fn set_layout_count(tokens: &mut AppLayoutTokens, token: &str, value: usize) -> 
 /// Built-in dark (espresso-like) palette used before styles load or as a last
 /// resort when the style book cannot provide an `espresso` theme.
 pub fn fallback_dark_tokens() -> ThemeTokens {
-    // Keep in sync with styles/themes/espresso.kdl
-    let mut tokens = ThemeTokens {
-        background: Color::from_rgb8(16, 12, 7),
-        surface: Color::from_rgb8(23, 17, 10),
-        surface_raised: Color::from_rgb8(36, 26, 16),
-        text_primary: Color::from_rgb8(240, 230, 212),
-        text_secondary: Color::from_rgb8(168, 144, 114),
-        accent: Color::from_rgb8(224, 180, 90),
-        border: Color::from_rgba8(200, 184, 154, 0.22),
-        error: Color::from_rgb8(232, 90, 90),
-        canvas: Color::from_rgb8(12, 9, 5),
-        placeholder: Color::from_rgb8(46, 34, 20),
-        focus: Color::from_rgb8(224, 180, 90),
-        shadow: Color::from_rgba8(0, 0, 0, 0.65),
-        class_styles: [ClassStyle::EMPTY; Class::COUNT],
-        primitives: PrimitiveTokens::default(),
-    };
-    apply_fallback_class_styles(&mut tokens);
-    tokens
+    finalize_fallback_tokens(raw_theme_from_palette(
+        Color::from_rgb8(16, 12, 7),
+        Color::from_rgb8(23, 17, 10),
+        Color::from_rgb8(36, 26, 16),
+        Color::from_rgb8(240, 230, 212),
+        Color::from_rgb8(168, 144, 114),
+        Color::from_rgb8(224, 180, 90),
+        Color::from_rgba8(200, 184, 154, 0.22),
+        Color::from_rgb8(232, 90, 90),
+        Color::from_rgb8(12, 9, 5),
+        Color::from_rgb8(46, 34, 20),
+        Color::from_rgb8(224, 180, 90),
+        Color::from_rgba8(0, 0, 0, 0.65),
+    ))
 }
 
 /// Built-in light palette used before styles load or as a last resort when the
 /// style book cannot provide a `light` theme.
 pub fn fallback_light_tokens() -> ThemeTokens {
-    // Keep in sync with styles/themes/light.kdl
-    let mut tokens = ThemeTokens {
-        background: Color::from_rgb8(237, 233, 225),
-        surface: Color::from_rgb8(251, 249, 244),
-        surface_raised: Color::from_rgb8(255, 255, 255),
-        text_primary: Color::from_rgb8(31, 24, 16),
-        text_secondary: Color::from_rgb8(110, 90, 66),
-        accent: Color::from_rgb8(166, 124, 46),
-        border: Color::from_rgb8(212, 203, 184),
-        error: Color::from_rgb8(176, 48, 64),
-        canvas: Color::from_rgb8(228, 221, 210),
-        placeholder: Color::from_rgb8(232, 224, 210),
-        focus: Color::from_rgb8(166, 124, 46),
-        shadow: Color::from_rgba8(31, 24, 16, 0.16),
-        class_styles: [ClassStyle::EMPTY; Class::COUNT],
+    finalize_fallback_tokens(raw_theme_from_palette(
+        Color::from_rgb8(237, 233, 225),
+        Color::from_rgb8(251, 249, 244),
+        Color::from_rgb8(255, 255, 255),
+        Color::from_rgb8(31, 24, 16),
+        Color::from_rgb8(110, 90, 66),
+        Color::from_rgb8(166, 124, 46),
+        Color::from_rgb8(212, 203, 184),
+        Color::from_rgb8(176, 48, 64),
+        Color::from_rgb8(228, 221, 210),
+        Color::from_rgb8(232, 224, 210),
+        Color::from_rgb8(166, 124, 46),
+        Color::from_rgba8(31, 24, 16, 0.16),
+    ))
+}
+
+fn raw_theme_from_palette(
+    background: Color,
+    surface: Color,
+    surface_raised: Color,
+    text_primary: Color,
+    text_secondary: Color,
+    accent: Color,
+    border: Color,
+    error: Color,
+    canvas: Color,
+    placeholder: Color,
+    focus: Color,
+    shadow: Color,
+) -> RawTheme {
+    let tokens = ThemeTokens {
+        background,
+        surface,
+        surface_raised,
+        text_primary,
+        text_secondary,
+        accent,
+        border,
+        error,
+        canvas,
+        placeholder,
+        focus,
+        shadow,
+        class_styles: ClassStylesRef::empty(),
         primitives: PrimitiveTokens::default(),
     };
-    apply_fallback_class_styles(&mut tokens);
-    tokens
+    let mut class_styles = Box::new([ClassStyle::EMPTY; Class::COUNT]);
+    apply_fallback_class_styles(&mut class_styles, &tokens);
+    RawTheme {
+        tokens,
+        class_styles,
+    }
+}
+
+fn raw_theme_from_fallback(tokens: ThemeTokens) -> RawTheme {
+    // Re-build a working table from the interned fallback so theme KDL can
+    // continue to layer component styles during load.
+    let mut class_styles = Box::new([ClassStyle::EMPTY; Class::COUNT]);
+    for index in 0..Class::COUNT {
+        class_styles[index] = tokens.class_styles[index];
+    }
+    RawTheme {
+        tokens: ThemeTokens {
+            class_styles: ClassStylesRef::empty(),
+            ..tokens
+        },
+        class_styles,
+    }
+}
+
+fn finalize_fallback_tokens(mut raw: RawTheme) -> ThemeTokens {
+    let styles = std::mem::replace(
+        &mut raw.class_styles,
+        Box::new([ClassStyle::EMPTY; Class::COUNT]),
+    );
+    raw.tokens.class_styles = ClassStylesRef::intern(*styles);
+    raw.tokens
 }
 
 /// Seeds a minimal set of class styles on fallback palettes so UI chrome has
 /// paint before KDL component blocks are applied (or when styles fail to load).
-fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
+fn apply_fallback_class_styles(class_styles: &mut [ClassStyle; Class::COUNT], tokens: &ThemeTokens) {
     for class in [
         Class::AppShell,
         Class::Toolbar,
@@ -1672,6 +1743,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
         Class::LibraryControlBar,
     ] {
         set_class_state(
+            class_styles,
             tokens,
             class,
             ComponentState::Normal,
@@ -1687,6 +1759,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
         );
     }
     set_class_state(
+        class_styles,
         tokens,
         Class::AppShell,
         ComponentState::Normal,
@@ -1718,6 +1791,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
         Class::FolderDropTarget,
     ] {
         set_class_state(
+            class_styles,
             tokens,
             class,
             ComponentState::Normal,
@@ -1749,6 +1823,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
         Class::TagPill,
     ] {
         set_class_state(
+            class_styles,
             tokens,
             class,
             ComponentState::Normal,
@@ -1763,6 +1838,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
             },
         );
         set_class_state(
+            class_styles,
             tokens,
             class,
             ComponentState::Hovered,
@@ -1773,6 +1849,7 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
             },
         );
         set_class_state(
+            class_styles,
             tokens,
             class,
             ComponentState::Pressed,
@@ -1784,15 +1861,16 @@ fn apply_fallback_class_styles(tokens: &mut ThemeTokens) {
     }
 }
 
-/// Merges `style` into `tokens.class_styles[class][state]` (used by fallbacks).
+/// Merges `style` into the working class-style table (used by fallbacks).
 fn set_class_state(
-    tokens: &mut ThemeTokens,
+    class_styles: &mut [ClassStyle; Class::COUNT],
+    _tokens: &ThemeTokens,
     class: Class,
     state: ComponentState,
     style: VisualStyle,
 ) {
-    tokens.class_styles[class.index()].states[state.index()] =
-        tokens.class_styles[class.index()].states[state.index()].merged(style);
+    class_styles[class.index()].states[state.index()] =
+        class_styles[class.index()].states[state.index()].merged(style);
 }
 
 #[cfg(test)]

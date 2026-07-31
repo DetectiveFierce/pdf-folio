@@ -3,14 +3,33 @@
 //! [`ViewerRuntime`] is the long-lived bag mounted on
 //! [`crate::PDFolioApp::viewer`]. It holds the open [`PdfDoc`], tile cache and
 //! rendered page map, viewport and scroll offsets, zoom UI state, text layers
-//! for selection/find, and outline/sidebar chrome flags.
+//! for selection/find, text-annotation rows and drafts, display title, and
+//! outline/sidebar/visibility chrome flags.
 //!
 //! Behavior methods live elsewhere: navigation/zoom on `PDFolioApp` in
-//! [`super::navigation`], find/open helpers in [`super::state`], async open and
-//! render in [`super::tasks`]. Session restore snapshots a subset via
-//! [`crate::shell::session::SessionViewer`].
+//! [`super::navigation`], find/open/annotation helpers in [`super::state`], async
+//! open/render/title/annotation loads in [`super::tasks`]. Session restore
+//! snapshots a subset via [`crate::shell::session::SessionViewer`].
 
 use crate::*;
+use pdf_folio_core::{Annotation, AnnotationId};
+
+/// In-progress create form for a text annotation from the active selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnnotationComposeState {
+    /// Selection start page (zero-based).
+    pub start_page: u16,
+    /// Inclusive start character index on `start_page`.
+    pub start_char: usize,
+    /// Selection end page (zero-based).
+    pub end_page: u16,
+    /// Inclusive end character index on `end_page`.
+    pub end_char: usize,
+    /// Snapshot of selected text at compose start.
+    pub quote: String,
+    /// Draft annotation body.
+    pub body: String,
+}
 
 /// Runtime state owned by the PDF viewer surface.
 ///
@@ -25,6 +44,16 @@ pub struct ViewerRuntime {
     pub current_entry_id: Option<EntryId>,
     /// Filesystem path of the open document.
     pub current_document_path: Option<PathBuf>,
+    /// Toolbar / window display title for the open document.
+    ///
+    /// Seeded immediately from the library entry or file name, then refined in
+    /// the background from PDF metadata (same pattern as annotations).
+    pub document_title: Option<String>,
+    /// True once PDF metadata has supplied a non-empty title (do not overwrite
+    /// with a later provisional library/path seed).
+    pub document_title_from_metadata: bool,
+    /// Monotonic generation to discard stale document-title load results.
+    pub document_title_load_generation: u64,
     /// Raster tiles keyed by page and render width.
     pub rendered_pages: HashMap<TileKey, RenderedPageView>,
     /// Cached aspect ratios used for layout before tiles arrive.
@@ -93,6 +122,10 @@ pub struct ViewerRuntime {
     pub page_fade_started: HashMap<TileKey, Instant>,
     /// Whether the outline/thumbnail sidebar is open.
     pub toc_open: bool,
+    /// Whether document-anchored annotation cards and highlights are shown.
+    pub annotations_visible: bool,
+    /// Whether the toolbar visibility menu (hide sidebar / hide comments) is open.
+    pub visibility_menu_open: bool,
     /// Active viewer sidebar tab (contents vs thumbnails).
     pub viewer_sidebar_tab: ViewerSidebarTab,
     /// Document outline tree from the PDF.
@@ -126,4 +159,16 @@ pub struct ViewerRuntime {
     pub page_mode_wheel_last_event_at: Option<Instant>,
     /// True after a page turn until wheel input goes idle (one turn per gesture).
     pub page_mode_wheel_gesture_consumed: bool,
+    /// Text annotations loaded for the open library entry (document order).
+    pub annotations: Vec<Annotation>,
+    /// Currently selected annotation for highlight + anchored card focus.
+    pub selected_annotation_id: Option<AnnotationId>,
+    /// Compose-from-selection draft, when creating a new annotation.
+    pub annotation_compose: Option<AnnotationComposeState>,
+    /// Annotation currently being body-edited in the overlay, if any.
+    pub annotation_editing_id: Option<AnnotationId>,
+    /// Draft body while `annotation_editing_id` is set.
+    pub annotation_edit_body: String,
+    /// Monotonic generation to discard stale annotation load results.
+    pub annotations_load_generation: u64,
 }

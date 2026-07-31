@@ -364,8 +364,65 @@ impl Db {
             [],
         )?;
         backfill_file_sizes(&connection)?;
+        ensure_annotations_schema(&connection)?;
         Ok(())
     }
+}
+
+/// Creates or upgrades the `annotations` table for text-anchored comments.
+///
+/// Older PDF-Folio libraries may already have a stub `annotations` table with
+/// columns `(id, entry_id, page, kind, data, created_at)` and no usable product
+/// data. That stub makes `CREATE TABLE IF NOT EXISTS` a no-op and breaks the
+/// new index on `start_page`. This helper:
+///
+/// 1. Creates the text-annotation schema when the table is missing.
+/// 2. Replaces the legacy stub schema (detected by missing `start_page`).
+/// 3. Ensures the document-order index exists.
+fn ensure_annotations_schema(connection: &Connection) -> Result<()> {
+    let table_exists: bool = connection
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master
+             WHERE type = 'table' AND name = 'annotations'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+
+    if table_exists {
+        let has_start_page: bool = connection
+            .prepare("PRAGMA table_info(annotations)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(Result::ok)
+            .any(|name| name == "start_page");
+
+        if !has_start_page {
+            // Legacy stub — drop and recreate. The old shape had no text-anchor
+            // fields; rows (if any) cannot be mapped into the new model.
+            connection.execute_batch("DROP TABLE IF EXISTS annotations;")?;
+        }
+    }
+
+    connection.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS annotations (
+            id            TEXT PRIMARY KEY,
+            entry_id      TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+            start_page    INTEGER NOT NULL,
+            start_char    INTEGER NOT NULL,
+            end_page      INTEGER NOT NULL,
+            end_char      INTEGER NOT NULL,
+            quote         TEXT NOT NULL,
+            body          TEXT NOT NULL,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_annotations_entry
+            ON annotations(entry_id, start_page, start_char);
+        "#,
+    )?;
+    Ok(())
 }
 
 /// Fills null `entries.file_size` from on-disk metadata for non-missing paths.

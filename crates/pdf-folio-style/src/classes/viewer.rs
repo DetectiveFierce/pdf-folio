@@ -38,6 +38,10 @@ pub struct ViewerPrimitiveStyle {
     pub find_fill: Color,
     /// Active find match highlight (`primitives.viewer_find_selected_fill`).
     pub find_selected_fill: Color,
+    /// Soft text-annotation highlight (`primitives.viewer_annotation_fill`).
+    pub annotation_fill: Color,
+    /// Active text-annotation highlight (`primitives.viewer_annotation_selected_fill`).
+    pub annotation_selected_fill: Color,
     /// Text-selection overlay (accent mixed with theme alpha/mix primitives).
     pub text_selection_fill: Color,
 }
@@ -54,6 +58,8 @@ pub fn viewer_primitives(tokens: ThemeTokens) -> ViewerPrimitiveStyle {
         },
         find_fill: tokens.primitives.viewer_find_fill,
         find_selected_fill: tokens.primitives.viewer_find_selected_fill,
+        annotation_fill: tokens.primitives.viewer_annotation_fill,
+        annotation_selected_fill: tokens.primitives.viewer_annotation_selected_fill,
         text_selection_fill: Color {
             a: tokens.primitives.viewer_text_selection_alpha,
             ..mix_color(

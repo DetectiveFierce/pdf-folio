@@ -136,6 +136,14 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let position = cursor.position_in(bounds)?;
                 state.pending_empty_click = None;
+                // Mockup: click a highlight to jump the comment carousel.
+                if let Some(annotation_id) = annotation_at_position(self.app, bounds, position) {
+                    state.last_char_click = None;
+                    return Some(
+                        canvas::Action::publish(Message::AnnotationSelected(annotation_id))
+                            .and_capture(),
+                    );
+                }
                 if let Some(anchor) = char_at_position(self.app, bounds, position) {
                     let now = Instant::now();
                     let expand = multi_click_expand(state, now, position, anchor.page, anchor.char_index);
@@ -295,11 +303,12 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if cursor
-            .position_in(bounds)
-            .and_then(|position| char_at_position(self.app, bounds, position))
-            .is_some()
-        {
+        let Some(position) = cursor.position_in(bounds) else {
+            return mouse::Interaction::default();
+        };
+        if annotation_at_position(self.app, bounds, position).is_some() {
+            mouse::Interaction::Pointer
+        } else if char_at_position(self.app, bounds, position).is_some() {
             mouse::Interaction::Text
         } else {
             mouse::Interaction::default()
@@ -334,6 +343,7 @@ impl canvas::Program<Message> for ViewerSelectionOverlay<'_> {
         };
 
         for (page, rect) in self.app.viewer_page_rects_visible_content() {
+            draw_annotation_highlights(self.app, &mut frame, page, rect);
             draw_find_highlights(self.app, &mut frame, page, rect);
             draw_text_selection(self.app, &mut frame, page, rect);
         }
@@ -441,6 +451,100 @@ impl canvas::Program<Message> for HistoryRestoreSpinner {
         );
         vec![frame.into_geometry()]
     }
+}
+
+/// Paint text-annotation ranges on `page` (active annotation uses stronger fill + accent ring).
+fn draw_annotation_highlights(
+    app: &PDFolioApp,
+    frame: &mut canvas::Frame,
+    page: u16,
+    page_rect: Rectangle,
+) {
+    if !app.viewer.annotations_visible || app.viewer.annotations.is_empty() {
+        return;
+    }
+    let Some(layer) = app.viewer.viewer_text_layers.get(&page) else {
+        return;
+    };
+
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let viewer_style = viewer_primitives(tokens);
+    let selected_id = app.viewer.selected_annotation_id.as_ref();
+    let accent_ring = Color {
+        a: 0.95,
+        ..tokens.accent
+    };
+
+    for annotation in &app.viewer.annotations {
+        let Some(range) =
+            PDFolioApp::annotation_char_range_for_page(annotation, page, layer.chars.len())
+        else {
+            continue;
+        };
+        let is_selected = selected_id == Some(&annotation.id);
+        let color = if is_selected {
+            viewer_style.annotation_selected_fill
+        } else {
+            viewer_style.annotation_fill
+        };
+        for rect in selected_line_highlights(layer, page_rect, range) {
+            let path = canvas::Path::rectangle(rect.position(), rect.size());
+            frame.fill(&path, color);
+            // Mockup `mark.is-active`: box-shadow ring via accent stroke.
+            if is_selected {
+                frame.stroke(
+                    &path,
+                    canvas::Stroke::default()
+                        .with_color(accent_ring)
+                        .with_width(1.5),
+                );
+            }
+        }
+    }
+}
+
+/// Hit-test: annotation whose highlight geometry contains `position`, if any.
+fn annotation_at_position(
+    app: &PDFolioApp,
+    _bounds: Rectangle,
+    position: Point,
+) -> Option<pdf_folio_core::AnnotationId> {
+    if !app.viewer.annotations_visible || app.viewer.annotations.is_empty() {
+        return None;
+    }
+    app.viewer.doc.as_ref()?;
+
+    for (page, page_rect) in app.viewer_page_rects_visible_content() {
+        if position.x < page_rect.x
+            || position.x > page_rect.x + page_rect.width
+            || position.y < page_rect.y
+            || position.y > page_rect.y + page_rect.height
+        {
+            continue;
+        }
+        let Some(layer) = app.viewer.viewer_text_layers.get(&page) else {
+            continue;
+        };
+        // Prefer the last matching annotation so overlapping ranges pick the later note.
+        let mut hit = None;
+        for annotation in &app.viewer.annotations {
+            let Some(range) =
+                PDFolioApp::annotation_char_range_for_page(annotation, page, layer.chars.len())
+            else {
+                continue;
+            };
+            for rect in selected_line_highlights(layer, page_rect, range) {
+                if point_in_rect(position, rect) {
+                    hit = Some(annotation.id.clone());
+                    break;
+                }
+            }
+        }
+        if hit.is_some() {
+            return hit;
+        }
+    }
+    None
 }
 
 /// Paint find-match rectangles on `page` (selected match uses accent fill; others optional).

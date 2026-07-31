@@ -21,8 +21,68 @@
 
 use iced::{font, Color, Font};
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use crate::classes::{Class, ComponentState};
+
+/// Interned class-style tables for [`ThemeTokens::class_styles`].
+///
+/// Tables are leaked so [`ClassStylesRef`] can stay [`Copy`] and return
+/// long-lived references without holding a lock across UI code.
+fn class_style_registry() -> &'static Mutex<Vec<&'static [ClassStyle; Class::COUNT]>> {
+    static REGISTRY: Mutex<Vec<&'static [ClassStyle; Class::COUNT]>> = Mutex::new(Vec::new());
+    &REGISTRY
+}
+
+/// Copyable handle to an interned `[ClassStyle; Class::COUNT]` table.
+///
+/// Keeps [`ThemeTokens`] small (~palette-sized) while preserving
+/// `tokens.class_styles[i]` indexing used throughout the UI.
+#[derive(Debug, Clone, Copy)]
+pub struct ClassStylesRef {
+    id: u32,
+}
+
+impl ClassStylesRef {
+    /// Interns a full class-style table and returns a copyable handle.
+    pub fn intern(styles: [ClassStyle; Class::COUNT]) -> Self {
+        let leaked: &'static [ClassStyle; Class::COUNT] = Box::leak(Box::new(styles));
+        let mut registry = class_style_registry()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let id = registry.len() as u32;
+        registry.push(leaked);
+        Self { id }
+    }
+
+    /// Empty styles table (all [`ClassStyle::EMPTY`]).
+    ///
+    /// Reuses a single interned empty table so fallback construction does not
+    /// leak a new allocation on every call.
+    pub fn empty() -> Self {
+        use std::sync::OnceLock;
+        static EMPTY: OnceLock<ClassStylesRef> = OnceLock::new();
+        *EMPTY.get_or_init(|| Self::intern([ClassStyle::EMPTY; Class::COUNT]))
+    }
+
+    fn table(self) -> &'static [ClassStyle; Class::COUNT] {
+        let registry = class_style_registry()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        registry
+            .get(self.id as usize)
+            .copied()
+            .expect("ClassStylesRef id must refer to an interned table")
+    }
+}
+
+impl std::ops::Index<usize> for ClassStylesRef {
+    type Output = ClassStyle;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.table()[index]
+    }
+}
 
 /// KDL-backed layout metrics for the app shell (window, sidebars, grids, menus).
 ///
@@ -274,9 +334,9 @@ impl Default for AppLayoutTokens {
             viewer_toolbar_selection_width: 116.0,
             viewer_find_bar_width: 420.0,
             viewer_find_bar_height: 42.0,
-            viewer_page_number_width: 42.0,
-            viewer_page_control_width: 150.0,
-            viewer_page_chevron_size: 28.0,
+            viewer_page_number_width: 36.0,
+            viewer_page_control_width: 132.0,
+            viewer_page_chevron_size: 26.0,
             viewer_thumbnail_width_px: 128,
             viewer_page_fade_ms: 140,
             viewer_zoom_control_width: 98.0,
@@ -924,6 +984,10 @@ pub struct PrimitiveTokens {
     pub viewer_find_fill: Color,
     /// Active find match highlight fill on the canvas.
     pub viewer_find_selected_fill: Color,
+    /// Soft fill for text-annotation ranges on the canvas.
+    pub viewer_annotation_fill: Color,
+    /// Stronger fill for the selected text annotation.
+    pub viewer_annotation_selected_fill: Color,
     /// Mix toward accent when building text-selection fill.
     pub viewer_text_selection_mix: f32,
     /// Alpha applied to the text-selection overlay fill.
@@ -1031,6 +1095,9 @@ impl Default for PrimitiveTokens {
             page_shadow_offset_y: 2.0,
             viewer_find_fill: Color::from_rgba(1.0, 0.725, 0.133, 0.52),
             viewer_find_selected_fill: Color::from_rgba(0.871, 0.498, 0.0, 0.68),
+            // Classic highlighter yellow (mockup --highlight / --highlight-strong).
+            viewer_annotation_fill: Color::from_rgba(0.957, 0.808, 0.447, 0.35),
+            viewer_annotation_selected_fill: Color::from_rgba(0.937, 0.710, 0.239, 0.45),
             viewer_text_selection_mix: 0.72,
             viewer_text_selection_alpha: 0.42,
             progress_girth: 3.0,
@@ -1089,6 +1156,9 @@ impl Default for PrimitiveTokens {
 /// Obtained from [`crate::StyleBook::tokens`] or [`crate::AppTheme::tokens`].
 /// Views should treat this as an immutable snapshot for a single frame. Named
 /// colors come from `themes/*.kdl`; class paint/layout from `components/**/*.kdl`.
+///
+/// Per-class styles are interned behind a [`ClassStylesRef`] so this type stays
+/// small and [`Copy`] (safe to pass through iced’s deep view stacks).
 #[derive(Debug, Clone, Copy)]
 pub struct ThemeTokens {
     /// Root window / app-shell background (`background` theme token).
@@ -1116,7 +1186,7 @@ pub struct ThemeTokens {
     /// Shared shadow tint for elevated chrome and page drop shadows (`shadow`).
     pub shadow: Color,
     /// Per-[`Class`] paint/layout/text loaded from component KDL.
-    pub class_styles: [ClassStyle; Class::COUNT],
+    pub class_styles: ClassStylesRef,
     /// Non-palette metrics (scrollbars, find highlights, tree indents, …).
     pub primitives: PrimitiveTokens,
 }

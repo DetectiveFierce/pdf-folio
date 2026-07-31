@@ -22,16 +22,30 @@ use iced::widget::{row, Svg};
 ///
 /// `width` is the bar’s fixed layout width from the host; the bar itself is
 /// only built when the domain view includes this element.
+///
+/// A small right inset keeps the dismiss control clear of the document
+/// scrollbar on the bottom-right edge.
 pub(crate) fn viewer_find_anchor(
     app: &PDFolioApp,
     tokens: ThemeTokens,
     width: f32,
 ) -> Element<'_, Message> {
+    let scrollbar_clearance = app.layout().metric(
+        "ViewerFindBar",
+        "scrollbar_clearance",
+        tokens.primitives.scrollbar_width.max(4.0) + Spacing::SM,
+    );
     container(view_viewer_find_bar(app, tokens, width))
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(iced::alignment::Horizontal::Right)
         .align_y(iced::alignment::Vertical::Bottom)
+        .padding(iced::Padding {
+            top: 0.0,
+            right: scrollbar_clearance,
+            bottom: Spacing::SM,
+            left: 0.0,
+        })
         .into()
 }
 

@@ -85,7 +85,7 @@ pub(crate) struct SessionViewer {
     /// Absolute path of the open PDF, if any.
     pub(crate) document_path: Option<PathBuf>,
     /// Library entry id string for the open document, when known.
-    entry_id: Option<String>,
+    pub(crate) entry_id: Option<String>,
     /// Zero-based page index to restore.
     page: u16,
     /// Vertical scroll offset within the document.
@@ -292,9 +292,22 @@ impl PDFolioApp {
                     .iter()
                     .any(|entry| entry.id == entry_id)
                 {
+                    // Keep pending until the document opens so page/zoom restore
+                    // can still run via apply_pending_session_to_open_document.
                     return Task::done(Message::OpenLibraryEntry(entry_id));
                 }
             }
+        }
+
+        // Path-based Viewer restore is handled by the startup open task. If that
+        // document is already open, finish pending page/zoom restore now so later
+        // LibraryLoaded events (e.g. after Back to Library) cannot re-apply Viewer.
+        if matches!(session.mode, SessionMode::Viewer)
+            && session.viewer.document_path.is_some()
+            && self.viewer.doc.is_some()
+            && self.document_matches_session(&session)
+        {
+            return self.apply_pending_session_to_open_document();
         }
 
         if !matches!(session.mode, SessionMode::Viewer) || session.viewer.document_path.is_none() {
@@ -309,6 +322,10 @@ impl PDFolioApp {
     }
 
     /// Applies pending session page/zoom/find state after a document opens.
+    ///
+    /// Also re-binds the library [`EntryId`] from the session snapshot (path-based
+    /// startup opens leave `current_entry_id` unset) and kicks a background
+    /// annotation load so notes appear without blocking the interactive viewer.
     pub(crate) fn apply_pending_session_to_open_document(&mut self) -> Task<Message> {
         let Some(session) = self.pending_session_restore.clone() else {
             return Task::none();
@@ -323,6 +340,16 @@ impl PDFolioApp {
             SessionMode::Library => AppMode::Library,
             SessionMode::Viewer => AppMode::Viewer,
         };
+        // Path-based restore opens via DocumentOpened and clears entry_id; put it
+        // back so annotations / reading progress can attach to the library row.
+        if self.viewer.current_entry_id.is_none() {
+            if let Some(entry_id) = session.viewer.entry_id.as_deref().map(EntryId::new) {
+                self.viewer.current_entry_id = Some(entry_id);
+            }
+        }
+        // Prefer library title over a content-hash path once entry_id is restored
+        // (library rows may still be empty — ensure_* re-seeds when they load).
+        self.seed_provisional_document_title();
         self.viewer.page_scroll_page = session.viewer.page;
         self.viewer.scroll_offset = session.viewer.scroll_offset.max(0.0);
         self.viewer.last_scroll_offset = self.viewer.scroll_offset;
@@ -351,6 +378,8 @@ impl PDFolioApp {
             self.request_visible_pages(),
             self.request_viewer_thumbnail_pages(),
             self.scroll_viewer_to_offsets_task(),
+            // Non-blocking spawn_blocking list; UI stays interactive meanwhile.
+            self.load_annotations_task(),
             save_app_session_task(self),
         ])
     }
@@ -431,21 +460,25 @@ impl PDFolioApp {
     }
 
     /// True when the open document matches the session entry id or file path.
+    ///
+    /// Matches on either identity: path-only startup opens leave `current_entry_id`
+    /// unset even when the session snapshot still carries an entry id, so requiring
+    /// entry id alone would leave `pending_session_restore` stuck and later library
+    /// reloads would re-enter Viewer mode.
     fn document_matches_session(&self, session: &AppSession) -> bool {
-        if let Some(session_entry_id) = session.viewer.entry_id.as_deref() {
-            return self
-                .viewer
+        let entry_matches = session.viewer.entry_id.as_deref().is_some_and(|session_entry_id| {
+            self.viewer
                 .current_entry_id
                 .as_ref()
-                .is_some_and(|entry_id| entry_id.as_str() == session_entry_id);
-        }
-
-        session.viewer.document_path.as_ref().is_some_and(|path| {
+                .is_some_and(|entry_id| entry_id.as_str() == session_entry_id)
+        });
+        let path_matches = session.viewer.document_path.as_ref().is_some_and(|path| {
             self.viewer
                 .current_document_path
                 .as_ref()
                 .is_some_and(|current| current == path)
-        })
+        });
+        entry_matches || path_matches
     }
 }
 
@@ -591,6 +624,7 @@ fn viewer_sidebar_tab_id(tab: ViewerSidebarTab) -> &'static str {
     match tab {
         ViewerSidebarTab::Contents => "contents",
         ViewerSidebarTab::Thumbnails => "thumbnails",
+        ViewerSidebarTab::Annotations => "annotations",
     }
 }
 
@@ -598,6 +632,7 @@ fn viewer_sidebar_tab_id(tab: ViewerSidebarTab) -> &'static str {
 fn parse_viewer_sidebar_tab(value: &str) -> ViewerSidebarTab {
     match value {
         "thumbnails" => ViewerSidebarTab::Thumbnails,
+        "annotations" => ViewerSidebarTab::Annotations,
         _ => ViewerSidebarTab::Contents,
     }
 }

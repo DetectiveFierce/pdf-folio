@@ -1,5 +1,10 @@
 primitive "viewer_find_fill" "#FFB92285"
 primitive "viewer_find_selected_fill" "#DE7F00AD"
+// Classic highlighter yellow (mockup --highlight / --highlight-strong), kept
+// distinct from find-in-document amber fills. Fills stay soft so text remains
+// readable; selected ranges get emphasis from the accent stroke, not fill alpha.
+primitive "viewer_annotation_fill" "#F4CE7259"
+primitive "viewer_annotation_selected_fill" "#EFB53D73"
 primitive "viewer_text_selection_mix" 0.72
 primitive "viewer_text_selection_alpha" 0.42
 primitive "slider_rail_width" 4
@@ -13,7 +18,8 @@ primitive "auto_scroll_radius" 999
 primitive "auto_scroll_shadow_blur" 4
 
 component "ViewerToolbar" {
-    layout height=48 spacing=6 padding_x=10 padding_y=6 title_min_width=28 title_max_width=360 selection_width=116
+    // spacing = gap between adjacent controls (not internal button padding).
+    layout height=48 spacing=10 padding_x=10 padding_y=6 title_min_width=28 title_max_width=360 selection_width=116
 
     normal background="#17110A" text="#F0E6D4" border="#C8B89A24" border_width=1 radius=0 theme="espresso"
     normal background="#FBF9F4" text="#1F1810" border="#D4CBB8" border_width=1 radius=0 theme="light"
@@ -40,8 +46,9 @@ component "ViewerToolbarTitle" {
 }
 
 component "ViewerPageControl" {
-    layout number_width=42 control_width=150 chevron_size=28 spacing=4 padding_x=6 padding_y=4
-    text size=14 weight="medium"
+    // Compact pill: [‹] current / total [›] — tighter than the old loose row.
+    layout number_width=36 control_width=132 chevron_size=26 spacing=2 padding_x=4 padding_y=2
+    text size=13 weight="medium"
 
     normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="espresso"
     normal background="#00000000" text="$text_secondary" border="#00000000" border_width=0 radius=0 theme="light"
@@ -155,4 +162,19 @@ component "ViewerPagePlaceholder" {
 component "ViewerPresentationOverlay" {
     normal background="#0C0905B8" text="#F0E6D4" border="#00000000" border_width=0 radius=0 theme="espresso"
     normal background="#E4DDD2B8" text="#1F1810" border="#00000000" border_width=0 radius=0 theme="light"
+}
+
+component "AnnotationPopover" {
+    layout padding_x=20 padding_y=18 spacing=8 width=320
+
+    // Solid paper cards with soft elevation (mockup comment carousel).
+    normal background="#241A10F2" text="#F0E6D4" border="#C8B89A66" border_width=1 radius=14 theme="espresso"
+    normal background="#FFFFFFF5" text="#1F1810" border="#DAD9CE" border_width=1 radius=14 theme="light"
+}
+
+component "AnnotationToolbar" {
+    layout spacing=4 padding_x=8 padding_y=4
+
+    normal background="#1E1610AA" text="#D8C9B0" border="#C8B89A40" border_width=1 radius=8 theme="espresso"
+    normal background="#FFFFFFCC" text="#1F1810" border="#D4CBB8AA" border_width=1 radius=8 theme="light"
 }

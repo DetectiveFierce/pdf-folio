@@ -1,2 +1,13 @@
+[build]
+# Optional cache: .cargo/rustc-wrapper.sh uses sccache when on PATH, else rustc.
+rustc-wrapper = ".cargo/rustc-wrapper.sh"
+
 [profile.dev]
-opt-level = 1
+opt-level = 0
+debug = 1
+incremental = false
+
+# Faster linking on Linux x86_64 is opt-in (requires clang + lld on PATH):
+#   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang \
+#   RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+#   cargo build
