@@ -64,6 +64,28 @@ impl PDFolioApp {
     ///
     /// Used by find-in-document and similar “reveal this location” flows.
     pub(crate) fn scroll_to_page_rect(&mut self, page: u16, x_fraction: f32, y_fraction: f32) {
+        self.scroll_to_page_rect_with_bias(page, x_fraction, y_fraction, 0.25, 0.25);
+    }
+
+    /// Scrolls so a fractional point inside `page` is at the viewport center
+    /// (mockup annotation reveal: `scrollIntoView({ block: 'center' })`).
+    pub(crate) fn scroll_to_page_rect_centered(
+        &mut self,
+        page: u16,
+        x_fraction: f32,
+        y_fraction: f32,
+    ) {
+        self.scroll_to_page_rect_with_bias(page, x_fraction, y_fraction, 0.5, 0.5);
+    }
+
+    fn scroll_to_page_rect_with_bias(
+        &mut self,
+        page: u16,
+        x_fraction: f32,
+        y_fraction: f32,
+        x_bias: f32,
+        y_bias: f32,
+    ) {
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
             self.viewer.page_scroll_page = page;
         }
@@ -71,9 +93,10 @@ impl PDFolioApp {
         let Some(rect) = self.viewer_page_rect_for_page(page) else {
             return;
         };
-        let target_x = rect.x + rect.width * x_fraction - self.viewer.viewer_viewport_width * 0.25;
+        let target_x =
+            rect.x + rect.width * x_fraction - self.viewer.viewer_viewport_width * x_bias;
         let target_y =
-            rect.y + rect.height * y_fraction - self.viewer.viewer_viewport_height * 0.25;
+            rect.y + rect.height * y_fraction - self.viewer.viewer_viewport_height * y_bias;
 
         if matches!(self.viewer.viewer_scroll_mode, ViewerScrollMode::Horizontal) {
             self.viewer.horizontal_offset = target_x.max(0.0);
@@ -234,6 +257,7 @@ impl PDFolioApp {
             self.viewer.zoom_input = zoom_percent_label(new_width);
         }
         self.viewer.zoom_menu_open = false;
+        self.viewer.visibility_menu_open = false;
         self.viewer.zoom_generation = self.viewer.zoom_generation.wrapping_add(1);
         let generation = self.viewer.zoom_generation;
 
@@ -301,18 +325,22 @@ impl PDFolioApp {
         })
     }
 
-    /// Window title: document filename in viewer mode, otherwise `"PDF-Folio"`.
+    /// Window title: resolved document title in viewer mode, otherwise `"PDF-Folio"`.
+    ///
+    /// Uses the same background-loaded [`ViewerRuntime::document_title`] as the
+    /// toolbar (library entry / PDF metadata), not the raw filesystem name, so
+    /// session-restored viewers do not keep a content-hash filename in the
+    /// window chrome.
     pub(crate) fn title(&self) -> String {
         if matches!(self.mode, AppMode::Library | AppMode::LibrarySwitcher) {
             return String::from("PDF-Folio");
         }
 
         self.viewer
-            .doc
-            .as_ref()
-            .and_then(|doc| doc.path().file_name())
-            .and_then(|name| name.to_str())
-            .map(|name| format!("{name} - PDF-Folio"))
+            .document_title
+            .as_deref()
+            .filter(|title| !title.is_empty())
+            .map(|title| format!("{title} - PDF-Folio"))
             .unwrap_or_else(|| String::from("PDF-Folio"))
     }
 }

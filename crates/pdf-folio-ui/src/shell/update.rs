@@ -473,6 +473,12 @@ pub(crate) fn update(app: &mut PDFolioApp, message: Message) -> Task<Message> {
         }
         Message::ThemeToggled => {
             app.appearance.theme = app.appearance.theme.toggled();
+            if app.mode == AppMode::Viewer && app.viewer.doc.is_some() {
+                return Task::batch([
+                    save_app_session_task(app),
+                    app.scroll_viewer_to_offsets_task(),
+                ]);
+            }
             return save_app_session_task(app);
         }
         Message::ReloadStyles => {

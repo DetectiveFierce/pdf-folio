@@ -58,6 +58,54 @@ impl FolderId {
     }
 }
 
+/// Stable text-annotation identifier (generated when the annotation is created).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AnnotationId(String);
+
+impl AnnotationId {
+    /// Wraps an existing annotation identifier string without validating format.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// Borrows the underlying identifier string (used as the SQLite primary key).
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A text-anchored comment attached to a library PDF entry.
+///
+/// Anchors use zero-based page and character indices from
+/// [`crate::PageTextLayer`] extraction. Character positions are stable for a
+/// given content-addressed [`EntryId`] (PDF bytes). The `quote` field stores a
+/// snapshot of the selected text at create time so the sidebar remains readable
+/// without re-extracting layers. Annotations are library metadata only — they
+/// are never written into the PDF stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Annotation {
+    /// Stable annotation identifier.
+    pub id: AnnotationId,
+    /// Library entry this annotation belongs to.
+    pub entry_id: EntryId,
+    /// Zero-based page index of the selection start.
+    pub start_page: u16,
+    /// Zero-based character index of the selection start on `start_page`.
+    pub start_char: usize,
+    /// Zero-based page index of the selection end.
+    pub end_page: u16,
+    /// Zero-based character index of the selection end on `end_page` (inclusive).
+    pub end_char: usize,
+    /// Snapshot of selected text at create time.
+    pub quote: String,
+    /// User-authored comment body.
+    pub body: String,
+    /// Creation timestamp.
+    pub created_at: DateTime<Utc>,
+    /// Last body-edit timestamp.
+    pub updated_at: DateTime<Utc>,
+}
+
 /// User-managed PDF folder in the library tree (not a filesystem path).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Folder {

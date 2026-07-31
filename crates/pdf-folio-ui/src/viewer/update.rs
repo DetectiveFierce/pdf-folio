@@ -11,6 +11,8 @@
 //! - Find: `OpenViewerFind`, `CloseViewerFind`, `ViewerFind*`
 //! - Outline: `ToggleOutlineNode`
 //! - Text selection / copy: `ViewerText*`, `CopyViewerTextSelection`
+//! - Annotations: `StartAnnotationCompose`, `Annotation*`, `AnnotationsLoaded`
+//! - Document title: `DocumentTitleLoaded`
 //! - Scroll / viewport / wheel: `Viewport*`, modifiers
 //! - Zoom: `Zoom*`, presets, scroll/spread mode, `ZoomRenderSettled`
 //! - Render completion: `PageRendered` (and related text-layer loads)
@@ -36,6 +38,33 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             app.viewer.viewer_viewport_height = app.estimated_viewer_viewport_height();
             Some(with_session_save(app.apply_active_dimension_zoom(), app))
         }
+        Message::ToggleVisibilityMenu => {
+            app.chrome.open_context_menu = None;
+            app.viewer.zoom_menu_open = false;
+            app.viewer.visibility_menu_open = !app.viewer.visibility_menu_open;
+            // Re-apply scroll in case overlay layout still jostles the scrollable.
+            Some(app.scroll_viewer_to_offsets_task())
+        }
+        Message::CloseVisibilityMenu => {
+            app.viewer.visibility_menu_open = false;
+            Some(app.scroll_viewer_to_offsets_task())
+        }
+        Message::ToggleHideSidebar => {
+            app.viewer.toc_open = !app.viewer.toc_open;
+            app.viewer.viewer_viewport_width = app.estimated_viewer_viewport_width();
+            app.viewer.viewer_viewport_height = app.estimated_viewer_viewport_height();
+            // Keep the menu open so the user can flip multiple rows.
+            // Preserve reading position across sidebar width / dimension-zoom changes.
+            let zoom = app.apply_active_dimension_zoom();
+            Some(with_session_save(
+                Task::batch([zoom, app.scroll_viewer_to_offsets_task()]),
+                app,
+            ))
+        }
+        Message::ToggleHideComments => {
+            app.viewer.annotations_visible = !app.viewer.annotations_visible;
+            Some(app.scroll_viewer_to_offsets_task())
+        }
         Message::ViewerSidebarTabSelected(tab) => {
             app.viewer.viewer_sidebar_tab = *tab;
             Some(with_session_save(app.request_viewer_thumbnail_pages(), app))
@@ -55,7 +84,10 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         Message::CloseViewerFind => {
             app.viewer.viewer_find.open = false;
             app.viewer.find_text_generation = app.viewer.find_text_generation.wrapping_add(1);
-            Some(save_app_session_task(app))
+            Some(Task::batch([
+                save_app_session_task(app),
+                app.scroll_viewer_to_offsets_task(),
+            ]))
         }
         Message::ViewerFindTextLayersContinue(generation) => {
             Some(app.continue_find_text_layers(*generation))
@@ -181,6 +213,19 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             if app.viewer.viewer_copy_pending && app.selected_text_layers_ready() {
                 tasks.push(app.copy_selected_viewer_text());
             }
+            if let Some(id) = app.viewer.selected_annotation_id.clone() {
+                if let Some(annotation) = app
+                    .viewer
+                    .annotations
+                    .iter()
+                    .find(|annotation| annotation.id == id)
+                    .cloned()
+                {
+                    if annotation.start_page == *page {
+                        tasks.push(app.scroll_to_annotation_anchor(&annotation));
+                    }
+                }
+            }
             Some(if tasks.is_empty() {
                 Task::none()
             } else {
@@ -220,6 +265,172 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             Some(Task::none())
         }
         Message::CopyViewerTextSelection => Some(app.copy_selected_viewer_text()),
+        Message::StartAnnotationCompose => Some(app.start_annotation_compose()),
+        Message::AnnotationComposeBodyChanged(body) => {
+            if let Some(compose) = &mut app.viewer.annotation_compose {
+                compose.body = body.clone();
+            }
+            Some(Task::none())
+        }
+        Message::AnnotationComposeCancelled => {
+            app.viewer.annotation_compose = None;
+            Some(Task::none())
+        }
+        Message::AnnotationCreateSubmitted => {
+            let Some(compose) = app.viewer.annotation_compose.clone() else {
+                return Some(Task::none());
+            };
+            let body = compose.body.trim().to_owned();
+            if body.is_empty() {
+                return Some(Task::none());
+            }
+            let Some(annotation) =
+                crate::viewer::tasks::build_annotation_from_compose(app, &compose, body)
+            else {
+                return Some(Task::none());
+            };
+            Some(crate::viewer::tasks::insert_annotation_task(app, annotation))
+        }
+        Message::AnnotationCreateFinished(result) => match result {
+            Ok(annotation) => {
+                let id = annotation.id.clone();
+                app.viewer.annotations.push(annotation.clone());
+                app.viewer.annotations.sort_by(|left, right| {
+                    left.start_page
+                        .cmp(&right.start_page)
+                        .then(left.start_char.cmp(&right.start_char))
+                        .then(left.created_at.cmp(&right.created_at))
+                });
+                app.viewer.annotation_compose = None;
+                app.clear_viewer_text_selection();
+                app.viewer.selected_annotation_id = Some(id);
+                Some(app.scroll_to_annotation_anchor(annotation))
+            }
+            Err(error) => {
+                app.viewer.document_error = Some(error.clone());
+                Some(Task::none())
+            }
+        },
+        Message::DocumentTitleLoaded { title, generation } => {
+            if *generation != app.viewer.document_title_load_generation {
+                return Some(Task::none());
+            }
+            // Only replace the provisional title when PDF metadata is non-empty.
+            if let Some(title) = title.clone().filter(|value| !value.trim().is_empty()) {
+                app.viewer.document_title = Some(title);
+                app.viewer.document_title_from_metadata = true;
+            }
+            Some(Task::none())
+        }
+        Message::AnnotationsLoaded {
+            entry_id,
+            annotations,
+            generation,
+        } => {
+            if *generation != app.viewer.annotations_load_generation {
+                return Some(Task::none());
+            }
+            if app.viewer.current_entry_id.as_ref() != Some(entry_id) {
+                return Some(Task::none());
+            }
+            app.viewer.annotations = annotations.clone();
+            if app.viewer.selected_annotation_id.is_none() {
+                if let Some(first) = app.viewer.annotations.first() {
+                    app.viewer.selected_annotation_id = Some(first.id.clone());
+                }
+            }
+            // Do not auto-scroll on open — the user stays at their reading position.
+            Some(Task::none())
+        }
+        Message::AnnotationSelected(id) => Some(app.select_annotation(id.clone())),
+        Message::AnnotationCarouselPrevious => Some(app.annotation_select_previous()),
+        Message::AnnotationCarouselNext => Some(app.annotation_select_next()),
+        Message::AnnotationEditStarted(id) => {
+            let body = app
+                .viewer
+                .annotations
+                .iter()
+                .find(|annotation| annotation.id == *id)
+                .map(|annotation| annotation.body.clone())
+                .unwrap_or_default();
+            app.viewer.annotation_editing_id = Some(id.clone());
+            app.viewer.annotation_edit_body = body;
+            app.viewer.selected_annotation_id = Some(id.clone());
+            Some(Task::none())
+        }
+        Message::AnnotationEditBodyChanged(body) => {
+            app.viewer.annotation_edit_body = body.clone();
+            Some(Task::none())
+        }
+        Message::AnnotationEditSubmitted => {
+            let Some(id) = app.viewer.annotation_editing_id.clone() else {
+                return Some(Task::none());
+            };
+            let body = app.viewer.annotation_edit_body.trim().to_owned();
+            if body.is_empty() {
+                return Some(Task::none());
+            }
+            Some(crate::viewer::tasks::update_annotation_body_task(
+                app, id, body,
+            ))
+        }
+        Message::AnnotationEditFinished(result) => match result {
+            Ok((id, body, updated_at)) => {
+                if let Some(annotation) = app
+                    .viewer
+                    .annotations
+                    .iter_mut()
+                    .find(|annotation| annotation.id == *id)
+                {
+                    annotation.body = body.clone();
+                    annotation.updated_at = *updated_at;
+                }
+                app.viewer.annotation_editing_id = None;
+                app.viewer.annotation_edit_body.clear();
+                Some(Task::none())
+            }
+            Err(error) => {
+                app.viewer.document_error = Some(error.clone());
+                Some(Task::none())
+            }
+        },
+        Message::AnnotationEditCancelled => {
+            app.viewer.annotation_editing_id = None;
+            app.viewer.annotation_edit_body.clear();
+            Some(Task::none())
+        }
+        Message::AnnotationDeleteRequested(id) => {
+            Some(crate::viewer::tasks::delete_annotation_task(app, id.clone()))
+        }
+        Message::AnnotationDeleteFinished { id, error } => {
+            if let Some(error) = error {
+                app.viewer.document_error = Some(error.clone());
+                return Some(Task::none());
+            }
+            if let Some(id) = id {
+                let removed_index = app
+                    .viewer
+                    .annotations
+                    .iter()
+                    .position(|annotation| annotation.id == *id);
+                app.viewer.annotations.retain(|annotation| annotation.id != *id);
+                if app.viewer.annotation_editing_id.as_ref() == Some(id) {
+                    app.viewer.annotation_editing_id = None;
+                    app.viewer.annotation_edit_body.clear();
+                }
+                if app.viewer.selected_annotation_id.as_ref() == Some(id) {
+                    app.viewer.selected_annotation_id = None;
+                    if let Some(index) = removed_index {
+                        if !app.viewer.annotations.is_empty() {
+                            let next = index.min(app.viewer.annotations.len() - 1);
+                            let next_id = app.viewer.annotations[next].id.clone();
+                            app.viewer.selected_annotation_id = Some(next_id);
+                        }
+                    }
+                }
+            }
+            Some(Task::none())
+        }
         Message::ViewportChanged {
             horizontal_offset,
             scroll_offset,
@@ -368,14 +579,15 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         }
         Message::ToggleZoomMenu => {
             app.chrome.open_context_menu = None;
+            app.viewer.visibility_menu_open = false;
             app.viewer.zoom_menu_open = !app.viewer.zoom_menu_open;
             app.viewer.zoom_editing = false;
             app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);
-            Some(Task::none())
+            Some(app.scroll_viewer_to_offsets_task())
         }
         Message::CloseZoomMenu => {
             app.viewer.zoom_menu_open = false;
-            Some(Task::none())
+            Some(app.scroll_viewer_to_offsets_task())
         }
         Message::ZoomPresetSelected(preset) => {
             app.viewer.zoom_menu_open = false;

@@ -15,11 +15,13 @@
 
 use crate::*;
 use iced::widget::{row, Svg};
+use iced::{Background, Border};
 
 /// Compact prev / page-number / next control for the viewer toolbar.
 ///
-/// Double-clicking the page number starts inline edit (`page_input_editing`);
-/// otherwise the label shows the 1-based `current_page` against `page_count`.
+/// Rendered as a single cohesive pill: transparent chevrons flank a
+/// `current / total` readout. Double-clicking the page number starts inline
+/// edit (`page_input_editing`).
 pub(crate) fn viewer_page_control<'a>(
     app: &'a PDFolioApp,
     current_page: u16,
@@ -34,6 +36,12 @@ pub(crate) fn viewer_page_control<'a>(
         ComponentState::Normal,
         tokens.text_secondary,
     );
+    let primary_color = tokens.text_primary;
+    let chevron_size = app.layout().viewer_page_chevron_size;
+    let number_width = app.layout().viewer_page_number_width;
+    let text_size = control_text.size.unwrap_or(FontSize::MD);
+    let text_weight = control_text.weight.unwrap_or(FontWeight::MEDIUM);
+
     let numerator: Element<'a, Message> = if app.viewer.page_input_editing {
         text_input("", &app.viewer.jump_input)
             .id(iced::widget::Id::new(PAGE_INPUT_ID))
@@ -43,78 +51,140 @@ pub(crate) fn viewer_page_control<'a>(
                 control_layout.padding_y(Spacing::XS),
                 control_layout.padding_x(Spacing::SM),
             ])
-            .size(control_text.size.unwrap_or(FontSize::MD))
-            .font(ui_font(control_text.weight.unwrap_or(FontWeight::MEDIUM)))
-            .width(Length::Fixed(app.layout().viewer_page_number_width))
+            .size(text_size)
+            .font(ui_font(text_weight))
+            .width(Length::Fixed(number_width))
             .style(move |_, status| text_input_style(tokens, Class::ViewerFindInput, status))
             .into()
     } else {
         mouse_area(
             container(
-                text(current_page.to_string())
-                    .size(control_text.size.unwrap_or(FontSize::MD))
-                    .font(ui_font(control_text.weight.unwrap_or(FontWeight::MEDIUM)))
-                    .color(control_color)
-                    .wrapping(Wrapping::None),
+                row![
+                    text(current_page.to_string())
+                        .size(text_size)
+                        .font(ui_font(FontWeight::SEMIBOLD))
+                        .color(primary_color)
+                        .wrapping(Wrapping::None),
+                    text(format!(" / {page_count}"))
+                        .size(text_size)
+                        .font(ui_font(text_weight))
+                        .color(control_color)
+                        .wrapping(Wrapping::None),
+                ]
+                .spacing(0)
+                .align_y(iced::Alignment::Center),
             )
-            .width(Length::Fixed(app.layout().viewer_page_number_width))
-            .height(Length::Fixed(app.layout().viewer_page_chevron_size))
+            .width(Length::Fixed(number_width + 28.0))
+            .height(Length::Fixed(chevron_size))
             .center(Length::Fill),
         )
         .on_double_click(Message::StartPageInputEdit)
         .into()
     };
 
-    row![
+    let cluster = row![
         viewer_page_chevron_button(app.layout(), CHEVRON_LEFT_SVG, tokens)
             .on_press(Message::PreviousPage)
-            .width(Length::Fixed(app.layout().viewer_page_chevron_size))
-            .height(Length::Fixed(app.layout().viewer_page_chevron_size)),
+            .width(Length::Fixed(chevron_size))
+            .height(Length::Fixed(chevron_size)),
         numerator,
-        text(format!("/ {page_count}"))
-            .size(control_text.size.unwrap_or(FontSize::MD))
-            .font(ui_font(control_text.weight.unwrap_or(FontWeight::MEDIUM)))
-            .color(control_color)
-            .wrapping(Wrapping::None),
         viewer_page_chevron_button(app.layout(), CHEVRON_RIGHT_SVG, tokens)
             .on_press(Message::NextPage)
-            .width(Length::Fixed(app.layout().viewer_page_chevron_size))
-            .height(Length::Fixed(app.layout().viewer_page_chevron_size)),
+            .width(Length::Fixed(chevron_size))
+            .height(Length::Fixed(chevron_size)),
     ]
-    .spacing(control_layout.spacing.unwrap_or(Spacing::XS))
+    .spacing(control_layout.spacing.unwrap_or(2.0))
     .align_y(iced::Alignment::Center)
-    .into()
+    .padding([
+        control_layout.padding_y(2.0),
+        control_layout.padding_x(4.0),
+    ]);
+
+    container(cluster)
+        .width(Length::Fixed(app.layout().viewer_page_control_width))
+        .height(Length::Fixed(chevron_size + 4.0))
+        .center_y(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(Background::Color(Color::from_rgba(
+                tokens.surface_raised.r,
+                tokens.surface_raised.g,
+                tokens.surface_raised.b,
+                0.45,
+            ))),
+            border: Border {
+                color: Color::from_rgba(tokens.border.r, tokens.border.g, tokens.border.b, 0.55),
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
 }
 
-/// Compact SVG chevron button for previous/next page on the viewer toolbar.
+/// Transparent SVG chevron for previous/next page (no solid chrome).
 fn viewer_page_chevron_button<'a>(
     layout: &crate::style::AppLayoutTokens,
     icon: &'static [u8],
     tokens: ThemeTokens,
 ) -> iced::widget::Button<'a, Message> {
-    let button_layout = tokens.class_styles[Class::ViewerToolbarButton.index()].layout;
-    let icon_color = class_text_color(
-        tokens,
-        Class::ViewerToolbarButton,
-        ComponentState::Normal,
-        tokens.text_secondary,
-    );
+    let icon_size = layout.metric("ViewerToolbarChrome", "icon_size", 16.0);
+    let icon_color = tokens.text_secondary;
     let icon = Svg::new(iced::widget::svg::Handle::from_memory(icon))
-        .width(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
-        .height(layout.metric("ViewerToolbarChrome", "icon_size", 16.0))
+        .width(icon_size)
+        .height(icon_size)
         .style(move |_, _| iced::widget::svg::Style {
             color: Some(icon_color),
         });
 
-    button(container(icon).center(Length::Fill))
-        .padding(
-            button_layout
-                .padding_x(0.0)
-                .min(button_layout.padding_y(0.0)),
-        )
-        .style(move |_, status| {
-            crate::style::button_style(tokens, Class::ViewerToolbarButton, status)
-        })
+    button(container(icon).center(Length::Fill)).padding(0.0).style(
+        move |_, status| transparent_toolbar_icon_style(tokens, status, true),
+    )
+}
+
+/// Shared transparent icon-button paint for toolbar glyphs (page, annotate, …).
+pub(crate) fn transparent_toolbar_icon_style(
+    tokens: ThemeTokens,
+    status: iced::widget::button::Status,
+    enabled: bool,
+) -> iced::widget::button::Style {
+    use iced::widget::button::Status;
+    let (background, text_color) = if !enabled {
+        (None, tokens.text_secondary)
+    } else {
+        match status {
+            Status::Hovered => (
+                Some(Background::Color(Color::from_rgba(
+                    tokens.accent.r,
+                    tokens.accent.g,
+                    tokens.accent.b,
+                    0.14,
+                ))),
+                tokens.text_primary,
+            ),
+            Status::Pressed => (
+                Some(Background::Color(Color::from_rgba(
+                    tokens.accent.r,
+                    tokens.accent.g,
+                    tokens.accent.b,
+                    0.22,
+                ))),
+                tokens.accent,
+            ),
+            Status::Disabled => (None, tokens.text_secondary),
+            Status::Active => (None, tokens.text_primary),
+        }
+    };
+    iced::widget::button::Style {
+        background,
+        text_color,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 6.0.into(),
+        },
+        shadow: Default::default(),
+        snap: false,
+    }
 }
 
 /// Resolve themed text color for `class`/`state`, falling back to `fallback`.

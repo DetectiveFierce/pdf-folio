@@ -74,12 +74,15 @@ When searching `messages.rs`, think in clusters rather than alphabetical order. 
 ### Viewer / document
 
 - Open document / document opened / document error
+- `DocumentTitleLoaded` (background PDF metadata title; generation-gated)
 - Page rendered, text layer loaded
 - Scroll, page jump, spread/scroll mode
-- Zoom change, zoom settle generation
+- Zoom change, zoom settle generation; `ToggleZoomMenu` / `CloseZoomMenu`
 - Find bar query, matches, next/prev
+- Text annotations: compose, create/edit/delete, load, select, carousel
+- Visibility menu: `ToggleVisibilityMenu`, `ToggleHideSidebar`, `ToggleHideComments`
 - Outline load and navigation
-- Text selection copy
+- Text selection copy; annotate from selection
 
 ### Chrome
 

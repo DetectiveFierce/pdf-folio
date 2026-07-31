@@ -40,9 +40,12 @@ Defined in [`viewer/document.rs`](../api/pdf-folio-ui/viewer/document.md) (and r
 | Concern | Typical fields |
 | --- | --- |
 | Open document | `PdfDoc` (`Arc`), entry id, path |
+| Display title | `document_title` (provisional library/path, then PDF metadata); `document_title_from_metadata` |
 | Raster | rendered page map, aspect ratios, `TileCache`, pending renders |
 | Viewport | scroll offset, zoom width, spread/scroll mode |
 | Text | text layers, selection, find bar state |
+| Annotations | loaded rows, selection, compose/edit drafts, `annotations_visible` |
+| Chrome flags | `toc_open`, `visibility_menu_open`, `zoom_menu_open` |
 | Outline | TOC tree + selection |
 | Progress | `progress_save_generation`, `last_saved_progress_page` (debounced `last_page` writes) |
 | Errors | document error banner state |

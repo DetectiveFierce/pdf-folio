@@ -5,6 +5,14 @@
 //! stacks global overlays: command palette, context menus, confirmation and
 //! import/export dialogs, error banners, and loading layers.
 //!
+//! ## Scroll-stable overlay stack
+//!
+//! Floating chrome (zoom menu, visibility menu, context menu, command palette)
+//! always occupies a fixed three-layer stack: base content, capture layer, menu
+//! panel. When nothing is open the upper slots are zero-size placeholders.
+//! Switching between a bare base and a stack remounts the viewer scrollable and
+//! jumps reading position to the origin — keep the stack shape stable.
+//!
 //! ## Ownership
 //!
 //! Single entry point composed by the iced `Application::view` path. Domain
@@ -26,7 +34,10 @@ use crate::components::shared::loading::{
     document_loading_layer, history_restore_spinner_layer, startup_library_loading_layer,
 };
 use crate::components::shared::menus::view_library_switcher;
-use crate::components::viewer::toolbar::{view_zoom_menu_dropdown, zoom_menu_capture_layer};
+use crate::components::viewer::toolbar::{
+    view_visibility_menu_dropdown, view_zoom_menu_dropdown, visibility_menu_capture_layer,
+    zoom_menu_capture_layer,
+};
 use crate::library::view::{
     floating_folder_drag_preview, floating_library_drag_preview, view_confirmation_dialog,
     view_create_folder_dialog, view_export_dialog, view_import_menu_dialog,
@@ -35,12 +46,18 @@ use crate::library::view::{
     view_raindrop_import_progress_dialog, view_tag_manager_dialog,
 };
 use crate::*;
-use iced::widget::{column, row, stack};
+use iced::widget::{column, row, stack, Space};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 /// Cap on startup-probe view timing logs when `PDF_FOLIO_STARTUP_PROBE` is set.
 static VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
+
+/// Zero-size non-interactive stack slot so overlay open/close does not remount
+/// the base tree (which would reset the viewer scrollable to the origin).
+fn overlay_slot_placeholder<'a>() -> Element<'a, Message> {
+    Space::new().width(0).height(0).into()
+}
 
 /// Compose the full application surface for the current `PDFolioApp` state.
 pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
@@ -65,36 +82,37 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
         library_shell.push(view_library(app)).into()
     };
 
-    let menu_content = if app.chrome.command_palette_open {
-        stack![
-            base_content,
-            command_palette_capture_layer(),
-            view_command_palette(app, tokens)
-        ]
+    // Always use a 3-layer stack (base + capture + menu). Switching between a
+    // bare base and a stack remounts the viewer scrollable and wipes scroll.
+    let (overlay_capture, overlay_menu): (Element<'_, Message>, Element<'_, Message>) =
+        if app.chrome.command_palette_open {
+            (
+                command_palette_capture_layer(),
+                view_command_palette(app, tokens),
+            )
+        } else if app.viewer.zoom_menu_open {
+            (
+                zoom_menu_capture_layer(app),
+                view_zoom_menu_dropdown(app, tokens),
+            )
+        } else if app.viewer.visibility_menu_open {
+            (
+                visibility_menu_capture_layer(app),
+                view_visibility_menu_dropdown(app, tokens),
+            )
+        } else if app.chrome.open_context_menu.is_some() {
+            (
+                context_menu_capture_layer(app),
+                view_context_menu_dropdown(app, tokens),
+            )
+        } else {
+            (overlay_slot_placeholder(), overlay_slot_placeholder())
+        };
+
+    let menu_content: Element<'_, Message> = stack![base_content, overlay_capture, overlay_menu]
         .width(Length::Fill)
         .height(Length::Fill)
-        .into()
-    } else if app.viewer.zoom_menu_open {
-        stack![
-            base_content,
-            zoom_menu_capture_layer(app),
-            view_zoom_menu_dropdown(app, tokens)
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-    } else if app.chrome.open_context_menu.is_some() {
-        stack![
-            base_content,
-            context_menu_capture_layer(app),
-            view_context_menu_dropdown(app, tokens)
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-    } else {
-        base_content
-    };
+        .into();
 
     let content = if app.libraries.name_dialog.is_some() {
         stack![menu_content, view_library_name_dialog(app, tokens)]

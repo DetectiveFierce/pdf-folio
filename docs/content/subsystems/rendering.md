@@ -138,6 +138,47 @@ Sidebar **thumbnails** only rasterize a window of pages around the current readi
 
 Text selection supports **double-click word** and **triple-click line** expand (`ViewerTextSelectionStarted.expand`).
 
+### Text annotations
+
+Library-opened documents support **text-anchored comments** (Google Docs–style notes, not freehand markup):
+
+| Surface | Behavior |
+| --- | --- |
+| Selection + annotate icon / context menu / `Ctrl+Alt+M` | Compose form pinned on the document viewport |
+| Annotation cards | Document-anchored column (cards track mark Y; collision stack when dense; sparse notes stay next to their highlights) |
+| Canvas overlay | Soft yellow highlighter fills; selected range keeps a strong **accent stroke** (fill alpha is intentionally lower than the ring) |
+| Click highlight or card | Selects the note and scrolls so mark + card share the viewport; ↑ / ↓ step comments |
+| Visibility menu (eye-off) | **Hide Comments?** toggles `annotations_visible` (cards + in-text highlights); compose hints still show |
+
+Anchors store `(start_page, start_char, end_page, end_char)` plus a **quote snapshot**. Persistence is SQLite metadata only (`annotations` table), never written into the PDF. File-dialog opens without a library `entry_id` cannot create notes. Multi-device CRDT sync of annotations is not included yet.
+
+Loads are **non-blocking**: `load_annotations_task` uses `spawn_blocking` and is generation-gated so a later open cannot apply stale rows.
+
+### Viewer toolbar chrome
+
+Three-column toolbar while a document is open:
+
+| Region | Contents |
+| --- | --- |
+| Left | Library, Open PDF, **document title** |
+| Center | Page pill (`‹ n / N ›`) + zoom − / % / + (stable; not shifted by selection tools) |
+| Right | Selection tools when active, find icon, visibility (eye-off) menu, theme |
+
+**Document title.** Seeded immediately from the library entry (or file stem), then refined by `load_document_title_task` reading PDF metadata. Window title (`PDFolioApp::title`) and the toolbar both use `ViewerRuntime::document_title`. Session restore re-seeds when the library entry becomes resolvable so a content-hash path does not stick.
+
+**Visibility menu.** Eye-off opens a two-row Yes/No panel (Yes green / No red): Hide Sidebar? / Hide Comments?. Outside click and Esc dismiss. Panel right edge aligns with the eye button.
+
+**Scroll stability.** Root surface always uses a fixed three-layer stack for floating menus (base + capture + menu placeholders). Document view keeps fixed slots for annotations, floating TOC, find, and chrome. Opening menus re-applies `scroll_viewer_to_offsets_task` so chrome does not jump reading position. Find bar sits bottom-right with scrollbar clearance so the dismiss control is not covered.
+
+| Concern | Location |
+| --- | --- |
+| Toolbar / menus | `components/viewer/toolbar.rs`, `page_controls.rs`, `zoom.rs` |
+| Icons | `components/shared/icons.rs` |
+| Overlay stacking | `components/shared/root_surface.rs` |
+| Document stack | `viewer/view/document.rs` |
+| Annotation cards | `components/viewer/annotations.rs` |
+| Annotation DB | `pdf-folio-core` `db/annotations.rs` |
+
 ## Layout geometry
 
 `viewer/layout.rs` and `viewer/navigation.rs` compute:
@@ -171,7 +212,9 @@ Keep geometry pure (inputs → rects) so it is unit-testable without Gpu.
 | Home / End | First / last page |
 | Ctrl+F | Find; F3 / Shift+F3 next/previous |
 | Ctrl+G | Jump to page |
-| Esc | Dismiss chrome, then hide TOC, then back to library |
+| Ctrl+Alt+M | Annotate selection (library PDF) |
+| ↑ / ↓ | Previous / next annotation (when notes focused) |
+| Esc | Dismiss chrome (menus, find, drafts), then hide TOC, then back to library |
 
 Plan status and remaining P1/P2 work: `scratch/viewer-ux-plan.md`.
 

@@ -4224,6 +4224,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "libc",
  "pdf-folio-cloud",
  "pdf-folio-ui",
  "tokio",

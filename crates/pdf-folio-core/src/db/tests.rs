@@ -317,6 +317,137 @@ fn entries_move_restore_and_expire_from_trash() {
 }
 
 #[test]
+fn migrate_replaces_legacy_annotations_stub_table() {
+    // Older installs had a stub annotations table without text-anchor columns.
+    // Opening the DB must rebuild that table so new annotation CRUD works.
+    let path = std::env::temp_dir().join(format!(
+        "pdf-folio-core-legacy-ann-{}-{}.db",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    let _ = std::fs::remove_file(&path);
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = ON;
+                CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+                INSERT INTO schema_version (version) VALUES (1);
+                CREATE TABLE entries (
+                    id TEXT PRIMARY KEY,
+                    path TEXT NOT NULL UNIQUE,
+                    title TEXT,
+                    author TEXT,
+                    display_title TEXT,
+                    display_author TEXT,
+                    sort_title TEXT,
+                    sort_author TEXT,
+                    metadata_locked INTEGER DEFAULT 0 NOT NULL,
+                    manual_order INTEGER DEFAULT 0 NOT NULL,
+                    author_attributed INTEGER DEFAULT 0 NOT NULL,
+                    page_count_attributed INTEGER DEFAULT 0 NOT NULL,
+                    added_at INTEGER NOT NULL,
+                    opened_at INTEGER,
+                    page_count INTEGER,
+                    file_size INTEGER,
+                    last_page INTEGER DEFAULT 0,
+                    rating INTEGER DEFAULT 0,
+                    cover_hash TEXT,
+                    missing INTEGER DEFAULT 0 NOT NULL,
+                    trashed_at INTEGER
+                );
+                CREATE TABLE annotations (
+                    id TEXT PRIMARY KEY,
+                    entry_id TEXT NOT NULL,
+                    page INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    data TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                );
+                "#,
+            )
+            .unwrap();
+    }
+
+    let db = Db::open(&path).expect("migrate should upgrade legacy annotations");
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+    let now = Utc::now();
+    db.insert_annotation(&Annotation {
+        id: AnnotationId::new("ann-1"),
+        entry_id: EntryId::new("paper"),
+        start_page: 0,
+        start_char: 0,
+        end_page: 0,
+        end_char: 3,
+        quote: "hi".into(),
+        body: "note".into(),
+        created_at: now,
+        updated_at: now,
+    })
+    .unwrap();
+    assert_eq!(db.list_annotations(&EntryId::new("paper")).unwrap().len(), 1);
+}
+
+#[test]
+fn annotation_crud_orders_by_document_position_and_cascades_on_entry_delete() {
+    let db = test_db();
+    db.insert_entry(&entry("paper", "Paper")).unwrap();
+    let entry_id = EntryId::new("paper");
+    let now = Utc::now();
+
+    let later = Annotation {
+        id: AnnotationId::new("ann-later"),
+        entry_id: entry_id.clone(),
+        start_page: 2,
+        start_char: 0,
+        end_page: 2,
+        end_char: 4,
+        quote: "later".into(),
+        body: "second page".into(),
+        created_at: now,
+        updated_at: now,
+    };
+    let earlier = Annotation {
+        id: AnnotationId::new("ann-earlier"),
+        entry_id: entry_id.clone(),
+        start_page: 0,
+        start_char: 10,
+        end_page: 0,
+        end_char: 20,
+        quote: "earlier".into(),
+        body: "first page".into(),
+        created_at: now,
+        updated_at: now,
+    };
+    db.insert_annotation(&later).unwrap();
+    db.insert_annotation(&earlier).unwrap();
+
+    let listed = db.list_annotations(&entry_id).unwrap();
+    assert_eq!(
+        listed
+            .iter()
+            .map(|annotation| annotation.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ann-earlier", "ann-later"]
+    );
+
+    let updated_at = now + chrono::Duration::seconds(5);
+    db.update_annotation_body(&AnnotationId::new("ann-earlier"), "edited", updated_at)
+        .unwrap();
+    let listed = db.list_annotations(&entry_id).unwrap();
+    assert_eq!(listed[0].body, "edited");
+    assert_eq!(listed[0].updated_at.timestamp(), updated_at.timestamp());
+
+    db.delete_annotation(&AnnotationId::new("ann-later"))
+        .unwrap();
+    assert_eq!(db.list_annotations(&entry_id).unwrap().len(), 1);
+
+    db.delete_entry(&entry_id).unwrap();
+    assert!(db.list_annotations(&entry_id).unwrap().is_empty());
+}
+
+#[test]
 fn folder_tree_moves_to_trash_with_entries() {
     let db = test_db();
     db.insert_entry(&entry("paper", "Paper")).unwrap();

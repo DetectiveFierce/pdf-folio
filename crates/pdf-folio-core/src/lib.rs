@@ -38,9 +38,9 @@ pub use db::import::{
 };
 pub use db::search::{IndexDocument, SearchHit, SearchIndex};
 pub use db::{
-    Db, EntryFolderMembership, EntryId, EntryTrashState, Folder, FolderId, ImportSource,
-    LibraryEntry, LibraryFolderSnapshot, LibraryLayoutMode, LibraryOrganizationSnapshot,
-    LibraryPreferences, LibrarySortMode, NewLibraryEntry, RaindropEntryMapping,
-    SyncCrdtOperation, SyncCrdtPrepareSummary, SyncEntryFolderRow, SyncEntryRow, SyncFolderRow,
-    SyncSeedSummary,
+    Annotation, AnnotationId, Db, EntryFolderMembership, EntryId, EntryTrashState, Folder,
+    FolderId, ImportSource, LibraryEntry, LibraryFolderSnapshot, LibraryLayoutMode,
+    LibraryOrganizationSnapshot, LibraryPreferences, LibrarySortMode, NewLibraryEntry,
+    RaindropEntryMapping, SyncCrdtOperation, SyncCrdtPrepareSummary, SyncEntryFolderRow,
+    SyncEntryRow, SyncFolderRow, SyncSeedSummary,
 };

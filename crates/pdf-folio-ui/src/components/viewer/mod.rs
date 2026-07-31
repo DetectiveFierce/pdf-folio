@@ -9,11 +9,13 @@
 //!
 //! - [`canvas`] — page paint, selection overlay, spinner, wheel handling
 //! - [`toolbar`] / [`zoom`] / [`page_controls`] — top chrome and menus
-//! - [`sidebar`] / [`outline`] — contents and thumbnails pane
+//! - [`sidebar`] / [`outline`] / [`annotations`] — contents, thumbnails, document-anchored notes
 //! - [`find_bar`] — in-document text search strip
 
 /// Continuous page paint, selection overlay, spinner, and wheel handling.
 pub(crate) mod canvas;
+/// Document-anchored annotation cards (scroll with content; collision layout).
+pub(crate) mod annotations;
 /// Floating find-in-document strip (query, matches, toggles).
 pub(crate) mod find_bar;
 /// Hierarchical table-of-contents list for the Contents sidebar tab.

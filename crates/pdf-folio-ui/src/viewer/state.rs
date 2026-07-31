@@ -426,7 +426,9 @@ impl PDFolioApp {
         self.appearance.style_book.layout()
     }
 
-    /// Estimates canvas width from window width minus open viewer sidebar.
+    /// Estimates canvas width from window width minus open left viewer sidebar.
+    ///
+    /// Annotations overlay the document viewport and do not reserve layout width.
     pub(crate) fn estimated_viewer_viewport_width(&self) -> f32 {
         let sidebar_width = if self.viewer.toc_open {
             self.layout().viewer_sidebar_width
@@ -536,6 +538,9 @@ impl PDFolioApp {
                 doc: None,
                 current_entry_id: None,
                 current_document_path: None,
+                document_title: None,
+                document_title_from_metadata: false,
+                document_title_load_generation: 0,
                 rendered_pages: HashMap::new(),
                 page_aspect_ratios: Vec::new(),
                 viewport_height: 900.0,
@@ -570,6 +575,8 @@ impl PDFolioApp {
                 pending_renders: HashMap::new(),
                 page_fade_started: HashMap::new(),
                 toc_open: true,
+                annotations_visible: true,
+                visibility_menu_open: false,
                 viewer_sidebar_tab: ViewerSidebarTab::Contents,
                 outline: Vec::new(),
                 expanded_outline_paths: HashSet::new(),
@@ -583,6 +590,12 @@ impl PDFolioApp {
                 page_mode_wheel_accum: 0.0,
                 page_mode_wheel_last_event_at: None,
                 page_mode_wheel_gesture_consumed: false,
+                annotations: Vec::new(),
+                selected_annotation_id: None,
+                annotation_compose: None,
+                annotation_editing_id: None,
+                annotation_edit_body: String::new(),
+                annotations_load_generation: 0,
             },
             library: LibraryRuntime {
                 compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),
@@ -826,6 +839,7 @@ impl PDFolioApp {
         self.viewer.zoom_editing = false;
         self.viewer.zoom_input = zoom_percent_label(self.viewer.zoom_width);
         self.viewer.zoom_menu_open = false;
+        self.viewer.visibility_menu_open = false;
         self.viewer.zoom_preview_width_px = None;
         self.viewer.zoom_generation = self.viewer.zoom_generation.wrapping_add(1);
         self.viewer.viewer_text_selection = None;
@@ -847,17 +861,158 @@ impl PDFolioApp {
         self.viewer.page_mode_wheel_accum = 0.0;
         self.viewer.page_mode_wheel_last_event_at = None;
         self.viewer.page_mode_wheel_gesture_consumed = false;
+        self.clear_viewer_annotations();
+        self.viewer.document_title = None;
+        self.viewer.document_title_from_metadata = false;
+        // Best-effort entry bind before session apply (pending snapshot or path).
+        self.bind_viewer_entry_id_from_context();
+        // Provisional title (library entry / file name) until PDF metadata lands.
+        self.seed_provisional_document_title();
 
         Task::batch([
             self.request_visible_pages(),
+            // Restores entry_id from session when path-matched and loads annotations.
             self.apply_pending_session_to_open_document(),
+            // If there was no pending session (or it did not match), still load
+            // annotations in the background whenever we have an entry binding.
+            self.load_annotations_task(),
+            // PDF metadata title — same background pattern as annotations.
+            self.load_document_title_task(),
         ])
     }
 
+    /// Seeds [`ViewerRuntime::document_title`] from library entry or file name.
+    ///
+    /// Prefer library display title when the PDF was opened from the library;
+    /// otherwise use the path stem. Skipped once PDF metadata has supplied a
+    /// title. Session restore often sets `entry_id` before library entries are
+    /// loaded — call again when the entry becomes resolvable.
+    pub(crate) fn seed_provisional_document_title(&mut self) {
+        if self.viewer.document_title_from_metadata {
+            return;
+        }
+        if let Some(entry_id) = self.viewer.current_entry_id.as_ref() {
+            if let Some(entry) = self
+                .library
+                .library_entries
+                .iter()
+                .find(|entry| entry.id == *entry_id)
+            {
+                self.viewer.document_title =
+                    Some(crate::components::library::metadata::entry_title(entry));
+                return;
+            }
+        }
+        let path = self
+            .viewer
+            .current_document_path
+            .as_deref()
+            .or_else(|| self.viewer.doc.as_ref().map(|doc| doc.path()));
+        self.viewer.document_title = path.and_then(|path| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .filter(|stem| !stem.is_empty())
+                .map(str::to_owned)
+                .or_else(|| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .map(str::to_owned)
+                })
+        });
+    }
+
+    /// Whether the open document's library entry is currently resolvable.
+    fn library_entry_title_available(&self) -> bool {
+        let Some(entry_id) = self.viewer.current_entry_id.as_ref() else {
+            return false;
+        };
+        self.library
+            .library_entries
+            .iter()
+            .any(|entry| entry.id == *entry_id)
+    }
+
+    /// Loads PDF metadata title for the open document (no-op when none).
+    pub(crate) fn load_document_title_task(&mut self) -> Task<Message> {
+        crate::viewer::tasks::load_document_title_task(self)
+    }
+
+    /// Sets [`ViewerRuntime::current_entry_id`] from pending session or library path.
+    ///
+    /// Path-based opens (startup restore, file dialog) clear the entry id; this
+    /// re-associates the open PDF with a library row so annotations can load
+    /// without blocking the UI.
+    pub(crate) fn bind_viewer_entry_id_from_context(&mut self) {
+        if self.viewer.current_entry_id.is_some() {
+            return;
+        }
+
+        if let Some(session) = self.pending_session_restore.as_ref() {
+            let path_ok = session.viewer.document_path.as_ref().is_some_and(|path| {
+                self.viewer
+                    .current_document_path
+                    .as_ref()
+                    .is_some_and(|current| current == path)
+            });
+            if path_ok {
+                if let Some(entry_id) = session.viewer.entry_id.as_deref().map(EntryId::new) {
+                    self.viewer.current_entry_id = Some(entry_id);
+                    return;
+                }
+            }
+        }
+
+        let Some(path) = self.viewer.current_document_path.as_ref() else {
+            return;
+        };
+        if let Some(entry) = self
+            .library
+            .library_entries
+            .iter()
+            .find(|entry| &entry.path == path)
+        {
+            self.viewer.current_entry_id = Some(entry.id.clone());
+        }
+    }
+
+    /// After the library finishes loading, bind a path-opened document to its
+    /// entry (if any) and fetch annotations in the background.
+    ///
+    /// Safe to call repeatedly: no-ops when already bound with loaded notes, or
+    /// when the open document is not a library PDF.
+    pub(crate) fn ensure_open_document_annotations_loaded(&mut self) -> Task<Message> {
+        if self.viewer.doc.is_none() {
+            return Task::none();
+        }
+        let had_entry = self.viewer.current_entry_id.is_some();
+        let had_resolvable_entry = self.library_entry_title_available();
+        self.bind_viewer_entry_id_from_context();
+        // Session restore often binds entry_id before library rows exist; re-seed
+        // when the entry becomes resolvable so the hash filename does not stick.
+        if self.library_entry_title_available() && !had_resolvable_entry {
+            self.seed_provisional_document_title();
+        }
+        if self.viewer.current_entry_id.is_none() {
+            return Task::none();
+        }
+        // Already populated for this open (or mid-flight load will finish).
+        if had_entry && !self.viewer.annotations.is_empty() {
+            return Task::none();
+        }
+        self.load_annotations_task()
+    }
+
     /// Leaves viewer mode for the library, refreshing entries/folders/thumbnails.
+    ///
+    /// Clears any deferred session restore so a subsequent [`Message::LibraryLoaded`]
+    /// cannot re-apply Viewer mode and bounce the user back into the document.
     pub(crate) fn return_to_library(&mut self) -> Task<Message> {
         let progress = self.flush_reading_progress();
         self.mode = AppMode::Library;
+        // Startup may leave `pending_session_restore` set when the document was
+        // opened by path while the session still keyed restore on entry id.
+        // Library refresh after leaving the viewer must not re-open it.
+        self.pending_session_restore = None;
         self.viewer.document_error = None;
         self.viewer.jump_dialog_open = false;
         self.viewer.page_input_editing = false;
@@ -905,6 +1060,9 @@ impl PDFolioApp {
             .map_or(0, |entry| entry.last_page);
         let task = self.open_document_with_path(doc, self.viewer.current_document_path.clone());
         self.viewer.current_entry_id = Some(entry_id);
+        // open_document_with_path cleared entry_id before rebinding; refresh the
+        // provisional title now that the library entry is known.
+        self.seed_provisional_document_title();
         self.viewer.last_scroll_offset = self.viewer.scroll_offset;
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
             self.viewer.page_scroll_page = last_page;
@@ -920,6 +1078,7 @@ impl PDFolioApp {
             self.apply_pending_session_to_open_document(),
             self.request_visible_pages(),
             self.scroll_viewer_to_offsets_task(),
+            self.load_annotations_task(),
         ])
     }
 
@@ -1287,11 +1446,14 @@ impl PDFolioApp {
 
         self.viewer.viewer_find.open = true;
         self.viewer.zoom_menu_open = false;
+        self.viewer.visibility_menu_open = false;
         self.refresh_viewer_find_matches();
 
         Task::batch([
             self.request_find_text_layers(),
             operation::focus(Id::new(VIEWER_FIND_INPUT_ID)),
+            // Find chrome is a fixed stack slot, but re-assert scroll anyway.
+            self.scroll_viewer_to_offsets_task(),
         ])
     }
 
@@ -1444,6 +1606,283 @@ impl PDFolioApp {
             self.viewer.viewer_copy_pending = true;
             self.request_visible_text_layers()
         }
+    }
+
+    /// Clears annotation runtime state for a document swap or non-library open.
+    pub(crate) fn clear_viewer_annotations(&mut self) {
+        self.viewer.annotations.clear();
+        self.viewer.selected_annotation_id = None;
+        self.viewer.annotation_compose = None;
+        self.viewer.annotation_editing_id = None;
+        self.viewer.annotation_edit_body.clear();
+        self.viewer.annotations_load_generation =
+            self.viewer.annotations_load_generation.wrapping_add(1);
+    }
+
+    /// Whether annotations can be created/edited (library entry is open).
+    pub(crate) fn can_annotate(&self) -> bool {
+        self.viewer.current_entry_id.is_some()
+    }
+
+    /// Starts compose mode from the current text selection.
+    pub(crate) fn start_annotation_compose(&mut self) -> Task<Message> {
+        if !self.can_annotate() {
+            return Task::none();
+        }
+        let Some(selection) = self.viewer.viewer_text_selection else {
+            return Task::none();
+        };
+        if selection.dragging {
+            return Task::none();
+        }
+        let (start, end) = selection.ordered();
+        let quote = self.selected_viewer_text().unwrap_or_default();
+        if quote.trim().is_empty() {
+            return Task::none();
+        }
+
+        self.viewer.annotation_compose = Some(crate::viewer::document::AnnotationComposeState {
+            start_page: start.page,
+            start_char: start.char_index,
+            end_page: end.page,
+            end_char: end.char_index,
+            quote,
+            body: String::new(),
+        });
+        self.viewer.annotation_editing_id = None;
+        self.viewer.annotation_edit_body.clear();
+        Task::none()
+    }
+
+    /// Cancels compose and edit drafts without deleting persisted annotations.
+    pub(crate) fn cancel_annotation_drafts(&mut self) {
+        self.viewer.annotation_compose = None;
+        self.viewer.annotation_editing_id = None;
+        self.viewer.annotation_edit_body.clear();
+    }
+
+    /// Selects an annotation and scrolls so both the mark and its card are in view.
+    pub(crate) fn select_annotation(
+        &mut self,
+        id: pdf_folio_core::AnnotationId,
+    ) -> Task<Message> {
+        let Some(index) = self
+            .viewer
+            .annotations
+            .iter()
+            .position(|candidate| candidate.id == id)
+        else {
+            return Task::none();
+        };
+        self.viewer.selected_annotation_id = Some(id);
+        self.scroll_annotation_pair_into_view(index)
+    }
+
+    /// Moves selection to the previous annotation in document order.
+    pub(crate) fn annotation_select_previous(&mut self) -> Task<Message> {
+        if self.viewer.annotations.is_empty() {
+            return Task::none();
+        }
+        let current = self
+            .viewer
+            .selected_annotation_id
+            .as_ref()
+            .and_then(|id| {
+                self.viewer
+                    .annotations
+                    .iter()
+                    .position(|annotation| &annotation.id == id)
+            })
+            .unwrap_or(0);
+        let next = current.saturating_sub(1);
+        let id = self.viewer.annotations[next].id.clone();
+        self.select_annotation(id)
+    }
+
+    /// Moves selection to the next annotation in document order.
+    pub(crate) fn annotation_select_next(&mut self) -> Task<Message> {
+        if self.viewer.annotations.is_empty() {
+            return Task::none();
+        }
+        let current = self
+            .viewer
+            .selected_annotation_id
+            .as_ref()
+            .and_then(|id| {
+                self.viewer
+                    .annotations
+                    .iter()
+                    .position(|annotation| &annotation.id == id)
+            })
+            .unwrap_or(0);
+        let next = (current + 1).min(self.viewer.annotations.len() - 1);
+        let id = self.viewer.annotations[next].id.clone();
+        self.select_annotation(id)
+    }
+
+    /// Scrolls so the selected annotation’s mark and card share the viewport
+    /// (mockup `scrollPairIntoView`).
+    pub(crate) fn scroll_annotation_pair_into_view(&mut self, index: usize) -> Task<Message> {
+        let Some(annotation) = self.viewer.annotations.get(index).cloned() else {
+            return Task::none();
+        };
+
+        // Base content size without annotation expansion to avoid feedback loops
+        // while still placing cards with the same algorithm the view uses.
+        let base = self.viewer_base_content_size(self.viewer.viewer_viewport_width);
+        let metrics =
+            crate::components::viewer::annotations::annotation_layer_metrics(self, base);
+        let placement = metrics.placements.iter().find(|p| p.index == index);
+
+        let mark_bounds = self.annotation_mark_content_bounds(&annotation);
+        let (pair_top, pair_bottom) = match (mark_bounds, placement) {
+            (Some(mark), Some(card)) => {
+                let top = mark.y.min(card.top);
+                let bottom = (mark.y + mark.height).max(card.top + card.height);
+                (top, bottom)
+            }
+            (Some(mark), None) => (mark.y, mark.y + mark.height),
+            (None, Some(card)) => (card.top, card.top + card.height),
+            (None, None) => {
+                // Text layer not ready — jump to the page and request extraction.
+                let page = annotation.start_page;
+                let mut tasks = vec![self.jump_to_page(page)];
+                if let Some(doc) = self.viewer.doc.as_ref().map(Arc::clone) {
+                    tasks.push(self.request_text_layers(page..page.saturating_add(1), doc));
+                }
+                return Task::batch(tasks);
+            }
+        };
+
+        if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+            self.viewer.page_scroll_page = annotation.start_page;
+        }
+
+        let viewport_h = self.viewer.viewer_viewport_height.max(1.0);
+        let target_y = ((pair_top + pair_bottom - viewport_h) * 0.5).max(0.0);
+
+        if matches!(self.viewer.viewer_scroll_mode, ViewerScrollMode::Horizontal) {
+            // Prefer horizontal pan toward the card column when needed.
+            if let Some(card) = placement {
+                let viewport_w = self.viewer.viewer_viewport_width.max(1.0);
+                let target_x =
+                    ((card.x + card.x + crate::components::viewer::annotations::CARD_WIDTH
+                        - viewport_w)
+                        * 0.5)
+                        .max(0.0);
+                self.viewer.horizontal_offset = target_x;
+            }
+            self.viewer.scroll_offset = 0.0;
+        } else {
+            self.viewer.scroll_offset = target_y;
+            if matches!(self.viewer.viewer_scroll_mode, ViewerScrollMode::Wrapped) {
+                self.viewer.horizontal_offset = 0.0;
+            } else if let Some(card) = placement {
+                // Ensure the card column is horizontally visible.
+                let viewport_w = self.viewer.viewer_viewport_width.max(1.0);
+                let card_right =
+                    card.x + crate::components::viewer::annotations::CARD_WIDTH + 16.0;
+                if card_right > self.viewer.horizontal_offset + viewport_w {
+                    self.viewer.horizontal_offset = (card_right - viewport_w).max(0.0);
+                }
+            }
+        }
+
+        self.clamp_scroll_offset();
+        self.clamp_horizontal_offset();
+        Task::batch([
+            self.request_visible_pages(),
+            self.scroll_viewer_to_offsets_task(),
+        ])
+    }
+
+    /// Content-space bounds of the annotation’s start mark (character rect).
+    fn annotation_mark_content_bounds(
+        &self,
+        annotation: &pdf_folio_core::Annotation,
+    ) -> Option<Rectangle> {
+        let page_rect = self.viewer_page_rect_for_page(annotation.start_page)?;
+        let layer = self.viewer.viewer_text_layers.get(&annotation.start_page)?;
+        let character = layer.chars.get(annotation.start_char)?;
+        Some(Rectangle::new(
+            Point::new(
+                page_rect.x + character.bounds.x * page_rect.width,
+                page_rect.y + character.bounds.y * page_rect.height,
+            ),
+            Size::new(
+                (character.bounds.width * page_rect.width).max(4.0),
+                (character.bounds.height * page_rect.height).max(8.0),
+            ),
+        ))
+    }
+
+    /// Scrolls so the annotation’s start character is near the viewport center.
+    pub(crate) fn scroll_to_annotation_anchor(
+        &mut self,
+        annotation: &pdf_folio_core::Annotation,
+    ) -> Task<Message> {
+        if let Some(index) = self
+            .viewer
+            .annotations
+            .iter()
+            .position(|candidate| candidate.id == annotation.id)
+        {
+            return self.scroll_annotation_pair_into_view(index);
+        }
+
+        if let Some(layer) = self.viewer.viewer_text_layers.get(&annotation.start_page) {
+            if let Some(character) = layer.chars.get(annotation.start_char) {
+                self.scroll_to_page_rect_centered(
+                    annotation.start_page,
+                    character.bounds.x,
+                    character.bounds.y,
+                );
+                self.clamp_scroll_offset();
+                self.clamp_horizontal_offset();
+                return Task::batch([
+                    self.request_visible_pages(),
+                    self.scroll_viewer_to_offsets_task(),
+                ]);
+            }
+        }
+
+        let page = annotation.start_page;
+        let mut tasks = vec![self.jump_to_page(page)];
+        if let Some(doc) = self.viewer.doc.as_ref().map(Arc::clone) {
+            tasks.push(self.request_text_layers(page..page.saturating_add(1), doc));
+        }
+        Task::batch(tasks)
+    }
+
+    /// Character range helper for drawing or hit-testing a stored annotation on one page.
+    pub(crate) fn annotation_char_range_for_page(
+        annotation: &pdf_folio_core::Annotation,
+        page: u16,
+        page_char_count: usize,
+    ) -> Option<std::ops::RangeInclusive<usize>> {
+        if page_char_count == 0 {
+            return None;
+        }
+        if page < annotation.start_page || page > annotation.end_page {
+            return None;
+        }
+        let last = page_char_count - 1;
+        let start_index = if page == annotation.start_page {
+            annotation.start_char.min(last)
+        } else {
+            0
+        };
+        let end_index = if page == annotation.end_page {
+            annotation.end_char.min(last)
+        } else {
+            last
+        };
+        (start_index <= end_index).then_some(start_index..=end_index)
+    }
+
+    /// Loads annotations for the open library entry (no-op when none).
+    pub(crate) fn load_annotations_task(&mut self) -> Task<Message> {
+        crate::viewer::tasks::load_annotations_task(self)
     }
 
     /// Zero-based half-open range of pages intersecting the current viewport.
@@ -1724,7 +2163,21 @@ impl PDFolioApp {
     }
 
     /// Total scrollable content size for the open document at `viewport_width`.
+    ///
+    /// When annotations are present, expands width/height so the anchored card
+    /// column (and any collision-pushed stack) is fully scrollable.
     pub(crate) fn viewer_content_size(&self, viewport_width: f32) -> Size {
+        let base = self.viewer_base_content_size(viewport_width);
+        if self.viewer.annotations.is_empty() {
+            return base;
+        }
+        let metrics =
+            crate::components::viewer::annotations::annotation_layer_metrics(self, base);
+        Size::new(metrics.content_width, metrics.content_height)
+    }
+
+    /// Page-only content size (no annotation column expansion).
+    pub(crate) fn viewer_base_content_size(&self, viewport_width: f32) -> Size {
         let Some(doc) = &self.viewer.doc else {
             return Size::new(
                 viewport_width.max(1.0),

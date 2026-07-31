@@ -83,13 +83,13 @@ Press **`/`** or **Ctrl/Cmd+K** to search the whole site. The **API Reference** 
 **Is:**
 
 - A personal PDF library manager with folders, tags, trash, undo, and multi-library vaults
-- A multi-page PDF reader with tile cache, zoom settle, outline, and find-in-document
+- A multi-page PDF reader with tile cache, zoom settle, outline, find-in-document, and text annotations
 - Optional cross-device sync for one user (not multi-user collab editing)
 - Optional Raindrop.io PDF import with collection mirroring
 
 **Is not:**
 
-- A general annotation / markup suite (beyond selection, find, and library metadata)
+- A full markup suite (freehand ink, sticky notes, or PDF-export of annotations)
 - A multi-tenant cloud product — the control plane is self-hosted for *your* devices
 - A web app; the desktop shell is iced on Linux (Wayland-first)
 

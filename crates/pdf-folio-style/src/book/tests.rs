@@ -4,7 +4,14 @@ use super::*;
 fn bundled_styles_compile() {
     let style_book = StyleBook::bundled();
     let tokens = style_book.tokens("espresso");
-    assert_eq!(tokens.accent, Color::from_rgb8(212, 168, 83));
+    // espresso.kdl: color "accent" "#E0B45A"
+    assert_eq!(tokens.accent, Color::from_rgb8(0xE0, 0xB4, 0x5A));
+    // Guard against re-embedding the full class table (stack-overflows iced views).
+    assert!(
+        std::mem::size_of::<ThemeTokens>() < 1024,
+        "ThemeTokens grew too large: {} bytes",
+        std::mem::size_of::<ThemeTokens>()
+    );
 }
 
 #[test]
@@ -30,18 +37,19 @@ fn bundled_sources_include_every_bundled_kdl_file() {
 fn bundled_file_tree_active_border_uses_side_widths() {
     let style_book = StyleBook::bundled();
 
+    // sidebar.kdl FileTree active: left width=3 accent rail (espresso + light).
     let espresso = style_book.tokens("espresso").class_styles[Class::FileTree.index()]
         .resolve(ComponentState::Active)
         .border
         .expect("active espresso file tree border should be set");
-    assert_eq!(espresso.left.width, Some(6.0));
+    assert_eq!(espresso.left.width, Some(3.0));
     assert!(espresso.uniform_style().is_none());
 
     let light = style_book.tokens("light").class_styles[Class::FileTree.index()]
         .resolve(ComponentState::Active)
         .border
         .expect("active light file tree border should be set");
-    assert_eq!(light.left.width, Some(12.0));
+    assert_eq!(light.left.width, Some(3.0));
     assert!(light.uniform_style().is_none());
 }
 
@@ -206,3 +214,5 @@ fn border_sides_can_override_width_and_color_independently() {
     assert_eq!(border.left.width, Some(0.0));
     assert_eq!(border.left.color, Some(Color::TRANSPARENT));
 }
+
+

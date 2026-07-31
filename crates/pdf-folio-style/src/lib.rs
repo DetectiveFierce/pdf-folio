@@ -140,7 +140,7 @@ pub use components::{
     section_heading, selection_checkbox, tag_pill, toc_entry, toolbar_button, MasterCheckboxState,
 };
 pub use tokens::{
-    display_font, ui_font, AppLabelTokens, AppLayoutTokens, BorderWidth, BoxShadow,
+    display_font, ui_font, AppLabelTokens, AppLayoutTokens, BorderWidth, BoxShadow, ClassStylesRef,
     ContentAlignment, FontSize, FontWeight, LabelSection, Radius, Spacing, TextAlignment,
     ThemeTokens, DISPLAY_FONT_FAMILY, UI_FONT_FAMILY,
 };

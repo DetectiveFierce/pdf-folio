@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+libc = "0.2"
 pdf-folio-cloud = { path = "../pdf-folio-cloud" }
 pdf-folio-ui = { path = "../pdf-folio-ui" }
 tokio.workspace = true

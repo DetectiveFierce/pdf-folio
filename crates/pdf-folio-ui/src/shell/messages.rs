@@ -28,11 +28,12 @@
 //! | Sync auth & CRDT | `SyncSignIn*`, `AutoSync*`, `RemoteSyncAvailable`, `LibraryRegistry*` |
 //! | Multi-library | `OpenLibrarySwitcher`, `SelectLibrary`, `CreateLibrary`, `DeleteLibrary` |
 //! | File dialogs | `OpenFileDialog`, `FileSelected`, `Import*Dialog`, `ExportDestinationSelected` |
-//! | Document open/render | `DocumentOpened`, `PageRendered`, `LibraryDocumentOpened`, `DocumentError` |
+//! | Document open/render | `DocumentOpened`, `DocumentTitleLoaded`, `PageRendered`, `LibraryDocumentOpened`, `DocumentError` |
 //! | Viewer navigation | `Viewport*`, `Jump*`, `PreviousPage` / `NextPage` |
 //! | Viewer zoom | `ZoomIn` / `ZoomOut` / `ZoomSet`, `ZoomPresetSelected`, `ZoomRenderSettled` |
 //! | Viewer text / find | `ViewerText*`, `OpenViewerFind`, `ViewerFind*`, `CopyViewerTextSelection` |
-//! | Outline / sidebar | `ToggleOutlineNode`, `ToggleSidebar`, `ViewerSidebarTabSelected` |
+//! | Viewer annotations | `StartAnnotationCompose`, `Annotation*`, `AnnotationsLoaded` |
+//! | Outline / sidebar | `ToggleOutlineNode`, `ToggleSidebar`, `ToggleVisibilityMenu`, `ToggleHideSidebar`, `ToggleHideComments`, `ViewerSidebarTabSelected` |
 //! | Library data load | `LibraryLoaded`, `LibraryFoldersLoaded`, `LibraryRefresh`, `LibraryError` |
 //! | Library selection | `LibraryEntryClicked`, `EntryCheckboxToggled`, `SelectAll*`, clipboard |
 //! | Library drag | `BeginLibraryEntryDrag`, `FolderDrag*`, `End*Drag`, `ManualEntryOrderSaved` |
@@ -53,8 +54,10 @@ use iced::Point;
 use pdf_folio_cloud::raindrop::{
     RaindropImportDestination, RaindropImportPreview, RaindropImportProgress, RaindropImportSummary,
 };
+use chrono::{DateTime, Utc};
 use pdf_folio_core::{
-    EntryId, Folder, FolderId, ImportSummary, LibraryEntry, LibrarySortMode, LibraryWatchEvent,
+    Annotation, AnnotationId, EntryId, Folder, FolderId, ImportSummary, LibraryEntry,
+    LibrarySortMode, LibraryWatchEvent,
 };
 use pdf_folio_core::{PageTextLayer, PdfDoc, TileKey};
 
@@ -155,6 +158,8 @@ pub enum ContextMenuAction {
     SortTitleAsc,
     /// Copy the current PDF text selection to the OS clipboard.
     CopyViewerSelection,
+    /// Start composing a text annotation from the current selection.
+    AddAnnotation,
     /// Open the find-in-document bar.
     FindInDocument,
     /// Open the jump-to-page overlay.
@@ -218,6 +223,8 @@ pub enum ViewerSidebarTab {
     Contents,
     /// Page thumbnail navigation.
     Thumbnails,
+    /// Reserved for session restore; annotations live in the right rail, not this tab strip.
+    Annotations,
 }
 
 impl ViewerSidebarTab {
@@ -226,6 +233,8 @@ impl ViewerSidebarTab {
         match self {
             Self::Contents => "Contents",
             Self::Thumbnails => "Thumbnails",
+            // Not shown in the left tab strip; kept for session wire-format compatibility.
+            Self::Annotations => "Annotations",
         }
     }
 }
@@ -307,6 +316,14 @@ pub enum Message {
     FileSelected(PathBuf),
     /// A document was opened successfully.
     DocumentOpened { path: PathBuf, doc: Arc<PdfDoc> },
+    /// Background PDF metadata title load finished for the open document.
+    ///
+    /// `generation` must match [`crate::ViewerRuntime::document_title_load_generation`]
+    /// or the result is discarded (stale work from a previously open PDF).
+    DocumentTitleLoaded {
+        title: Option<String>,
+        generation: u64,
+    },
     /// A document operation failed.
     DocumentError(String),
     /// Dismiss the current document error banner.
@@ -426,6 +443,45 @@ pub enum Message {
     ClearViewerTextSelection,
     /// Copy the currently selected PDF text.
     CopyViewerTextSelection,
+    /// Begin composing a text annotation from the current selection.
+    StartAnnotationCompose,
+    /// Draft body changed while composing a new annotation.
+    AnnotationComposeBodyChanged(String),
+    /// Cancel the in-progress annotation compose form.
+    AnnotationComposeCancelled,
+    /// Submit a new annotation from the compose form.
+    AnnotationCreateSubmitted,
+    /// Persist result for a newly created annotation.
+    AnnotationCreateFinished(Result<Annotation, String>),
+    /// Annotations for the open entry finished loading.
+    AnnotationsLoaded {
+        entry_id: EntryId,
+        annotations: Vec<Annotation>,
+        generation: u64,
+    },
+    /// Select an annotation in the sidebar / document highlight.
+    AnnotationSelected(AnnotationId),
+    /// Begin editing an existing annotation body.
+    AnnotationEditStarted(AnnotationId),
+    /// Draft body changed while editing an annotation.
+    AnnotationEditBodyChanged(String),
+    /// Submit an annotation body edit.
+    AnnotationEditSubmitted,
+    /// Persist result for an annotation body edit.
+    AnnotationEditFinished(Result<(AnnotationId, String, DateTime<Utc>), String>),
+    /// Cancel the in-progress annotation edit form.
+    AnnotationEditCancelled,
+    /// Delete an annotation by id.
+    AnnotationDeleteRequested(AnnotationId),
+    /// Persist result for an annotation delete.
+    AnnotationDeleteFinished {
+        id: Option<AnnotationId>,
+        error: Option<String>,
+    },
+    /// Move the annotation selection to the previous item (document order).
+    AnnotationCarouselPrevious,
+    /// Move the annotation selection to the next item (document order).
+    AnnotationCarouselNext,
     /// Close the active overlay or panel.
     CloseOverlay,
     /// Last known app-window cursor position changed.
@@ -477,6 +533,14 @@ pub enum Message {
     SubmitJump,
     /// Toggle the viewer sidebar (TOC / thumbnails rail).
     ToggleSidebar,
+    /// Open or close the toolbar visibility menu (hide sidebar / hide comments).
+    ToggleVisibilityMenu,
+    /// Close the toolbar visibility menu.
+    CloseVisibilityMenu,
+    /// Flip “Hide Sidebar?” in the visibility menu (toggles `toc_open`).
+    ToggleHideSidebar,
+    /// Flip “Hide Comments?” in the visibility menu (toggles annotation chrome).
+    ToggleHideComments,
     /// Switch the active open-PDF viewer sidebar tab.
     ViewerSidebarTabSelected(ViewerSidebarTab),
     /// Toggle the placeholder view mode control.
@@ -1037,4 +1101,6 @@ pub enum Shortcut {
     ToggleLibraryInspector,
     /// Close overlays or panels.
     Escape,
+    /// Start composing a text annotation from the current selection.
+    AddAnnotation,
 }

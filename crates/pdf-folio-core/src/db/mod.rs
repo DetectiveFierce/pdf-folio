@@ -13,6 +13,7 @@
 //! - [`library`] — entry CRUD, tags, trash, missing-file flags, path relink.
 //! - [`organization`] — folder tree, memberships, manual order, undo snapshots.
 //! - [`metadata`] — display overrides, preferences, reading progress, ratings.
+//! - [`annotations`] — text-anchored comment CRUD for library PDFs.
 //! - [`import`] — BLAKE3 hashing, folder scan/import, thumbnails, FS watcher.
 //! - [`search`] — Tantivy full-text index over page text ([`search::SearchIndex`]).
 //! - [`raindrop`] — Raindrop.io collection/entry mapping tables.
@@ -38,6 +39,8 @@ mod naming;
 mod types;
 pub use types::*;
 
+/// Text-anchored comment CRUD for library PDFs.
+pub mod annotations;
 /// Import scanning, hashing, thumbnails, and filesystem watching.
 pub mod import;
 /// Entry CRUD, tags, trash, missing-file flags, and path relink.
