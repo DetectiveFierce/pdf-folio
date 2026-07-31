@@ -103,6 +103,9 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
                 // Capture wheel for Ctrl-zoom, page-mode turns, and horizontal
                 // scrolling. Continuous vertical scrolling stays with iced's
                 // scrollable (return None) so momentum/trackpad feel natural.
+                //
+                // Page mode always captures so momentum micro-events can be
+                // accumulated in the updater without leaking into the scrollable.
                 let capture_wheel = self.app.viewer.modifiers.control()
                     || matches!(
                         self.app.viewer.viewer_scroll_mode,
@@ -637,7 +640,7 @@ fn multi_click_expand(
     now: Instant,
     position: Point,
     page: u16,
-    char_index: usize,
+    _char_index: usize,
 ) -> u8 {
     let Some(previous) = state.last_char_click else {
         return 1;

@@ -154,7 +154,15 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             }
             Some(save_app_session_task(app))
         }
-        Message::ViewerTextLayerLoaded { page, layer } => {
+        Message::ViewerTextLayerLoaded {
+            page,
+            layer,
+            document_generation,
+        } => {
+            if *document_generation != app.viewer.document_generation {
+                // Stale extraction from a previously open PDF — drop silently.
+                return Some(Task::none());
+            }
             app.viewer.pending_text_layers.remove(page);
             app.viewer
                 .viewer_text_layers
@@ -179,7 +187,14 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                 Task::batch(tasks)
             })
         }
-        Message::ViewerTextLayerError { page, error } => {
+        Message::ViewerTextLayerError {
+            page,
+            error,
+            document_generation,
+        } => {
+            if *document_generation != app.viewer.document_generation {
+                return Some(Task::none());
+            }
             app.viewer.pending_text_layers.remove(page);
             app.viewer.document_error = Some(error.clone());
             Some(Task::none())
@@ -254,10 +269,8 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             }
 
             if app.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
-                let direction = if *delta_y < 0.0 || *delta_x > 0.0 {
-                    1
-                } else {
-                    -1
+                let Some(direction) = app.take_page_mode_wheel_turn(*delta_x, *delta_y) else {
+                    return Some(Task::none());
                 };
                 let task = app.scroll_page_mode_by(direction);
                 return Some(Task::batch([

@@ -130,6 +130,10 @@ Viewer find is separate from library Tantivy search:
 
 Find loads text layers **progressively**: the current viewport (+ margin) first, then additional batches of ~8 pages via `ViewerFindTextLayersContinue` until the document is covered or find closes. The match counter shows a trailing `…` while layers are still pending. Compact option toggles: **All** / **Aa** / **á**. **F3** / **Shift+F3** move next/previous match.
 
+Text-layer completions carry `document_generation`. Opening a different PDF bumps that counter so in-flight extraction from the previous file cannot insert layers, update find matches, or surface errors on the newly open document.
+
+**Page scroll mode** does not turn a page on every raw wheel event. Deltas accumulate until ~48 logical pixels of motion, then one turn fires and a short cooldown (~220 ms) absorbs trackpad momentum tails.
+
 Sidebar **thumbnails** only rasterize a window of pages around the current reading position (~12 on each side), so large documents do not schedule every thumbnail at once.
 
 Text selection supports **double-click word** and **triple-click line** expand (`ViewerTextSelectionStarted.expand`).

@@ -111,4 +111,17 @@ pub struct ViewerRuntime {
     pub last_saved_progress_page: Option<u16>,
     /// Monotonic generation for progressive find text-layer loading.
     pub find_text_generation: u64,
+    /// Monotonic generation for the open document identity.
+    ///
+    /// Bumped whenever a new PDF is installed so in-flight text-layer tasks
+    /// from a previous document cannot mutate the new document's find/selection
+    /// state when they complete.
+    pub document_generation: u64,
+    /// Residual signed wheel delta for page-mode turns (positive = next page).
+    ///
+    /// Accumulates trackpad/momentum micro-events until a page-turn threshold is
+    /// reached so one gesture does not skip multiple pages.
+    pub page_mode_wheel_accum: f32,
+    /// When the last page-mode page turn was applied (momentum cooldown).
+    pub page_mode_wheel_turned_at: Option<Instant>,
 }

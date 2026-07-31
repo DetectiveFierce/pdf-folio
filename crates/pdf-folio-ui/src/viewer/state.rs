@@ -579,6 +579,9 @@ impl PDFolioApp {
                 progress_save_generation: 0,
                 last_saved_progress_page: None,
                 find_text_generation: 0,
+                document_generation: 0,
+                page_mode_wheel_accum: 0.0,
+                page_mode_wheel_turned_at: None,
             },
             library: LibraryRuntime {
                 compact_view_mode: matches!(preferences.layout_mode, LibraryLayoutMode::List),
@@ -838,6 +841,10 @@ impl PDFolioApp {
         self.viewer.progress_save_generation = self.viewer.progress_save_generation.wrapping_add(1);
         self.viewer.last_saved_progress_page = None;
         self.viewer.find_text_generation = self.viewer.find_text_generation.wrapping_add(1);
+        // Invalidate in-flight text extraction from the previous document.
+        self.viewer.document_generation = self.viewer.document_generation.wrapping_add(1);
+        self.viewer.page_mode_wheel_accum = 0.0;
+        self.viewer.page_mode_wheel_turned_at = None;
 
         Task::batch([
             self.request_visible_pages(),
@@ -1170,12 +1177,15 @@ impl PDFolioApp {
     /// Spawns text-layer extraction tasks for pages not already loaded or pending.
     ///
     /// Completions become [`Message::ViewerTextLayerLoaded`] or
-    /// [`Message::ViewerTextLayerError`].
+    /// [`Message::ViewerTextLayerError`], each tagged with the current
+    /// [`ViewerRuntime::document_generation`] so results from a previously open
+    /// document are ignored.
     pub(crate) fn request_text_layers(
         &mut self,
         pages: std::ops::Range<u16>,
         doc: Arc<PdfDoc>,
     ) -> Task<Message> {
+        let document_generation = self.viewer.document_generation;
         let mut tasks = Vec::new();
         for page in pages {
             if self.viewer.viewer_text_layers.contains_key(&page)
@@ -1196,16 +1206,57 @@ impl PDFolioApp {
                     Ok(layer) => Message::ViewerTextLayerLoaded {
                         page,
                         layer: Arc::new(layer),
+                        document_generation,
                     },
                     Err(error) => Message::ViewerTextLayerError {
                         page,
                         error: error.to_string(),
+                        document_generation,
                     },
                 },
             ));
         }
 
         Task::batch(tasks)
+    }
+
+    /// Applies a wheel delta in page-scroll mode, returning a turn direction if any.
+    ///
+    /// Accumulates micro-events until [`PAGE_MODE_WHEEL_THRESHOLD_PX`] is reached
+    /// and enforces a short cooldown after each turn so trackpad momentum does
+    /// not skip multiple pages for one gesture. Returns `Some(±1)` when a page
+    /// turn should fire, or `None` when the event was only absorbed.
+    pub(crate) fn take_page_mode_wheel_turn(&mut self, delta_x: f32, delta_y: f32) -> Option<i16> {
+        let now = Instant::now();
+        if self
+            .viewer
+            .page_mode_wheel_turned_at
+            .is_some_and(|at| now.saturating_duration_since(at).as_millis() < PAGE_MODE_WHEEL_COOLDOWN_MS)
+        {
+            // Absorb residual momentum without advancing further pages.
+            return None;
+        }
+
+        // Match historical direction: scroll down / right → next page.
+        let step = if delta_y.abs() >= delta_x.abs() {
+            -delta_y
+        } else {
+            delta_x
+        };
+        self.viewer.page_mode_wheel_accum += step;
+
+        if self.viewer.page_mode_wheel_accum.abs() < PAGE_MODE_WHEEL_THRESHOLD_PX {
+            return None;
+        }
+
+        let direction: i16 = if self.viewer.page_mode_wheel_accum > 0.0 {
+            1
+        } else {
+            -1
+        };
+        self.viewer.page_mode_wheel_accum = 0.0;
+        self.viewer.page_mode_wheel_turned_at = Some(now);
+        Some(direction)
     }
 
     /// Recomputes find matches from currently loaded text layers and the query.
@@ -1818,6 +1869,10 @@ const VIEWER_THUMBNAIL_WINDOW: u16 = 12;
 const FIND_TEXT_LAYER_MARGIN: u16 = 4;
 /// Pages requested per progressive find text-layer batch.
 const FIND_TEXT_LAYER_BATCH: usize = 8;
+/// Accumulated wheel pixels required before a page-mode turn fires.
+const PAGE_MODE_WHEEL_THRESHOLD_PX: f32 = 48.0;
+/// Minimum time between page-mode turns (absorbs trackpad momentum tails).
+const PAGE_MODE_WHEEL_COOLDOWN_MS: u128 = 220;
 
 /// Inclusive character range for the word containing `char_index`.
 pub(crate) fn word_char_range(layer: &PageTextLayer, char_index: usize) -> (usize, usize) {

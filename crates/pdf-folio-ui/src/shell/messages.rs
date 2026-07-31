@@ -393,12 +393,20 @@ pub enum Message {
     /// Open the jump-to-page overlay.
     OpenJumpDialog,
     /// A page text layer was extracted.
+    ///
+    /// `document_generation` must match [`crate::ViewerRuntime::document_generation`]
+    /// or the result is discarded (stale work from a previously open PDF).
     ViewerTextLayerLoaded {
         page: u16,
         layer: Arc<PageTextLayer>,
+        document_generation: u64,
     },
     /// A page text-layer extraction failed.
-    ViewerTextLayerError { page: u16, error: String },
+    ViewerTextLayerError {
+        page: u16,
+        error: String,
+        document_generation: u64,
+    },
     /// Start selecting PDF text at the character under the cursor.
     /// Begin a text selection (`expand`: 1 = char, 2 = word, 3 = line).
     ViewerTextSelectionStarted {

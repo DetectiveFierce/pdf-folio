@@ -1,6 +1,7 @@
 use crate::library::drag::folder_drop_target_ready;
 use crate::viewer::state::ViewerTextAnchor;
 use crate::*;
+use pdf_folio_core::{PageTextChar, TextRect};
 
 fn test_db(label: &str) -> Db {
     let nanos = SystemTime::now()
@@ -305,6 +306,67 @@ fn stale_page_render_completion_is_discarded() {
     assert!(!app.viewer.rendered_pages.contains_key(&key));
     assert!(app.viewer.cache.is_empty());
     assert!(!app.viewer.pending_renders.contains_key(&key));
+}
+
+#[test]
+fn stale_text_layer_completion_is_discarded_after_document_change() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.viewer.document_generation = 2;
+    app.viewer.pending_text_layers.insert(0);
+    app.viewer.viewer_find.open = true;
+    app.viewer.viewer_find.query = String::from("hello");
+
+    let layer = Arc::new(PageTextLayer {
+        page: 0,
+        width_points: 100.0,
+        height_points: 100.0,
+        chars: vec![PageTextChar {
+            index: 0,
+            text: String::from("h"),
+            bounds: TextRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.1,
+                height: 0.1,
+            },
+        }],
+    });
+
+    let _ = update(
+        &mut app,
+        Message::ViewerTextLayerLoaded {
+            page: 0,
+            layer: Arc::clone(&layer),
+            document_generation: 1,
+        },
+    );
+
+    assert!(
+        !app.viewer.viewer_text_layers.contains_key(&0),
+        "stale text layer from previous document must not be stored"
+    );
+    assert!(
+        app.viewer.pending_text_layers.contains(&0),
+        "pending markers for the new document should stay until its own tasks finish"
+    );
+    assert!(app.viewer.viewer_find.matches.is_empty());
+}
+
+#[test]
+fn page_mode_wheel_requires_accumulated_delta_before_turning() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    app.viewer.viewer_scroll_mode = ViewerScrollMode::Page;
+
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
+    // Accumulated -dy of 50px crosses the 48px threshold → next page.
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), Some(1));
+
+    // Momentum within cooldown is absorbed.
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
+    assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
 }
 
 #[test]

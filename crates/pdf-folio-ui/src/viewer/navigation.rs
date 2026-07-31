@@ -171,6 +171,8 @@ impl PDFolioApp {
         self.viewer.viewer_scroll_mode = mode;
         if mode == ViewerScrollMode::Page {
             self.viewer.page_scroll_page = current_page;
+            self.viewer.page_mode_wheel_accum = 0.0;
+            self.viewer.page_mode_wheel_turned_at = None;
         }
         self.viewer.horizontal_offset = 0.0;
         self.viewer.scroll_offset = 0.0;
