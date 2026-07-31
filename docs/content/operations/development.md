@@ -15,6 +15,18 @@ order: 30
 - For docs: Node + pnpm ([docs site](#docs-site) below)
 - For sync server image: Docker (optional) — [Packaging](packaging.md)
 
+### Optional build acceleration
+
+Checked-in `.cargo/config.toml` uses a small `rustc-wrapper` that calls **sccache** when it is on `PATH`, and otherwise runs `rustc` directly — installs stay portable without sccache.
+
+Faster linking on Linux x86_64 (optional; needs `clang` and `lld`):
+
+```bash
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang \
+RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+cargo build
+```
+
 ## Common cargo commands
 
 ```bash
