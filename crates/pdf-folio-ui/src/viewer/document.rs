@@ -31,6 +31,21 @@ pub struct AnnotationComposeState {
     pub body: String,
 }
 
+/// Exclusive in-progress annotation draft: either composing a new note or
+/// editing an existing one. Compose and edit never coexist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnnotationDraft {
+    /// Create form seeded from the active text selection.
+    Compose(AnnotationComposeState),
+    /// Body edit for a persisted annotation.
+    Edit {
+        /// Annotation being edited.
+        id: AnnotationId,
+        /// Draft body text.
+        body: String,
+    },
+}
+
 /// Runtime state owned by the PDF viewer surface.
 ///
 /// Cleared or reinitialized when a new document opens or the user returns to
@@ -163,12 +178,120 @@ pub struct ViewerRuntime {
     pub annotations: Vec<Annotation>,
     /// Currently selected annotation for highlight + anchored card focus.
     pub selected_annotation_id: Option<AnnotationId>,
-    /// Compose-from-selection draft, when creating a new annotation.
-    pub annotation_compose: Option<AnnotationComposeState>,
-    /// Annotation currently being body-edited in the overlay, if any.
-    pub annotation_editing_id: Option<AnnotationId>,
-    /// Draft body while `annotation_editing_id` is set.
-    pub annotation_edit_body: String,
+    /// Exclusive compose-or-edit draft (never both at once).
+    pub annotation_draft: Option<AnnotationDraft>,
+    /// Monotonic generation for the draft slot identity.
+    ///
+    /// Bumped whenever the draft is replaced or cleared (not on body-only
+    /// edits). In-flight create tasks capture this value at submit and only
+    /// clear the draft on completion when it still matches — so a newer
+    /// compose or edit started while create is running is not wiped.
+    pub annotation_draft_generation: u64,
     /// Monotonic generation to discard stale annotation load results.
     pub annotations_load_generation: u64,
+}
+
+impl ViewerRuntime {
+    /// Bumps [`Self::annotation_draft_generation`] (draft slot identity change).
+    fn bump_annotation_draft_generation(&mut self) {
+        self.annotation_draft_generation = self.annotation_draft_generation.wrapping_add(1);
+    }
+
+    /// Clears any in-progress compose or edit draft.
+    pub fn clear_annotation_draft(&mut self) {
+        if self.annotation_draft.is_some() {
+            self.bump_annotation_draft_generation();
+        }
+        self.annotation_draft = None;
+    }
+
+    /// Whether a new-annotation compose form is active.
+    pub fn is_composing(&self) -> bool {
+        matches!(self.annotation_draft, Some(AnnotationDraft::Compose(_)))
+    }
+
+    /// Whether any annotation draft (compose or edit) is active.
+    pub fn has_annotation_draft(&self) -> bool {
+        self.annotation_draft.is_some()
+    }
+
+    /// Id of the annotation currently being body-edited, if any.
+    pub fn editing_id(&self) -> Option<&AnnotationId> {
+        match &self.annotation_draft {
+            Some(AnnotationDraft::Edit { id, .. }) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Draft body text while editing an existing annotation.
+    pub fn edit_body(&self) -> &str {
+        match &self.annotation_draft {
+            Some(AnnotationDraft::Edit { body, .. }) => body.as_str(),
+            _ => "",
+        }
+    }
+
+    /// Mutable access to the compose state, if composing.
+    pub fn compose_mut(&mut self) -> Option<&mut AnnotationComposeState> {
+        match &mut self.annotation_draft {
+            Some(AnnotationDraft::Compose(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Immutable access to the compose state, if composing.
+    pub fn compose(&self) -> Option<&AnnotationComposeState> {
+        match &self.annotation_draft {
+            Some(AnnotationDraft::Compose(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Starts compose, replacing any existing draft.
+    pub fn set_compose_draft(&mut self, state: AnnotationComposeState) {
+        self.bump_annotation_draft_generation();
+        self.annotation_draft = Some(AnnotationDraft::Compose(state));
+    }
+
+    /// Starts edit for `id`, replacing any existing draft.
+    pub fn set_edit_draft(&mut self, id: AnnotationId, body: String) {
+        self.bump_annotation_draft_generation();
+        self.annotation_draft = Some(AnnotationDraft::Edit { id, body });
+    }
+
+    /// Sets the edit draft body when editing; no-op if not editing.
+    pub fn set_edit_body(&mut self, body: String) {
+        if let Some(AnnotationDraft::Edit {
+            body: draft_body, ..
+        }) = &mut self.annotation_draft
+        {
+            *draft_body = body;
+        }
+    }
+
+    /// Clears the draft when it is an edit of `id`.
+    pub fn clear_edit_draft_if(&mut self, id: &AnnotationId) {
+        if self.editing_id() == Some(id) {
+            self.bump_annotation_draft_generation();
+            self.annotation_draft = None;
+        }
+    }
+
+    /// Clears the draft only when it is still the compose form that was
+    /// submitted for `draft_generation`.
+    ///
+    /// Used when an in-flight create completes:
+    /// - If the user started compose B or an edit while create A was running,
+    ///   the draft generation no longer matches and B is left intact.
+    /// - Body-only edits on the same compose do not bump generation, so A still
+    ///   clears correctly on success.
+    pub fn clear_compose_draft_if_generation(&mut self, draft_generation: u64) {
+        if self.annotation_draft_generation != draft_generation {
+            return;
+        }
+        if self.is_composing() {
+            self.bump_annotation_draft_generation();
+            self.annotation_draft = None;
+        }
+    }
 }

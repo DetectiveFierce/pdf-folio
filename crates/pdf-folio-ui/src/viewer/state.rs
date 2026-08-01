@@ -592,9 +592,8 @@ impl PDFolioApp {
                 page_mode_wheel_gesture_consumed: false,
                 annotations: Vec::new(),
                 selected_annotation_id: None,
-                annotation_compose: None,
-                annotation_editing_id: None,
-                annotation_edit_body: String::new(),
+                annotation_draft: None,
+                annotation_draft_generation: 0,
                 annotations_load_generation: 0,
             },
             library: LibraryRuntime {
@@ -869,13 +868,13 @@ impl PDFolioApp {
         // Provisional title (library entry / file name) until PDF metadata lands.
         self.seed_provisional_document_title();
 
+        // Session apply may re-bind entry_id; then a single annotations reload.
         Task::batch([
             self.request_visible_pages(),
-            // Restores entry_id from session when path-matched and loads annotations.
+            // Restores page/zoom/find and entry_id from session when path-matched.
             self.apply_pending_session_to_open_document(),
-            // If there was no pending session (or it did not match), still load
-            // annotations in the background whenever we have an entry binding.
-            self.load_annotations_task(),
+            // Load annotations once after bind (session or path). No-op if unbound.
+            self.reload_annotations_if_bound(),
             // PDF metadata title — same background pattern as annotations.
             self.load_document_title_task(),
         ])
@@ -939,9 +938,9 @@ impl PDFolioApp {
 
     /// Sets [`ViewerRuntime::current_entry_id`] from pending session or library path.
     ///
-    /// Path-based opens (startup restore, file dialog) clear the entry id; this
-    /// re-associates the open PDF with a library row so annotations can load
-    /// without blocking the UI.
+    /// Pure bind step: only sets `current_entry_id`, never loads annotations.
+    /// Path-based opens clear the entry id; this re-associates the open PDF with
+    /// a library row so a subsequent [`Self::reload_annotations_if_bound`] can run.
     pub(crate) fn bind_viewer_entry_id_from_context(&mut self) {
         if self.viewer.current_entry_id.is_some() {
             return;
@@ -975,16 +974,30 @@ impl PDFolioApp {
         }
     }
 
-    /// After the library finishes loading, bind a path-opened document to its
-    /// entry (if any) and fetch annotations in the background.
+    /// Starts a background annotation load when an entry is bound and a doc is open.
     ///
-    /// Safe to call repeatedly: no-ops when already bound with loaded notes, or
-    /// when the open document is not a library PDF.
+    /// No-ops without `current_entry_id` or an open document. Always bumps the
+    /// load generation and starts [`Self::load_annotations_task`] when bound —
+    /// an empty annotation list is a successful load, not a reason to skip.
+    /// Stale in-flight results are dropped by the generation gate on
+    /// [`Message::AnnotationsLoaded`].
+    pub(crate) fn reload_annotations_if_bound(&mut self) -> Task<Message> {
+        if self.viewer.doc.is_none() || self.viewer.current_entry_id.is_none() {
+            return Task::none();
+        }
+        self.load_annotations_task()
+    }
+
+    /// After library hydration: bind a path-opened document, re-seed title if
+    /// the entry just became resolvable, then reload annotations.
+    ///
+    /// Single pipeline used by [`Message::LibraryLoaded`]. Does not short-circuit
+    /// on a non-empty annotation list — empty loads must still re-run when the
+    /// library binds late.
     pub(crate) fn ensure_open_document_annotations_loaded(&mut self) -> Task<Message> {
         if self.viewer.doc.is_none() {
             return Task::none();
         }
-        let had_entry = self.viewer.current_entry_id.is_some();
         let had_resolvable_entry = self.library_entry_title_available();
         self.bind_viewer_entry_id_from_context();
         // Session restore often binds entry_id before library rows exist; re-seed
@@ -992,14 +1005,7 @@ impl PDFolioApp {
         if self.library_entry_title_available() && !had_resolvable_entry {
             self.seed_provisional_document_title();
         }
-        if self.viewer.current_entry_id.is_none() {
-            return Task::none();
-        }
-        // Already populated for this open (or mid-flight load will finish).
-        if had_entry && !self.viewer.annotations.is_empty() {
-            return Task::none();
-        }
-        self.load_annotations_task()
+        self.reload_annotations_if_bound()
     }
 
     /// Leaves viewer mode for the library, refreshing entries/folders/thumbnails.
@@ -1038,15 +1044,15 @@ impl PDFolioApp {
 
     /// Opens a library entry's PDF and restores its last reading page.
     ///
-    /// Sets `current_entry_id` for progress tracking, then batches open setup,
-    /// session restore, tile requests, and scroll sync.
+    /// Installs via [`Self::open_document_with_path`] (bind + single annotations
+    /// reload), then forces the known library entry and reading position. A
+    /// second reload runs only when open could not path-bind the entry.
     pub(crate) fn open_library_document(
         &mut self,
         entry_id: EntryId,
         doc: Arc<PdfDoc>,
     ) -> Task<Message> {
-        self.viewer.current_entry_id = Some(entry_id.clone());
-        self.viewer.current_document_path = self
+        let path = self
             .library
             .library_entries
             .iter()
@@ -1058,10 +1064,11 @@ impl PDFolioApp {
             .iter()
             .find(|entry| entry.id == entry_id)
             .map_or(0, |entry| entry.last_page);
-        let task = self.open_document_with_path(doc, self.viewer.current_document_path.clone());
+        // Install + path-bind + session + reload when path matches a library row.
+        let open_task = self.open_document_with_path(doc, path);
+        // open clears entry_id then rebinds; keep the OpenLibraryEntry id authoritative.
+        let entry_already_bound = self.viewer.current_entry_id.as_ref() == Some(&entry_id);
         self.viewer.current_entry_id = Some(entry_id);
-        // open_document_with_path cleared entry_id before rebinding; refresh the
-        // provisional title now that the library entry is known.
         self.seed_provisional_document_title();
         self.viewer.last_scroll_offset = self.viewer.scroll_offset;
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
@@ -1074,11 +1081,15 @@ impl PDFolioApp {
         self.clamp_scroll_offset();
         self.viewer.last_saved_progress_page = Some(last_page);
         Task::batch([
-            task,
-            self.apply_pending_session_to_open_document(),
+            open_task,
             self.request_visible_pages(),
             self.scroll_viewer_to_offsets_task(),
-            self.load_annotations_task(),
+            // Open already reloaded when path-bind found this entry; otherwise load now.
+            if entry_already_bound {
+                Task::none()
+            } else {
+                self.reload_annotations_if_bound()
+            },
         ])
     }
 
@@ -1612,9 +1623,7 @@ impl PDFolioApp {
     pub(crate) fn clear_viewer_annotations(&mut self) {
         self.viewer.annotations.clear();
         self.viewer.selected_annotation_id = None;
-        self.viewer.annotation_compose = None;
-        self.viewer.annotation_editing_id = None;
-        self.viewer.annotation_edit_body.clear();
+        self.viewer.clear_annotation_draft();
         self.viewer.annotations_load_generation =
             self.viewer.annotations_load_generation.wrapping_add(1);
     }
@@ -1625,6 +1634,8 @@ impl PDFolioApp {
     }
 
     /// Starts compose mode from the current text selection.
+    ///
+    /// Replaces any active edit draft (exclusive with compose).
     pub(crate) fn start_annotation_compose(&mut self) -> Task<Message> {
         if !self.can_annotate() {
             return Task::none();
@@ -1641,24 +1652,21 @@ impl PDFolioApp {
             return Task::none();
         }
 
-        self.viewer.annotation_compose = Some(crate::viewer::document::AnnotationComposeState {
-            start_page: start.page,
-            start_char: start.char_index,
-            end_page: end.page,
-            end_char: end.char_index,
-            quote,
-            body: String::new(),
-        });
-        self.viewer.annotation_editing_id = None;
-        self.viewer.annotation_edit_body.clear();
+        self.viewer
+            .set_compose_draft(crate::viewer::document::AnnotationComposeState {
+                start_page: start.page,
+                start_char: start.char_index,
+                end_page: end.page,
+                end_char: end.char_index,
+                quote,
+                body: String::new(),
+            });
         Task::none()
     }
 
     /// Cancels compose and edit drafts without deleting persisted annotations.
     pub(crate) fn cancel_annotation_drafts(&mut self) {
-        self.viewer.annotation_compose = None;
-        self.viewer.annotation_editing_id = None;
-        self.viewer.annotation_edit_body.clear();
+        self.viewer.clear_annotation_draft();
     }
 
     /// Selects an annotation and scrolls so both the mark and its card are in view.
@@ -1727,14 +1735,28 @@ impl PDFolioApp {
             return Task::none();
         };
 
+        use crate::viewer::annotation_layout::{
+            annotation_layer_metrics, annotation_mark_content_bounds, CARD_WIDTH,
+        };
+
         // Base content size without annotation expansion to avoid feedback loops
         // while still placing cards with the same algorithm the view uses.
         let base = self.viewer_base_content_size(self.viewer.viewer_viewport_width);
-        let metrics =
-            crate::components::viewer::annotations::annotation_layer_metrics(self, base);
+        let page_rects = self.viewer_page_rects_content(self.viewer.viewer_viewport_width);
+        let metrics = annotation_layer_metrics(
+            &self.viewer.annotations,
+            &page_rects,
+            &self.viewer.viewer_text_layers,
+            self.viewer.editing_id(),
+            base,
+        );
         let placement = metrics.placements.iter().find(|p| p.index == index);
 
-        let mark_bounds = self.annotation_mark_content_bounds(&annotation);
+        let mark_bounds = annotation_mark_content_bounds(
+            &annotation,
+            &page_rects,
+            &self.viewer.viewer_text_layers,
+        );
         let (pair_top, pair_bottom) = match (mark_bounds, placement) {
             (Some(mark), Some(card)) => {
                 let top = mark.y.min(card.top);
@@ -1744,7 +1766,7 @@ impl PDFolioApp {
             (Some(mark), None) => (mark.y, mark.y + mark.height),
             (None, Some(card)) => (card.top, card.top + card.height),
             (None, None) => {
-                // Text layer not ready — jump to the page and request extraction.
+                // Page geometry not ready — jump to the page and request extraction.
                 let page = annotation.start_page;
                 let mut tasks = vec![self.jump_to_page(page)];
                 if let Some(doc) = self.viewer.doc.as_ref().map(Arc::clone) {
@@ -1766,10 +1788,7 @@ impl PDFolioApp {
             if let Some(card) = placement {
                 let viewport_w = self.viewer.viewer_viewport_width.max(1.0);
                 let target_x =
-                    ((card.x + card.x + crate::components::viewer::annotations::CARD_WIDTH
-                        - viewport_w)
-                        * 0.5)
-                        .max(0.0);
+                    ((card.x + card.x + CARD_WIDTH - viewport_w) * 0.5).max(0.0);
                 self.viewer.horizontal_offset = target_x;
             }
             self.viewer.scroll_offset = 0.0;
@@ -1780,8 +1799,7 @@ impl PDFolioApp {
             } else if let Some(card) = placement {
                 // Ensure the card column is horizontally visible.
                 let viewport_w = self.viewer.viewer_viewport_width.max(1.0);
-                let card_right =
-                    card.x + crate::components::viewer::annotations::CARD_WIDTH + 16.0;
+                let card_right = card.x + CARD_WIDTH + 16.0;
                 if card_right > self.viewer.horizontal_offset + viewport_w {
                     self.viewer.horizontal_offset = (card_right - viewport_w).max(0.0);
                 }
@@ -1794,26 +1812,6 @@ impl PDFolioApp {
             self.request_visible_pages(),
             self.scroll_viewer_to_offsets_task(),
         ])
-    }
-
-    /// Content-space bounds of the annotation’s start mark (character rect).
-    fn annotation_mark_content_bounds(
-        &self,
-        annotation: &pdf_folio_core::Annotation,
-    ) -> Option<Rectangle> {
-        let page_rect = self.viewer_page_rect_for_page(annotation.start_page)?;
-        let layer = self.viewer.viewer_text_layers.get(&annotation.start_page)?;
-        let character = layer.chars.get(annotation.start_char)?;
-        Some(Rectangle::new(
-            Point::new(
-                page_rect.x + character.bounds.x * page_rect.width,
-                page_rect.y + character.bounds.y * page_rect.height,
-            ),
-            Size::new(
-                (character.bounds.width * page_rect.width).max(4.0),
-                (character.bounds.height * page_rect.height).max(8.0),
-            ),
-        ))
     }
 
     /// Scrolls so the annotation’s start character is near the viewport center.
@@ -2162,17 +2160,32 @@ impl PDFolioApp {
         rects
     }
 
+    /// Whether the annotation card column and highlight paint should be active.
+    ///
+    /// True only when comments are visible **and** at least one annotation exists.
+    /// Content-size expansion, card mounting, highlight paint, and hit-test all
+    /// share this predicate so a hidden comments toggle does not leave a gutter.
+    pub(crate) fn annotation_layer_active(&self) -> bool {
+        self.viewer.annotations_visible && !self.viewer.annotations.is_empty()
+    }
+
     /// Total scrollable content size for the open document at `viewport_width`.
     ///
-    /// When annotations are present, expands width/height so the anchored card
-    /// column (and any collision-pushed stack) is fully scrollable.
+    /// When the annotation layer is active, expands width/height so the anchored
+    /// card column (and any collision-pushed stack) is fully scrollable.
     pub(crate) fn viewer_content_size(&self, viewport_width: f32) -> Size {
         let base = self.viewer_base_content_size(viewport_width);
-        if self.viewer.annotations.is_empty() {
+        if !self.annotation_layer_active() {
             return base;
         }
-        let metrics =
-            crate::components::viewer::annotations::annotation_layer_metrics(self, base);
+        let page_rects = self.viewer_page_rects_content(viewport_width);
+        let metrics = crate::viewer::annotation_layout::annotation_layer_metrics(
+            &self.viewer.annotations,
+            &page_rects,
+            &self.viewer.viewer_text_layers,
+            self.viewer.editing_id(),
+            base,
+        );
         Size::new(metrics.content_width, metrics.content_height)
     }
 

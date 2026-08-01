@@ -323,9 +323,10 @@ impl PDFolioApp {
 
     /// Applies pending session page/zoom/find state after a document opens.
     ///
-    /// Also re-binds the library [`EntryId`] from the session snapshot (path-based
-    /// startup opens leave `current_entry_id` unset) and kicks a background
-    /// annotation load so notes appear without blocking the interactive viewer.
+    /// Re-binds the library [`EntryId`] from the session snapshot (path-based
+    /// startup opens leave `current_entry_id` unset). Annotation loading is
+    /// owned by the open / library-hydration pipeline (`reload_annotations_if_bound`
+    /// / `ensure_open_document_annotations_loaded`), not this restore step.
     pub(crate) fn apply_pending_session_to_open_document(&mut self) -> Task<Message> {
         let Some(session) = self.pending_session_restore.clone() else {
             return Task::none();
@@ -378,8 +379,6 @@ impl PDFolioApp {
             self.request_visible_pages(),
             self.request_viewer_thumbnail_pages(),
             self.scroll_viewer_to_offsets_task(),
-            // Non-blocking spawn_blocking list; UI stays interactive meanwhile.
-            self.load_annotations_task(),
             save_app_session_task(self),
         ])
     }

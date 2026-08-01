@@ -16,6 +16,7 @@
 //! | [`document`] | [`ViewerRuntime`] fields for the open document |
 //! | [`state`] | Scroll/spread modes, text selection, find state, app helpers |
 //! | [`layout`] | Spread groups, page rects helpers, render-key selection |
+//! | [`annotation_layout`] | Anchored card placement + mark geometry (domain) |
 //! | [`navigation`] | Jump/scroll/zoom methods on `PDFolioApp` |
 //! | [`rendering`] | Zoom presets, percent math, render policy |
 //! | [`tasks`] | Open document / render page / zoom debounce tasks |
@@ -32,6 +33,8 @@
 //! Presentational widgets (canvas, toolbar, find bar) live under
 //! `components::viewer` and are composed by [`view`].
 
+/// Pure annotation card placement and mark geometry (domain, not widgets).
+pub(crate) mod annotation_layout;
 /// Open-document runtime fields mounted on `PDFolioApp` (`ViewerRuntime`).
 pub(crate) mod document;
 /// Spread groups, page rect helpers, and render-key selection.
