@@ -1722,14 +1722,28 @@ impl PDFolioApp {
             return Task::none();
         };
 
+        use crate::viewer::annotation_layout::{
+            annotation_layer_metrics, annotation_mark_content_bounds, CARD_WIDTH,
+        };
+
         // Base content size without annotation expansion to avoid feedback loops
         // while still placing cards with the same algorithm the view uses.
         let base = self.viewer_base_content_size(self.viewer.viewer_viewport_width);
-        let metrics =
-            crate::components::viewer::annotations::annotation_layer_metrics(self, base);
+        let page_rects = self.viewer_page_rects_content(self.viewer.viewer_viewport_width);
+        let metrics = annotation_layer_metrics(
+            &self.viewer.annotations,
+            &page_rects,
+            &self.viewer.viewer_text_layers,
+            self.viewer.annotation_editing_id.as_ref(),
+            base,
+        );
         let placement = metrics.placements.iter().find(|p| p.index == index);
 
-        let mark_bounds = self.annotation_mark_content_bounds(&annotation);
+        let mark_bounds = annotation_mark_content_bounds(
+            &annotation,
+            &page_rects,
+            &self.viewer.viewer_text_layers,
+        );
         let (pair_top, pair_bottom) = match (mark_bounds, placement) {
             (Some(mark), Some(card)) => {
                 let top = mark.y.min(card.top);
@@ -1739,7 +1753,7 @@ impl PDFolioApp {
             (Some(mark), None) => (mark.y, mark.y + mark.height),
             (None, Some(card)) => (card.top, card.top + card.height),
             (None, None) => {
-                // Text layer not ready — jump to the page and request extraction.
+                // Page geometry not ready — jump to the page and request extraction.
                 let page = annotation.start_page;
                 let mut tasks = vec![self.jump_to_page(page)];
                 if let Some(doc) = self.viewer.doc.as_ref().map(Arc::clone) {
@@ -1761,10 +1775,7 @@ impl PDFolioApp {
             if let Some(card) = placement {
                 let viewport_w = self.viewer.viewer_viewport_width.max(1.0);
                 let target_x =
-                    ((card.x + card.x + crate::components::viewer::annotations::CARD_WIDTH
-                        - viewport_w)
-                        * 0.5)
-                        .max(0.0);
+                    ((card.x + card.x + CARD_WIDTH - viewport_w) * 0.5).max(0.0);
                 self.viewer.horizontal_offset = target_x;
             }
             self.viewer.scroll_offset = 0.0;
@@ -1775,8 +1786,7 @@ impl PDFolioApp {
             } else if let Some(card) = placement {
                 // Ensure the card column is horizontally visible.
                 let viewport_w = self.viewer.viewer_viewport_width.max(1.0);
-                let card_right =
-                    card.x + crate::components::viewer::annotations::CARD_WIDTH + 16.0;
+                let card_right = card.x + CARD_WIDTH + 16.0;
                 if card_right > self.viewer.horizontal_offset + viewport_w {
                     self.viewer.horizontal_offset = (card_right - viewport_w).max(0.0);
                 }
@@ -1789,26 +1799,6 @@ impl PDFolioApp {
             self.request_visible_pages(),
             self.scroll_viewer_to_offsets_task(),
         ])
-    }
-
-    /// Content-space bounds of the annotation’s start mark (character rect).
-    fn annotation_mark_content_bounds(
-        &self,
-        annotation: &pdf_folio_core::Annotation,
-    ) -> Option<Rectangle> {
-        let page_rect = self.viewer_page_rect_for_page(annotation.start_page)?;
-        let layer = self.viewer.viewer_text_layers.get(&annotation.start_page)?;
-        let character = layer.chars.get(annotation.start_char)?;
-        Some(Rectangle::new(
-            Point::new(
-                page_rect.x + character.bounds.x * page_rect.width,
-                page_rect.y + character.bounds.y * page_rect.height,
-            ),
-            Size::new(
-                (character.bounds.width * page_rect.width).max(4.0),
-                (character.bounds.height * page_rect.height).max(8.0),
-            ),
-        ))
     }
 
     /// Scrolls so the annotation’s start character is near the viewport center.
@@ -2157,17 +2147,32 @@ impl PDFolioApp {
         rects
     }
 
+    /// Whether the annotation card column and highlight paint should be active.
+    ///
+    /// True only when comments are visible **and** at least one annotation exists.
+    /// Content-size expansion, card mounting, highlight paint, and hit-test all
+    /// share this predicate so a hidden comments toggle does not leave a gutter.
+    pub(crate) fn annotation_layer_active(&self) -> bool {
+        self.viewer.annotations_visible && !self.viewer.annotations.is_empty()
+    }
+
     /// Total scrollable content size for the open document at `viewport_width`.
     ///
-    /// When annotations are present, expands width/height so the anchored card
-    /// column (and any collision-pushed stack) is fully scrollable.
+    /// When the annotation layer is active, expands width/height so the anchored
+    /// card column (and any collision-pushed stack) is fully scrollable.
     pub(crate) fn viewer_content_size(&self, viewport_width: f32) -> Size {
         let base = self.viewer_base_content_size(viewport_width);
-        if self.viewer.annotations.is_empty() {
+        if !self.annotation_layer_active() {
             return base;
         }
-        let metrics =
-            crate::components::viewer::annotations::annotation_layer_metrics(self, base);
+        let page_rects = self.viewer_page_rects_content(viewport_width);
+        let metrics = crate::viewer::annotation_layout::annotation_layer_metrics(
+            &self.viewer.annotations,
+            &page_rects,
+            &self.viewer.viewer_text_layers,
+            self.viewer.annotation_editing_id.as_ref(),
+            base,
+        );
         Size::new(metrics.content_width, metrics.content_height)
     }
 

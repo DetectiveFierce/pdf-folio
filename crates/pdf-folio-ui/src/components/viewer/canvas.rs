@@ -460,7 +460,7 @@ fn draw_annotation_highlights(
     page: u16,
     page_rect: Rectangle,
 ) {
-    if !app.viewer.annotations_visible || app.viewer.annotations.is_empty() {
+    if !app.annotation_layer_active() {
         return;
     }
     let Some(layer) = app.viewer.viewer_text_layers.get(&page) else {
@@ -509,7 +509,7 @@ fn annotation_at_position(
     _bounds: Rectangle,
     position: Point,
 ) -> Option<pdf_folio_core::AnnotationId> {
-    if !app.viewer.annotations_visible || app.viewer.annotations.is_empty() {
+    if !app.annotation_layer_active() {
         return None;
     }
     app.viewer.doc.as_ref()?;
@@ -666,16 +666,7 @@ fn selected_line_highlights(
 
 /// Map a normalized character bounds rect into screen coordinates within `page_rect`.
 fn character_screen_rect(character: &PageTextChar, page_rect: Rectangle) -> Rectangle {
-    Rectangle::new(
-        Point::new(
-            page_rect.x + character.bounds.x * page_rect.width,
-            page_rect.y + character.bounds.y * page_rect.height,
-        ),
-        Size::new(
-            character.bounds.width * page_rect.width,
-            character.bounds.height * page_rect.height,
-        ),
-    )
+    crate::viewer::annotation_layout::character_content_rect(page_rect, &character.bounds)
 }
 
 /// Vertical center of a rectangle (line-grouping key for selection highlights).
