@@ -161,12 +161,14 @@ pub(crate) fn load_annotations_task(app: &mut PDFolioApp) -> Task<Message> {
 /// Takes compose fields (anchors + quote) plus `entry_id` and body. Allocates
 /// the annotation id via [`pdf_folio_core::Db::new_annotation_id`] inside the
 /// worker so the UI never mints identities. On success emits
-/// [`Message::AnnotationCreateFinished`] with the full inserted row.
+/// [`Message::AnnotationCreateFinished`] with the full inserted row and the
+/// draft generation captured at submit.
 pub(crate) fn insert_annotation_task(
     app: &PDFolioApp,
     entry_id: EntryId,
     compose: crate::viewer::document::AnnotationComposeState,
     body: String,
+    draft_generation: u64,
 ) -> Task<Message> {
     let db = Arc::clone(&app.db);
     Task::perform(
@@ -191,9 +193,15 @@ pub(crate) fn insert_annotation_task(
             })
             .await?
         },
-        |result| match result {
-            Ok(annotation) => Message::AnnotationCreateFinished(Ok(annotation)),
-            Err(error) => Message::AnnotationCreateFinished(Err(error.to_string())),
+        move |result| match result {
+            Ok(annotation) => Message::AnnotationCreateFinished {
+                result: Ok(annotation),
+                draft_generation,
+            },
+            Err(error) => Message::AnnotationCreateFinished {
+                result: Err(error.to_string()),
+                draft_generation,
+            },
         },
     )
 }

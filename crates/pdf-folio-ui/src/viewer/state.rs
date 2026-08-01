@@ -593,6 +593,7 @@ impl PDFolioApp {
                 annotations: Vec::new(),
                 selected_annotation_id: None,
                 annotation_draft: None,
+                annotation_draft_generation: 0,
                 annotations_load_generation: 0,
             },
             library: LibraryRuntime {

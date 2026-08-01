@@ -452,7 +452,14 @@ pub enum Message {
     /// Submit a new annotation from the compose form.
     AnnotationCreateSubmitted,
     /// Persist result for a newly created annotation.
-    AnnotationCreateFinished(Result<Annotation, String>),
+    ///
+    /// `draft_generation` is the [`crate::viewer::document::ViewerRuntime::annotation_draft_generation`]
+    /// captured at submit; completion only clears the compose form when it still
+    /// matches so a newer compose/edit is not wiped by a slower create.
+    AnnotationCreateFinished {
+        result: Result<Annotation, String>,
+        draft_generation: u64,
+    },
     /// Annotations for the open entry finished loading.
     AnnotationsLoaded {
         entry_id: EntryId,

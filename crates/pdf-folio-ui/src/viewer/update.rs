@@ -287,11 +287,21 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             let Some(entry_id) = app.viewer.current_entry_id.clone() else {
                 return Some(Task::none());
             };
+            // Capture draft identity at submit so a slower create cannot clear
+            // a newer compose/edit that replaced this form while the task ran.
+            let draft_generation = app.viewer.annotation_draft_generation;
             Some(crate::viewer::tasks::insert_annotation_task(
-                app, entry_id, compose, body,
+                app,
+                entry_id,
+                compose,
+                body,
+                draft_generation,
             ))
         }
-        Message::AnnotationCreateFinished(result) => match result {
+        Message::AnnotationCreateFinished {
+            result,
+            draft_generation,
+        } => match result {
             Ok(annotation) => {
                 let id = annotation.id.clone();
                 app.viewer.annotations.push(annotation.clone());
@@ -301,10 +311,11 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                         .then(left.start_char.cmp(&right.start_char))
                         .then(left.created_at.cmp(&right.created_at))
                 });
-                // Only drop a still-active compose form. If the user started
-                // editing another annotation while create was in flight, the
-                // exclusive draft slot already holds that edit — leave it.
-                app.viewer.clear_compose_draft_if_composing();
+                // Clear only if the draft slot is still the compose that was
+                // submitted (same generation). Compose B or an edit started
+                // mid-flight bumps generation and is preserved.
+                app.viewer
+                    .clear_compose_draft_if_generation(*draft_generation);
                 app.clear_viewer_text_selection();
                 app.viewer.selected_annotation_id = Some(id);
                 Some(app.scroll_to_annotation_anchor(annotation))
