@@ -1746,7 +1746,7 @@ impl PDFolioApp {
             &self.viewer.annotations,
             &page_rects,
             &self.viewer.viewer_text_layers,
-            self.viewer.annotation_editing_id.as_ref(),
+            self.viewer.editing_id(),
             base,
         );
         let placement = metrics.placements.iter().find(|p| p.index == index);
@@ -2182,7 +2182,7 @@ impl PDFolioApp {
             &self.viewer.annotations,
             &page_rects,
             &self.viewer.viewer_text_layers,
-            self.viewer.annotation_editing_id.as_ref(),
+            self.viewer.editing_id(),
             base,
         );
         Size::new(metrics.content_width, metrics.content_height)
