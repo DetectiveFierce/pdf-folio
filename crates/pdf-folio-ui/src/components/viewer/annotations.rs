@@ -76,7 +76,7 @@ pub(crate) fn view_annotations_viewport_chrome(
     app: &PDFolioApp,
     tokens: ThemeTokens,
 ) -> Option<Element<'_, Message>> {
-    if let Some(compose) = &app.viewer.annotation_compose {
+    if let Some(compose) = app.viewer.compose() {
         let card = view_compose_card(compose, tokens);
         let x = (app.viewer.viewer_viewport_width - CARD_WIDTH - 16.0).max(Spacing::SM);
         return Some(pin(card).x(x).y(Spacing::MD).into());
@@ -133,7 +133,7 @@ pub(crate) fn view_annotations_content_layer<'a>(
             continue;
         };
         let active = selected == Some(&annotation.id);
-        let editing = app.viewer.annotation_editing_id.as_ref() == Some(&annotation.id);
+        let editing = app.viewer.editing_id() == Some(&annotation.id);
         // Placement is the card’s top-left; the frame grows by BADGE_OVERHANG
         // up/left so the ordinal circle can sit on the corner without clipping.
         let mut x = placement.x - BADGE_OVERHANG;
@@ -183,7 +183,7 @@ pub(crate) fn annotation_layer_metrics(
     for (index, annotation) in annotations.iter().enumerate() {
         let height = estimate_card_height(
             annotation,
-            app.viewer.annotation_editing_id.as_ref() == Some(&annotation.id),
+            app.viewer.editing_id() == Some(&annotation.id),
         );
         let (center_y, page_right) =
             annotation_anchor_center(app, annotation, &page_rects).unwrap_or_else(|| {
@@ -383,7 +383,7 @@ fn view_anchored_card<'a>(
     let badge = view_ordinal_badge(ordinal, active, tokens);
 
     if editing {
-        let body_input = text_input("Annotation", &app.viewer.annotation_edit_body)
+        let body_input = text_input("Annotation", app.viewer.edit_body())
             .on_input(Message::AnnotationEditBodyChanged)
             .on_submit(Message::AnnotationEditSubmitted)
             .style(move |_, status| text_input_style(tokens, Class::SearchInput, status));

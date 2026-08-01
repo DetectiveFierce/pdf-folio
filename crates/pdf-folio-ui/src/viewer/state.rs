@@ -592,9 +592,7 @@ impl PDFolioApp {
                 page_mode_wheel_gesture_consumed: false,
                 annotations: Vec::new(),
                 selected_annotation_id: None,
-                annotation_compose: None,
-                annotation_editing_id: None,
-                annotation_edit_body: String::new(),
+                annotation_draft: None,
                 annotations_load_generation: 0,
             },
             library: LibraryRuntime {
@@ -1612,9 +1610,7 @@ impl PDFolioApp {
     pub(crate) fn clear_viewer_annotations(&mut self) {
         self.viewer.annotations.clear();
         self.viewer.selected_annotation_id = None;
-        self.viewer.annotation_compose = None;
-        self.viewer.annotation_editing_id = None;
-        self.viewer.annotation_edit_body.clear();
+        self.viewer.clear_annotation_draft();
         self.viewer.annotations_load_generation =
             self.viewer.annotations_load_generation.wrapping_add(1);
     }
@@ -1625,6 +1621,8 @@ impl PDFolioApp {
     }
 
     /// Starts compose mode from the current text selection.
+    ///
+    /// Replaces any active edit draft (exclusive with compose).
     pub(crate) fn start_annotation_compose(&mut self) -> Task<Message> {
         if !self.can_annotate() {
             return Task::none();
@@ -1641,24 +1639,21 @@ impl PDFolioApp {
             return Task::none();
         }
 
-        self.viewer.annotation_compose = Some(crate::viewer::document::AnnotationComposeState {
-            start_page: start.page,
-            start_char: start.char_index,
-            end_page: end.page,
-            end_char: end.char_index,
-            quote,
-            body: String::new(),
-        });
-        self.viewer.annotation_editing_id = None;
-        self.viewer.annotation_edit_body.clear();
+        self.viewer
+            .set_compose_draft(crate::viewer::document::AnnotationComposeState {
+                start_page: start.page,
+                start_char: start.char_index,
+                end_page: end.page,
+                end_char: end.char_index,
+                quote,
+                body: String::new(),
+            });
         Task::none()
     }
 
     /// Cancels compose and edit drafts without deleting persisted annotations.
     pub(crate) fn cancel_annotation_drafts(&mut self) {
-        self.viewer.annotation_compose = None;
-        self.viewer.annotation_editing_id = None;
-        self.viewer.annotation_edit_body.clear();
+        self.viewer.clear_annotation_draft();
     }
 
     /// Selects an annotation and scrolls so both the mark and its card are in view.

@@ -232,8 +232,7 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
     // Mockup: ↑ / ↓ step comments when notes exist (document still scrolls via wheel).
     if app.mode == AppMode::Viewer
         && !app.viewer.annotations.is_empty()
-        && app.viewer.annotation_compose.is_none()
-        && app.viewer.annotation_editing_id.is_none()
+        && !app.viewer.has_annotation_draft()
         && !app.viewer.viewer_find.open
     {
         match shortcut {
@@ -512,10 +511,7 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
             } else if app.viewer.page_input_editing {
                 app.viewer.page_input_editing = false;
                 app.viewer.jump_input.clear();
-            } else if app.mode == AppMode::Viewer
-                && (app.viewer.annotation_compose.is_some()
-                    || app.viewer.annotation_editing_id.is_some())
-            {
+            } else if app.mode == AppMode::Viewer && app.viewer.has_annotation_draft() {
                 app.cancel_annotation_drafts();
             } else if app.mode == AppMode::Viewer && app.viewer.viewer_find.open {
                 app.viewer.viewer_find.open = false;

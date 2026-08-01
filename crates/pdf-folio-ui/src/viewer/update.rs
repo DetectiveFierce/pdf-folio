@@ -267,17 +267,17 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         Message::CopyViewerTextSelection => Some(app.copy_selected_viewer_text()),
         Message::StartAnnotationCompose => Some(app.start_annotation_compose()),
         Message::AnnotationComposeBodyChanged(body) => {
-            if let Some(compose) = &mut app.viewer.annotation_compose {
+            if let Some(compose) = app.viewer.compose_mut() {
                 compose.body = body.clone();
             }
             Some(Task::none())
         }
         Message::AnnotationComposeCancelled => {
-            app.viewer.annotation_compose = None;
+            app.viewer.clear_annotation_draft();
             Some(Task::none())
         }
         Message::AnnotationCreateSubmitted => {
-            let Some(compose) = app.viewer.annotation_compose.clone() else {
+            let Some(compose) = app.viewer.compose().cloned() else {
                 return Some(Task::none());
             };
             let body = compose.body.trim().to_owned();
@@ -301,7 +301,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                         .then(left.start_char.cmp(&right.start_char))
                         .then(left.created_at.cmp(&right.created_at))
                 });
-                app.viewer.annotation_compose = None;
+                app.viewer.clear_annotation_draft();
                 app.clear_viewer_text_selection();
                 app.viewer.selected_annotation_id = Some(id);
                 Some(app.scroll_to_annotation_anchor(annotation))
@@ -353,20 +353,20 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                 .find(|annotation| annotation.id == *id)
                 .map(|annotation| annotation.body.clone())
                 .unwrap_or_default();
-            app.viewer.annotation_editing_id = Some(id.clone());
-            app.viewer.annotation_edit_body = body;
+            // Replaces any active compose draft (exclusive with edit).
+            app.viewer.set_edit_draft(id.clone(), body);
             app.viewer.selected_annotation_id = Some(id.clone());
             Some(Task::none())
         }
         Message::AnnotationEditBodyChanged(body) => {
-            app.viewer.annotation_edit_body = body.clone();
+            app.viewer.set_edit_body(body.clone());
             Some(Task::none())
         }
         Message::AnnotationEditSubmitted => {
-            let Some(id) = app.viewer.annotation_editing_id.clone() else {
+            let Some(id) = app.viewer.editing_id().cloned() else {
                 return Some(Task::none());
             };
-            let body = app.viewer.annotation_edit_body.trim().to_owned();
+            let body = app.viewer.edit_body().trim().to_owned();
             if body.is_empty() {
                 return Some(Task::none());
             }
@@ -385,8 +385,8 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                     annotation.body = body.clone();
                     annotation.updated_at = *updated_at;
                 }
-                app.viewer.annotation_editing_id = None;
-                app.viewer.annotation_edit_body.clear();
+                // Only drop draft if still editing this id (compose may have replaced it).
+                app.viewer.clear_edit_draft_if(id);
                 Some(Task::none())
             }
             Err(error) => {
@@ -395,8 +395,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             }
         },
         Message::AnnotationEditCancelled => {
-            app.viewer.annotation_editing_id = None;
-            app.viewer.annotation_edit_body.clear();
+            app.viewer.clear_annotation_draft();
             Some(Task::none())
         }
         Message::AnnotationDeleteRequested(id) => {
@@ -414,10 +413,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                     .iter()
                     .position(|annotation| annotation.id == *id);
                 app.viewer.annotations.retain(|annotation| annotation.id != *id);
-                if app.viewer.annotation_editing_id.as_ref() == Some(id) {
-                    app.viewer.annotation_editing_id = None;
-                    app.viewer.annotation_edit_body.clear();
-                }
+                app.viewer.clear_edit_draft_if(id);
                 if app.viewer.selected_annotation_id.as_ref() == Some(id) {
                     app.viewer.selected_annotation_id = None;
                     if let Some(index) = removed_index {
