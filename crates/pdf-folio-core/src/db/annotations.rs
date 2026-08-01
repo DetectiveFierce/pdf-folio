@@ -42,6 +42,8 @@ impl Db {
     /// Inserts a new annotation row.
     ///
     /// Callers supply a fully-formed [`Annotation`] including id and timestamps.
+    /// Mint the id with [`Self::new_annotation_id`] immediately before insert
+    /// (typically inside the same blocking task) so the UI never invents ids.
     ///
     /// # Errors
     ///
@@ -120,24 +122,27 @@ impl Db {
 
     /// Allocates a unique annotation id string.
     ///
-    /// Uses nanosecond timestamps plus a local counter suffix, matching the
-    /// folder id generation style used elsewhere in this crate.
+    /// Format: `annotation-{nanos}-{seq}` where `seq` is a process-local atomic
+    /// counter. Prefer calling this inside the same blocking path that inserts
+    /// the row so ids are owned by persistence, not the UI.
+    ///
+    /// The suffix is *not* `COUNT(*) + 1`: deletes shrink the count and would
+    /// recreate colliding ids. Nanos alone can also collide under concurrent
+    /// inserts in the same tick, so the monotonic seq disambiguates.
     pub fn new_annotation_id(&self) -> Result<AnnotationId> {
-        let connection = self.connection()?;
-        let suffix = next_annotation_suffix(&connection)?;
+        let _ = self; // id allocation is process-local; no DB read required
         Ok(AnnotationId::new(format!(
             "annotation-{}-{}",
             Utc::now().timestamp_nanos_opt().unwrap_or_default(),
-            suffix
+            next_annotation_suffix()
         )))
     }
 }
 
-fn next_annotation_suffix(connection: &rusqlite::Connection) -> Result<u64> {
-    let count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM annotations", [], |row| row.get(0))
-        .unwrap_or(0);
-    Ok((count as u64).saturating_add(1))
+fn next_annotation_suffix() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 fn row_to_annotation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Annotation> {

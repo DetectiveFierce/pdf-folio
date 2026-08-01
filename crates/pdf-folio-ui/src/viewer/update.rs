@@ -284,12 +284,12 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             if body.is_empty() {
                 return Some(Task::none());
             }
-            let Some(annotation) =
-                crate::viewer::tasks::build_annotation_from_compose(app, &compose, body)
-            else {
+            let Some(entry_id) = app.viewer.current_entry_id.clone() else {
                 return Some(Task::none());
             };
-            Some(crate::viewer::tasks::insert_annotation_task(app, annotation))
+            Some(crate::viewer::tasks::insert_annotation_task(
+                app, entry_id, compose, body,
+            ))
         }
         Message::AnnotationCreateFinished(result) => match result {
             Ok(annotation) => {

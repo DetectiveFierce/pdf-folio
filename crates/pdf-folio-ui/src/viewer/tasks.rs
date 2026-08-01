@@ -157,13 +157,35 @@ pub(crate) fn load_annotations_task(app: &mut PDFolioApp) -> Task<Message> {
 }
 
 /// Inserts a new annotation on a blocking worker.
-pub(crate) fn insert_annotation_task(app: &PDFolioApp, annotation: Annotation) -> Task<Message> {
+///
+/// Takes compose fields (anchors + quote) plus `entry_id` and body. Allocates
+/// the annotation id via [`pdf_folio_core::Db::new_annotation_id`] inside the
+/// worker so the UI never mints identities. On success emits
+/// [`Message::AnnotationCreateFinished`] with the full inserted row.
+pub(crate) fn insert_annotation_task(
+    app: &PDFolioApp,
+    entry_id: EntryId,
+    compose: crate::viewer::document::AnnotationComposeState,
+    body: String,
+) -> Task<Message> {
     let db = Arc::clone(&app.db);
     Task::perform(
         async move {
-            let db = db;
-            let annotation = annotation;
             tokio::task::spawn_blocking(move || {
+                let id = db.new_annotation_id()?;
+                let now = chrono::Utc::now();
+                let annotation = Annotation {
+                    id,
+                    entry_id,
+                    start_page: compose.start_page,
+                    start_char: compose.start_char,
+                    end_page: compose.end_page,
+                    end_char: compose.end_char,
+                    quote: compose.quote,
+                    body,
+                    created_at: now,
+                    updated_at: now,
+                };
                 db.insert_annotation(&annotation)?;
                 Ok::<_, anyhow::Error>(annotation)
             })
@@ -220,29 +242,4 @@ pub(crate) fn delete_annotation_task(app: &PDFolioApp, id: AnnotationId) -> Task
     )
 }
 
-/// Builds a new [`Annotation`] with a fresh id for the open library entry.
-pub(crate) fn build_annotation_from_compose(
-    app: &PDFolioApp,
-    compose: &crate::viewer::document::AnnotationComposeState,
-    body: String,
-) -> Option<Annotation> {
-    let entry_id = app.viewer.current_entry_id.clone()?;
-    let now = chrono::Utc::now();
-    let id = AnnotationId::new(format!(
-        "annotation-{}-{}",
-        now.timestamp_nanos_opt().unwrap_or_default(),
-        app.viewer.annotations.len().saturating_add(1)
-    ));
-    Some(Annotation {
-        id,
-        entry_id,
-        start_page: compose.start_page,
-        start_char: compose.start_char,
-        end_page: compose.end_page,
-        end_char: compose.end_char,
-        quote: compose.quote.clone(),
-        body,
-        created_at: now,
-        updated_at: now,
-    })
-}
+
