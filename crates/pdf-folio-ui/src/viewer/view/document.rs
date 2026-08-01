@@ -40,15 +40,14 @@ pub(crate) fn view_viewer_document(app: &PDFolioApp, tokens: ThemeTokens) -> Ele
         .height(Length::Fixed(content_size.height));
 
     // Always three content layers so show/hide annotations does not remount.
-    let annotations_layer: Element<'_, Message> =
-        if app.viewer.annotations_visible && !app.viewer.annotations.is_empty() {
-            view_annotations_content_layer(app, tokens, content_size)
-        } else {
-            Space::new()
-                .width(content_size.width)
-                .height(content_size.height)
-                .into()
-        };
+    let annotations_layer: Element<'_, Message> = if app.annotation_layer_active() {
+        view_annotations_content_layer(app, tokens, content_size)
+    } else {
+        Space::new()
+            .width(content_size.width)
+            .height(content_size.height)
+            .into()
+    };
 
     let viewer_content = stack![viewer, selection_overlay, annotations_layer]
         .width(Length::Fixed(content_size.width))
