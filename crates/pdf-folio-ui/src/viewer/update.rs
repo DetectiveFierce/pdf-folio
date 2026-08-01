@@ -301,7 +301,10 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                         .then(left.start_char.cmp(&right.start_char))
                         .then(left.created_at.cmp(&right.created_at))
                 });
-                app.viewer.clear_annotation_draft();
+                // Only drop a still-active compose form. If the user started
+                // editing another annotation while create was in flight, the
+                // exclusive draft slot already holds that edit — leave it.
+                app.viewer.clear_compose_draft_if_composing();
                 app.clear_viewer_text_selection();
                 app.viewer.selected_annotation_id = Some(id);
                 Some(app.scroll_to_annotation_anchor(annotation))

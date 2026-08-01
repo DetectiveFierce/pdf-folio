@@ -258,4 +258,15 @@ impl ViewerRuntime {
             self.annotation_draft = None;
         }
     }
+
+    /// Clears the draft only when it is still a compose form.
+    ///
+    /// Used when an in-flight create completes: if the user already switched to
+    /// editing another annotation (or otherwise replaced the compose draft),
+    /// leave that newer draft intact.
+    pub fn clear_compose_draft_if_composing(&mut self) {
+        if self.is_composing() {
+            self.annotation_draft = None;
+        }
+    }
 }
