@@ -307,11 +307,42 @@ fn page_scroll_mode_lays_out_only_the_active_page() {
     let _ = app.set_viewer_scroll_mode(ViewerScrollMode::Vertical);
     assert!(app.content_height() > page_mode_height * 10.0);
 
+    // Scroll pan in page mode must not change the active page.
     let _ = app.set_viewer_scroll_mode(ViewerScrollMode::Page);
     let _ = app.jump_to_page(20);
     let _ = app.scroll_by(10_000.0);
     assert_eq!(app.current_page(), 20);
     assert_eq!(app.visible_page_range(), 20..21);
+}
+
+#[test]
+fn page_scroll_mode_with_spreads_lays_out_the_whole_spread() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/phase1-multipage.pdf");
+    let doc = Arc::new(PdfDoc::open(&fixture).expect("fixture should open"));
+    assert!(doc.page_count() > 5);
+
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    let _ = app.open_document(doc);
+    let _ = app.set_viewer_scroll_mode(ViewerScrollMode::Page);
+    let _ = app.set_viewer_spread_mode(ViewerSpreadMode::Odd);
+    // Page 2 sits in the [2, 3] odd-spread pair.
+    let _ = app.jump_to_page(2);
+
+    let rects = app.viewer_page_rects_content(app.viewer.viewer_viewport_width);
+    assert_eq!(
+        rects.iter().map(|(page, _)| *page).collect::<Vec<_>>(),
+        vec![2, 3]
+    );
+    assert_eq!(app.visible_page_range(), 2..4);
+
+    // Page-mode steps advance by whole spreads.
+    let _ = app.scroll_page_mode_by(1);
+    let rects = app.viewer_page_rects_content(app.viewer.viewer_viewport_width);
+    assert_eq!(
+        rects.iter().map(|(page, _)| *page).collect::<Vec<_>>(),
+        vec![4, 5]
+    );
 }
 
 #[test]
@@ -384,58 +415,7 @@ fn stale_text_layer_completion_is_discarded_after_document_change() {
     assert!(app.viewer.viewer_find.matches.is_empty());
 }
 
-#[test]
-fn page_mode_wheel_requires_accumulated_delta_before_turning() {
-    let mut app = PDFolioApp::new().expect("app should initialize");
-    app.viewer.viewer_scroll_mode = ViewerScrollMode::Page;
 
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), None);
-    // Accumulated -dy of 50px crosses the 48px threshold → next page.
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -10.0), Some(1));
-
-    // Long momentum stream after the turn stays locked (one turn per gesture).
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -100.0), None);
-}
-
-#[test]
-fn page_mode_wheel_stays_locked_for_continuous_momentum_after_cooldown_window() {
-    let mut app = PDFolioApp::new().expect("app should initialize");
-    app.viewer.viewer_scroll_mode = ViewerScrollMode::Page;
-
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -50.0), Some(1));
-    assert!(app.viewer.page_mode_wheel_gesture_consumed);
-
-    // Simulate events that continue well after the old 220ms cooldown would
-    // have expired, but still form one continuous gesture (gaps < idle).
-    for _ in 0..8 {
-        app.viewer.page_mode_wheel_last_event_at =
-            Some(Instant::now() - std::time::Duration::from_millis(100));
-        assert_eq!(
-            app.take_page_mode_wheel_turn(0.0, -80.0),
-            None,
-            "continuous momentum must not turn another page after cooldown-length gaps"
-        );
-    }
-}
-
-#[test]
-fn page_mode_wheel_rearms_after_gesture_idle_gap() {
-    let mut app = PDFolioApp::new().expect("app should initialize");
-    app.viewer.viewer_scroll_mode = ViewerScrollMode::Page;
-
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -50.0), Some(1));
-
-    // Idle longer than PAGE_MODE_GESTURE_IDLE_MS ends the gesture.
-    app.viewer.page_mode_wheel_last_event_at =
-        Some(Instant::now() - std::time::Duration::from_millis(200));
-    assert_eq!(app.take_page_mode_wheel_turn(0.0, -50.0), Some(1));
-    assert!(app.viewer.page_mode_wheel_gesture_consumed);
-}
 
 #[test]
 fn root_library_scope_shows_only_unfiled_entries() {
@@ -1058,6 +1038,91 @@ fn entry_search_fields_match_folder_names() {
         ["Research Archive"].into_iter(),
         "cookbook",
     ));
+}
+
+#[test]
+fn entry_search_and_tokens_and_exclusions() {
+    assert!(entry_search_fields_match(
+        "Linear Algebra Notes",
+        "Gilbert Strang",
+        "/courses/algebra.pdf",
+        ["math", "mit"].into_iter(),
+        ["Courses"].into_iter(),
+        "linear strang",
+    ));
+    assert!(!entry_search_fields_match(
+        "Linear Algebra Notes",
+        "Gilbert Strang",
+        "/courses/algebra.pdf",
+        ["math"].into_iter(),
+        ["Courses"].into_iter(),
+        "linear calculus",
+    ));
+    assert!(!entry_search_fields_match(
+        "Linear Algebra Notes",
+        "Gilbert Strang",
+        "/courses/algebra.pdf",
+        ["math"].into_iter(),
+        ["Courses"].into_iter(),
+        "algebra -author:strang",
+    ));
+    assert!(entry_search_fields_match(
+        "Budget 2024",
+        "Finance Team",
+        "/tmp/budget.pdf",
+        ["work"].into_iter(),
+        ["Office"].into_iter(),
+        "tag:work",
+    ));
+    assert!(!entry_search_fields_match(
+        "work handbook",
+        "Finance Team",
+        "/tmp/budget.pdf",
+        ["other"].into_iter(),
+        ["Office"].into_iter(),
+        "tag:work",
+    ));
+}
+
+#[test]
+fn search_results_ignore_folder_and_tag_filters() {
+    let mut app = PDFolioApp::new().expect("app should initialize");
+    let entry = LibraryEntry {
+        id: EntryId::new("a"),
+        path: PathBuf::from("/tmp/alpha.pdf"),
+        title: Some(String::from("Alpha Paper")),
+        author: Some(String::from("Ada")),
+        display_title: None,
+        display_author: None,
+        sort_title: Some(String::from("alpha paper")),
+        sort_author: Some(String::from("ada")),
+        metadata_locked: false,
+        manual_order: 0,
+        author_attributed: true,
+        page_count_attributed: true,
+        added_at: chrono::Utc::now(),
+        opened_at: None,
+        page_count: Some(10),
+        file_size: None,
+        last_page: 0,
+        rating: 0,
+        cover_hash: None,
+        tags: vec![String::from("other")],
+        folders: vec![],
+        folder_orders: vec![],
+        missing: false,
+    };
+    app.library.library_entries = vec![entry.clone()];
+    app.library.selected_folder = Some(FolderId::new("folder"));
+    app.library.active_tag_filter = Some(String::from("research"));
+    app.library.active_reading_filter = Some(LibraryReadingFilter::Unread);
+    app.library.search_query = String::from("alpha");
+    app.library.search_results = Some(vec![entry]);
+
+    // Active search must surface whole-library hits even when stale filters remain set.
+    let visible = app.visible_library_entries();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].id.as_str(), "a");
 }
 
 #[test]

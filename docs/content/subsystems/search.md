@@ -52,14 +52,30 @@ Text extraction uses `PdfDoc::text_on_page` (Pdfium). Large imports should stay 
 
 ```text
 User types query
-  → Message updates query string
-  → schedule_search bumps generation
-  → Task queries SearchIndex
-  → SearchFinished { generation, hits }
-  → if generation matches, store hits and filter grid
+  → SearchQueryChanged clears folder/tag/smart filters (whole-library scope)
+  → Instant metadata preview ranks title/author/tag/folder/path hits
+  → schedule_search debounces 200ms
+  → Task queries SearchIndex + structured metadata matcher
+  → SearchResults replaces the main pane (no folder/tag filters on top)
 ```
 
-Library filters (folder scope, reading state, tags) still apply on top of hit sets in pure helpers (`components/library/filters.rs`).
+While a query is active, the main pane shows **only** search results for the entire library. Sidebar folder/tag/reading filters are cleared on the first keystroke so hits are never silently scoped to the previous view. Choosing a folder or smart filter clears the search box again.
+
+### Query syntax (library search box)
+
+| Form | Meaning |
+| --- | --- |
+| `words` | All tokens must match (AND) across metadata and/or full text |
+| `"exact phrase"` | Contiguous substring / phrase |
+| `title:` / `t:` / `name:` | Title only |
+| `author:` / `a:` / `by:` | Author only |
+| `tag:` / `tags:` / `#:` | Tag only |
+| `folder:` / `in:` / `dir:` | Folder name only |
+| `path:` / `file:` / `filename:` | Path or filename |
+| `text:` / `body:` / `content:` | Full-text body (Tantivy) only |
+| `-term` / `-field:value` | Exclusion |
+
+Structured parsing and metadata scoring live in `components/library/search.rs`. Full-text strategies (boosted title/author, phrase, AND tokens, prefix wildcards) live in `pdf-folio-core` [`SearchIndex::search`](../api/pdf-folio-core/db/search.md).
 
 ### Default index location
 

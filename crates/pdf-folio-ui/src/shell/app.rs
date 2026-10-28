@@ -150,9 +150,12 @@ pub struct LibraryRuntime {
     pub create_folder_dialog_open: bool,
     /// Draft rename text for the selected/details folder.
     pub folder_rename_input: String,
-    /// Full-text / title search box contents.
+    /// Library search box contents (metadata operators + full-text terms).
     pub search_query: String,
-    /// Latest search hit list when a query is active; `None` means unfiltered browse.
+    /// Whole-library search hits when a query is active; `None` means browse/filter mode.
+    ///
+    /// While non-empty `search_query` is set, the main pane uses this list directly
+    /// and does not re-apply folder/tag/reading filters.
     pub search_results: Option<Vec<LibraryEntry>>,
     /// Best matching page per entry for search result jump-to-page.
     pub search_hit_pages: HashMap<EntryId, u16>,

@@ -581,23 +581,36 @@ pub(crate) fn save_library_preferences_task(app: &PDFolioApp) -> Task<Message> {
 
 /// Short label explaining why an entry matched the current library search.
 ///
-/// Prefers full-text hit page numbers when available; otherwise falls back to
-/// title/author/path field match labels. Returns `None` when the query is empty.
+/// Prefers full-text hit page numbers when available, optionally combined with
+/// metadata field labels. Returns `None` when the query is empty.
 fn library_search_match_label(
     app: &PDFolioApp,
     entry: &LibraryEntry,
     entry_id: &EntryId,
 ) -> Option<String> {
-    let query = app.library.search_query.trim().to_lowercase();
+    let query = app.library.search_query.trim();
     if query.is_empty() {
         return None;
     }
 
-    app.library
+    let page_label = app
+        .library
         .search_hit_pages
         .get(entry_id)
-        .map(|page| format!("Match on page {}", u32::from(*page) + 1))
-        .or_else(|| search_match_source_label(entry, &query))
+        .map(|page| format!("page {}", u32::from(*page) + 1));
+    let field_label = search_match_source_label(entry, query).and_then(|label| {
+        label
+            .strip_prefix("Match in ")
+            .map(|fields| fields.to_owned())
+            .or(Some(label))
+    });
+
+    match (page_label, field_label) {
+        (Some(page), Some(fields)) => Some(format!("Match on {page} · {fields}")),
+        (Some(page), None) => Some(format!("Match on {page}")),
+        (None, Some(fields)) => Some(format!("Match in {fields}")),
+        (None, None) => Some(String::from("Match")),
+    }
 }
 
 /// Single-line title that ellipsizes to `width` and shows a tooltip when cut.

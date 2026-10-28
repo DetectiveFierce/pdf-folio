@@ -22,6 +22,8 @@ pub(crate) mod dialogs;
 pub mod drag;
 /// Free-text search matching, reading-state buckets, and folder-scope visibility.
 pub mod filters;
+/// Structured library search query parsing, scoring, and field operators.
+pub mod search;
 /// Indented folder tree rows and fold chevrons for the library sidebar.
 pub(crate) mod folder_tree;
 /// Bulk-operation and Raindrop import progress banners/modals.

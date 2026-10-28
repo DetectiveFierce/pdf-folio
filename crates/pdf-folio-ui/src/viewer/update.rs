@@ -41,6 +41,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         Message::ToggleVisibilityMenu => {
             app.chrome.open_context_menu = None;
             app.viewer.zoom_menu_open = false;
+            app.viewer.page_view_menu_open = false;
             app.viewer.visibility_menu_open = !app.viewer.visibility_menu_open;
             // Re-apply scroll in case overlay layout still jostles the scrollable.
             Some(app.scroll_viewer_to_offsets_task())
@@ -159,26 +160,39 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             ]))
         }
         Message::PreviousPage => {
-            let page = app.current_page().saturating_sub(1);
-            let task = app.jump_to_page(page);
+            // In page mode, step by whole spread group when spreads are on.
+            let task = if app.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+                app.scroll_page_mode_by(-1)
+            } else {
+                app.jump_to_page(app.current_page().saturating_sub(1))
+            };
             Some(Task::batch([
                 with_session_save(task, app),
                 app.schedule_reading_progress_save(),
             ]))
         }
         Message::NextPage => {
-            if let Some(doc) = &app.viewer.doc {
+            if app.viewer.doc.is_none() {
+                return Some(Task::none());
+            }
+            let task = if app.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+                app.scroll_page_mode_by(1)
+            } else {
                 let page = app
                     .current_page()
                     .saturating_add(1)
-                    .min(doc.page_count().saturating_sub(1));
-                let task = app.jump_to_page(page);
-                return Some(Task::batch([
-                    with_session_save(task, app),
-                    app.schedule_reading_progress_save(),
-                ]));
-            }
-            Some(Task::none())
+                    .min(
+                        app.viewer
+                            .doc
+                            .as_ref()
+                            .map_or(0, |doc| doc.page_count().saturating_sub(1)),
+                    );
+                app.jump_to_page(page)
+            };
+            Some(Task::batch([
+                with_session_save(task, app),
+                app.schedule_reading_progress_save(),
+            ]))
         }
         Message::ToggleOutlineNode(path) => {
             if !app.viewer.expanded_outline_paths.insert(path.clone()) {
@@ -489,17 +503,6 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                 return Some(with_session_save_debounced(task, app));
             }
 
-            if app.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
-                let Some(direction) = app.take_page_mode_wheel_turn(*delta_x, *delta_y) else {
-                    return Some(Task::none());
-                };
-                let task = app.scroll_page_mode_by(direction);
-                return Some(Task::batch([
-                    with_session_save_debounced(task, app),
-                    app.schedule_reading_progress_save(),
-                ]));
-            }
-
             if app.viewer.viewer_scroll_mode == ViewerScrollMode::Horizontal {
                 let delta = if *delta_x != 0.0 { *delta_x } else { *delta_y };
                 app.viewer.horizontal_offset =
@@ -569,6 +572,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         Message::StartZoomInputEdit => {
             app.viewer.zoom_editing = true;
             app.viewer.zoom_menu_open = false;
+            app.viewer.page_view_menu_open = false;
             app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);
             Some(operation::focus(Id::new(ZOOM_INPUT_ID)))
         }
@@ -590,6 +594,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         Message::ToggleZoomMenu => {
             app.chrome.open_context_menu = None;
             app.viewer.visibility_menu_open = false;
+            app.viewer.page_view_menu_open = false;
             app.viewer.zoom_menu_open = !app.viewer.zoom_menu_open;
             app.viewer.zoom_editing = false;
             app.viewer.zoom_input = zoom_percent_label(app.viewer.zoom_width);
@@ -597,6 +602,18 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         }
         Message::CloseZoomMenu => {
             app.viewer.zoom_menu_open = false;
+            Some(app.scroll_viewer_to_offsets_task())
+        }
+        Message::TogglePageViewMenu => {
+            app.chrome.open_context_menu = None;
+            app.viewer.zoom_menu_open = false;
+            app.viewer.visibility_menu_open = false;
+            app.viewer.page_view_menu_open = !app.viewer.page_view_menu_open;
+            app.viewer.zoom_editing = false;
+            Some(app.scroll_viewer_to_offsets_task())
+        }
+        Message::ClosePageViewMenu => {
+            app.viewer.page_view_menu_open = false;
             Some(app.scroll_viewer_to_offsets_task())
         }
         Message::ZoomPresetSelected(preset) => {
@@ -612,10 +629,12 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             Some(with_session_save(task, app))
         }
         Message::ViewerScrollModeSelected(mode) => {
+            app.viewer.page_view_menu_open = false;
             let task = app.set_viewer_scroll_mode(*mode);
             Some(with_session_save(task, app))
         }
         Message::ViewerSpreadModeSelected(mode) => {
+            app.viewer.page_view_menu_open = false;
             let task = app.set_viewer_spread_mode(*mode);
             Some(with_session_save(task, app))
         }

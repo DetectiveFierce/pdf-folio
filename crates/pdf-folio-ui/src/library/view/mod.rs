@@ -203,8 +203,16 @@ fn view_library_header(app: &PDFolioApp, tokens: ThemeTokens) -> Element<'_, Mes
         .into()
 }
 
-/// Header title reflecting trash, active tag, folder breadcrumbs, or the vault name.
+/// Header title reflecting search, trash, active tag, folder breadcrumbs, or the vault name.
 fn library_header_title(app: &PDFolioApp) -> String {
+    let query = app.library.search_query.trim();
+    if !query.is_empty() {
+        let count = app.visible_library_entries().len();
+        return format!(
+            "Search results ({})",
+            format_count(count, "PDF")
+        );
+    }
     if app.library.trash_view_active {
         return String::from("Trash Can");
     }
@@ -460,7 +468,10 @@ pub(crate) fn library_search_input<'a>(
     app: &'a PDFolioApp,
     tokens: ThemeTokens,
 ) -> Element<'a, Message> {
-    let input = text_input("Search library", &app.library.search_query)
+    let input = text_input(
+        "Search library — title, tags, folders, text…  tag:work  author:ada",
+        &app.library.search_query,
+    )
         .on_input(Message::SearchQueryChanged)
         .padding(iced::Padding {
             top: Spacing::SM,
@@ -618,21 +629,29 @@ pub(crate) fn library_filter_summary<'a>(
     narrow: bool,
 ) -> Element<'a, Message> {
     let mut labels = Vec::new();
-    if let Some(tag) = app.library.active_tag_filter.as_ref() {
-        labels.push(format!("Tag: {tag}"));
-    }
-    if let Some(filter) = app.library.active_reading_filter {
-        labels.push(format!("Reading: {}", filter.label()));
-    }
-    if app.library.active_recently_opened_filter {
-        labels.push(String::from("Recently Opened"));
-    }
-    if app.library.missing_filter_active {
-        labels.push(String::from("Missing files"));
-    }
     let query = app.library.search_query.trim();
     if !query.is_empty() {
+        let count = app
+            .library
+            .search_results
+            .as_ref()
+            .map(|entries| entries.len())
+            .unwrap_or(0);
         labels.push(format!("Search: {query}"));
+        labels.push(format_count(count, "match"));
+    } else {
+        if let Some(tag) = app.library.active_tag_filter.as_ref() {
+            labels.push(format!("Tag: {tag}"));
+        }
+        if let Some(filter) = app.library.active_reading_filter {
+            labels.push(format!("Reading: {}", filter.label()));
+        }
+        if app.library.active_recently_opened_filter {
+            labels.push(String::from("Recently Opened"));
+        }
+        if app.library.missing_filter_active {
+            labels.push(String::from("Missing files"));
+        }
     }
 
     if labels.is_empty() {

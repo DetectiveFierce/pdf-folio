@@ -82,7 +82,62 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
                 app.library.search_hit_pages.clear();
                 return Some(with_session_save(app.request_visible_thumbnails(), app));
             }
-            Some(with_session_save(schedule_search(query), app))
+
+            // Searching always covers the entire library: drop folder/tag/smart
+            // filters and leave trash so results are not scoped to the prior view.
+            let cleared_scope = clear_library_scope_for_search(app);
+            if cleared_scope {
+                app.library.library_scroll_offset = 0.0;
+            }
+
+            // Instant metadata preview while the full-text task runs.
+            let parsed = crate::library::filters::parse_library_search_query(&query);
+            if !parsed.is_empty() && !parsed.is_text_only() {
+                let mut ranked = app
+                    .library
+                    .library_entries
+                    .iter()
+                    .filter_map(|entry| {
+                        let score =
+                            crate::library::filters::score_entry_match(entry, &parsed)?;
+                        Some((score, entry.clone()))
+                    })
+                    .collect::<Vec<_>>();
+                ranked.sort_by(|left, right| {
+                    right
+                        .0
+                        .cmp(&left.0)
+                        .then_with(|| left.1.manual_order.cmp(&right.1.manual_order))
+                });
+                app.library.search_results =
+                    Some(ranked.into_iter().map(|(_, entry)| entry).collect());
+            } else if parsed.is_text_only() {
+                // Keep prior results only if still searching text; otherwise clear.
+                // Page hits arrive from the debounced task.
+            } else {
+                app.library.search_results = Some(Vec::new());
+            }
+            app.library.search_hit_pages.clear();
+
+            let visible_entries = app.visible_library_entries();
+            app.prune_selection_to_visible_entries(&visible_entries);
+
+            let search_task = schedule_search(query);
+            let tasks = if cleared_scope {
+                Task::batch([
+                    search_task,
+                    app.request_visible_thumbnails(),
+                    scroll_library_to_offset_task(0.0),
+                    save_library_preferences_task(app),
+                    save_app_session_task(app),
+                ])
+            } else {
+                with_session_save(
+                    Task::batch([search_task, app.request_visible_thumbnails()]),
+                    app,
+                )
+            };
+            Some(tasks)
         }
         Message::SearchDebounced(query) => {
             if query == &app.library.search_query {
@@ -237,6 +292,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();
             app.library.trash_view_active = false;
+            clear_library_search_state(app);
             app.library.active_tag_filter = tag.clone();
             app.library.active_recently_opened_filter = false;
             app.library.previous_tag_pill_view = None;
@@ -330,6 +386,7 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         }
         Message::ReadingFilterChanged(filter) => {
             app.library.trash_view_active = false;
+            clear_library_search_state(app);
             app.library.active_reading_filter = *filter;
             app.library.active_recently_opened_filter = false;
             app.library.missing_filter_active = false;
@@ -349,6 +406,9 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         }
         Message::RecentlyOpenedFilterChanged(active) => {
             app.library.trash_view_active = false;
+            if *active {
+                clear_library_search_state(app);
+            }
             app.library.active_recently_opened_filter = *active;
             if *active {
                 app.library.active_reading_filter = None;
@@ -370,6 +430,9 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         }
         Message::MissingFilterChanged(active) => {
             app.library.trash_view_active = false;
+            if *active {
+                clear_library_search_state(app);
+            }
             app.library.missing_filter_active = *active;
             if *active {
                 app.library.active_recently_opened_filter = false;
@@ -384,8 +447,12 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
             app.library.renaming_tag = None;
             app.library.tag_rename_input.clear();
             app.library.trash_view_active = false;
+            clear_library_search_state(app);
             app.library.selected_folder = folder_id.clone();
             app.library.active_recently_opened_filter = false;
+            app.library.active_tag_filter = None;
+            app.library.active_reading_filter = None;
+            app.library.missing_filter_active = false;
             app.library.previous_tag_pill_view = None;
             app.select_folder_for_details(folder_id.clone());
             app.sync_folder_rename_input();
@@ -2614,4 +2681,35 @@ pub(crate) fn update(app: &mut PDFolioApp, message: &Message) -> Option<Task<Mes
         }
         _ => None,
     }
+}
+
+/// Clear folder/tag/smart filters and leave trash so search covers the whole library.
+///
+/// Returns `true` when any scope state changed.
+fn clear_library_scope_for_search(app: &mut PDFolioApp) -> bool {
+    let changed = app.library.trash_view_active
+        || app.library.selected_folder.is_some()
+        || app.library.active_tag_filter.is_some()
+        || app.library.active_reading_filter.is_some()
+        || app.library.active_recently_opened_filter
+        || app.library.missing_filter_active
+        || app.library.previous_tag_pill_view.is_some();
+
+    app.library.trash_view_active = false;
+    app.library.selected_folder = None;
+    app.library.details_folder_id = None;
+    app.library.active_tag_filter = None;
+    app.library.active_reading_filter = None;
+    app.library.active_recently_opened_filter = false;
+    app.library.missing_filter_active = false;
+    app.library.previous_tag_pill_view = None;
+    changed
+}
+
+/// Drop active search query/results (used when navigating into a filter or folder).
+fn clear_library_search_state(app: &mut PDFolioApp) {
+    app.library.search_query.clear();
+    app.library.search_results = None;
+    app.library.search_hit_pages.clear();
+    app.library.search_generation = app.library.search_generation.wrapping_add(1);
 }

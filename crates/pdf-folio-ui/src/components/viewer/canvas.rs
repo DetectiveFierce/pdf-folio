@@ -100,16 +100,15 @@ impl canvas::Program<Message> for ViewerCanvas<'_> {
     ) -> Option<canvas::Action<Message>> {
         match event {
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                // Capture wheel for Ctrl-zoom, page-mode turns, and horizontal
-                // scrolling. Continuous vertical scrolling stays with iced's
-                // scrollable (return None) so momentum/trackpad feel natural.
-                //
-                // Page mode always captures so momentum micro-events can be
-                // accumulated in the updater without leaking into the scrollable.
+                // Capture wheel for Ctrl-zoom and horizontal scrolling only.
+                // Vertical continuous *and* page mode leave the wheel with
+                // iced's scrollable so the scrollbar pans overflow content
+                // (zoomed page / tall spread) with natural trackpad momentum.
+                // Page turns stay on PageUp/PageDown and the page controls.
                 let capture_wheel = self.app.viewer.modifiers.control()
                     || matches!(
                         self.app.viewer.viewer_scroll_mode,
-                        ViewerScrollMode::Horizontal | ViewerScrollMode::Page
+                        ViewerScrollMode::Horizontal
                     );
                 if !capture_wheel {
                     return None;

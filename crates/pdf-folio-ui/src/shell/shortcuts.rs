@@ -503,6 +503,8 @@ pub(crate) fn handle_shortcut(app: &mut PDFolioApp, shortcut: Shortcut) -> Task<
                 app.library.tag_rename_input.clear();
             } else if app.viewer.zoom_menu_open {
                 app.viewer.zoom_menu_open = false;
+            } else if app.viewer.page_view_menu_open {
+                app.viewer.page_view_menu_open = false;
             } else if app.viewer.visibility_menu_open {
                 app.viewer.visibility_menu_open = false;
             } else if app.viewer.zoom_editing {

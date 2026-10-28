@@ -40,6 +40,7 @@ impl PDFolioApp {
     /// only one floating menu is open at a time.
     pub(crate) fn open_context_menu(&mut self, target: ContextMenuTarget) {
         self.viewer.zoom_menu_open = false;
+        self.viewer.page_view_menu_open = false;
         self.viewer.visibility_menu_open = false;
 
         match &target {

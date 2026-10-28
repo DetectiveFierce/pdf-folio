@@ -28,6 +28,11 @@ fn indexes_and_searches_page_documents() -> Result<()> {
     assert_eq!(hits[0].id, "entry-a");
     assert_eq!(hits[0].page, 1);
 
+    // Multi-word queries should still resolve via phrase / AND strategies.
+    let multi_hits = index.search("linear transformations", 10)?;
+    assert!(!multi_hits.is_empty());
+    assert_eq!(multi_hits[0].id, "entry-a");
+
     let _ = std::fs::remove_dir_all(&root);
     Ok(())
 }

@@ -9,9 +9,13 @@
 //! tool cluster (annotate, copy, find, visibility). Prefer these over ad-hoc
 //! inline SVGs when the same glyph appears in more than one surface.
 //!
-//! Viewer-toolbar glyphs (`ANNOTATE_SVG`, `COPY_SVG`, `FIND_SVG`, `EYE_OFF_SVG`)
-//! are sized for ~18px paint boxes; `FIND_SVG` uses a cropped 100×100 viewBox so
-//! the stacked-document mark fills its box next to the eye icon.
+//! Viewer-toolbar glyphs (`ANNOTATE_SVG`, `COPY_SVG`, `FIND_SVG`, `EYE_OFF_SVG`,
+//! `DOCUMENT_VIEW_SVG`) are sized for ~18px paint boxes and share a Lucide-style
+//! stroke language (24×24, stroke-width 2, black ink for iced recoloring).
+//! `FIND_SVG` uses a cropped viewBox so the stacked-document mark fills its box
+//! next to the eye icon. Page-view menu row glyphs (`SCROLL_*_SVG`,
+//! `SPREAD_*_SVG`) are the 16×16 PDF.js secondary-toolbar assets under
+//! `assets/icons/`.
 //!
 //! Related: asset-backed overflow icons in [`super::menus`]; file-tree fold
 //! chevrons remain local to `components::library::folder_tree`.
@@ -78,3 +82,49 @@ pub(crate) const FIND_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" 
 </svg>"##;
 /// Eye with slash — viewer toolbar visibility menu (sidebar / comments).
 pub(crate) const EYE_OFF_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-4.86"/><path d="m2 2 20 20"/></svg>"##;
+/// Document page + eye — viewer toolbar page-view menu button.
+///
+/// Page-view affordance: a single dog-eared page with an eye (view) mark on
+/// the lower right. Built for ~18px toolbar paint like FIND:
+/// - No interior text lines (noise at small size)
+/// - Thick strokes + cropped viewBox so the glyph fills its box
+/// - Mask cuts the page under the eye so strokes do not double up
+///
+/// Black ink for iced `svg::Style` recoloring, matching FIND / eye-off weight.
+pub(crate) const DOCUMENT_VIEW_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 8 96 96" width="100" height="100">
+  <defs>
+    <mask id="document-view-page-mask">
+      <rect x="8" y="8" width="96" height="96" fill="white"/>
+      <!-- Clear space for the eye so page strokes do not collide -->
+      <ellipse cx="70" cy="72" rx="28" ry="18" fill="black"/>
+    </mask>
+  </defs>
+  <g mask="url(#document-view-page-mask)">
+    <path d="M24 16h40l18 18v52a8 8 0 0 1-8 8H24a8 8 0 0 1-8-8V24a8 8 0 0 1 8-8z" fill="none" stroke="#000" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M64 16v18h18" fill="none" stroke="#000" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <!-- Eye (view): Lucide-style almond + pupil, scaled for thick-stroke paint -->
+  <path d="M46 72c8-14 16-20 24-20s16 6 24 20c-8 14-16 20-24 20s-16-6-24-20z" fill="none" stroke="#000" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="70" cy="72" r="7" fill="none" stroke="#000" stroke-width="8"/>
+</svg>"##;
+/// Single-page with up/down arrows — “Page Scrolling” row in the page-view menu.
+pub(crate) const SCROLL_PAGE_SVG: &[u8] =
+    include_bytes!("../../../assets/icons/secondaryToolbarButton-scrollPage.svg");
+/// Horizontal band with top/bottom rails — “Vertical Scrolling” menu row.
+pub(crate) const SCROLL_VERTICAL_SVG: &[u8] =
+    include_bytes!("../../../assets/icons/secondaryToolbarButton-scrollVertical.svg");
+/// Vertical band with left/right rails — “Horizontal Scrolling” menu row.
+pub(crate) const SCROLL_HORIZONTAL_SVG: &[u8] =
+    include_bytes!("../../../assets/icons/secondaryToolbarButton-scrollHorizontal.svg");
+/// Two-up page grid — “Wrapped Scrolling” menu row.
+pub(crate) const SCROLL_WRAPPED_SVG: &[u8] =
+    include_bytes!("../../../assets/icons/secondaryToolbarButton-scrollWrapped.svg");
+/// Single page outline — “No Spreads” menu row.
+pub(crate) const SPREAD_NONE_SVG: &[u8] =
+    include_bytes!("../../../assets/icons/secondaryToolbarButton-spreadNone.svg");
+/// Two-page open book with odd-left pairing mark — “Odd Spreads” menu row.
+pub(crate) const SPREAD_ODD_SVG: &[u8] =
+    include_bytes!("../../../assets/icons/secondaryToolbarButton-spreadOdd.svg");
+/// Two-page open book with even-left pairing mark — “Even Spreads” menu row.
+pub(crate) const SPREAD_EVEN_SVG: &[u8] =
+    include_bytes!("../../../assets/icons/secondaryToolbarButton-spreadEven.svg");

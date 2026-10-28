@@ -562,6 +562,7 @@ impl PDFolioApp {
                 zoom_editing: false,
                 zoom_input: zoom_percent_label(settings.default_zoom_width),
                 zoom_menu_open: false,
+                page_view_menu_open: false,
                 zoom_preview_width_px: None,
                 zoom_generation: 0,
                 last_scroll_offset: 0.0,
@@ -587,9 +588,6 @@ impl PDFolioApp {
                 last_saved_progress_page: None,
                 find_text_generation: 0,
                 document_generation: 0,
-                page_mode_wheel_accum: 0.0,
-                page_mode_wheel_last_event_at: None,
-                page_mode_wheel_gesture_consumed: false,
                 annotations: Vec::new(),
                 selected_annotation_id: None,
                 annotation_draft: None,
@@ -838,6 +836,7 @@ impl PDFolioApp {
         self.viewer.zoom_editing = false;
         self.viewer.zoom_input = zoom_percent_label(self.viewer.zoom_width);
         self.viewer.zoom_menu_open = false;
+        self.viewer.page_view_menu_open = false;
         self.viewer.visibility_menu_open = false;
         self.viewer.zoom_preview_width_px = None;
         self.viewer.zoom_generation = self.viewer.zoom_generation.wrapping_add(1);
@@ -857,9 +856,6 @@ impl PDFolioApp {
         self.viewer.find_text_generation = self.viewer.find_text_generation.wrapping_add(1);
         // Invalidate in-flight text extraction from the previous document.
         self.viewer.document_generation = self.viewer.document_generation.wrapping_add(1);
-        self.viewer.page_mode_wheel_accum = 0.0;
-        self.viewer.page_mode_wheel_last_event_at = None;
-        self.viewer.page_mode_wheel_gesture_consumed = false;
         self.clear_viewer_annotations();
         self.viewer.document_title = None;
         self.viewer.document_title_from_metadata = false;
@@ -1392,53 +1388,6 @@ impl PDFolioApp {
         Task::batch(tasks)
     }
 
-    /// Applies a wheel delta in page-scroll mode, returning a turn direction if any.
-    ///
-    /// Accumulates micro-events until [`PAGE_MODE_WHEEL_THRESHOLD_PX`] is reached,
-    /// then fires **at most one** page turn for the continuous gesture stream.
-    /// Further events are ignored until input goes idle for
-    /// [`PAGE_MODE_GESTURE_IDLE_MS`] (detected as a gap before the next event),
-    /// so long trackpad momentum cannot skip multiple pages after a fixed
-    /// cooldown would have expired.
-    pub(crate) fn take_page_mode_wheel_turn(&mut self, delta_x: f32, delta_y: f32) -> Option<i16> {
-        let now = Instant::now();
-
-        // A quiet gap means the previous gesture ended; re-arm for a new turn.
-        if let Some(last) = self.viewer.page_mode_wheel_last_event_at {
-            if now.saturating_duration_since(last).as_millis() >= PAGE_MODE_GESTURE_IDLE_MS {
-                self.viewer.page_mode_wheel_accum = 0.0;
-                self.viewer.page_mode_wheel_gesture_consumed = false;
-            }
-        }
-        self.viewer.page_mode_wheel_last_event_at = Some(now);
-
-        // Already turned once in this continuous stream — absorb momentum.
-        if self.viewer.page_mode_wheel_gesture_consumed {
-            return None;
-        }
-
-        // Match historical direction: scroll down / right → next page.
-        let step = if delta_y.abs() >= delta_x.abs() {
-            -delta_y
-        } else {
-            delta_x
-        };
-        self.viewer.page_mode_wheel_accum += step;
-
-        if self.viewer.page_mode_wheel_accum.abs() < PAGE_MODE_WHEEL_THRESHOLD_PX {
-            return None;
-        }
-
-        let direction: i16 = if self.viewer.page_mode_wheel_accum > 0.0 {
-            1
-        } else {
-            -1
-        };
-        self.viewer.page_mode_wheel_accum = 0.0;
-        self.viewer.page_mode_wheel_gesture_consumed = true;
-        Some(direction)
-    }
-
     /// Recomputes find matches from currently loaded text layers and the query.
     pub(crate) fn refresh_viewer_find_matches(&mut self) {
         self.viewer.viewer_find.refresh_matches(
@@ -1457,6 +1406,7 @@ impl PDFolioApp {
 
         self.viewer.viewer_find.open = true;
         self.viewer.zoom_menu_open = false;
+        self.viewer.page_view_menu_open = false;
         self.viewer.visibility_menu_open = false;
         self.refresh_viewer_find_matches();
 
@@ -1891,11 +1841,18 @@ impl PDFolioApp {
 
         let page_count = doc.page_count();
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
-            let page = self
-                .viewer
-                .page_scroll_page
-                .min(page_count.saturating_sub(1));
-            return page..page.saturating_add(1).min(page_count);
+            // All pages of the active spread (or the single active page).
+            let pages: Vec<u16> = self
+                .page_mode_rects(page_count)
+                .into_iter()
+                .map(|(page, _)| page)
+                .collect();
+            let start = pages.first().copied().unwrap_or(0);
+            let end = pages
+                .last()
+                .map(|page| page.saturating_add(1).min(page_count))
+                .unwrap_or(0);
+            return start..end;
         }
 
         let viewport = Rectangle {
@@ -2017,7 +1974,11 @@ impl PDFolioApp {
         }
     }
 
-    /// Single-page layout: only the current page-scroll page is positioned.
+    /// Page-mode layout: only the active page or spread group is positioned.
+    ///
+    /// With [`ViewerSpreadMode::None`] this is a single page. With odd/even
+    /// spreads, every page in the active group is laid out side-by-side so the
+    /// viewport shows one complete spread at a time.
     pub(crate) fn page_mode_rects(&self, page_count: u16) -> Vec<(u16, Rectangle)> {
         if page_count == 0 {
             return Vec::new();
@@ -2027,20 +1988,33 @@ impl PDFolioApp {
             .viewer
             .page_scroll_page
             .min(page_count.saturating_sub(1));
-        let height = self.page_height(page);
-        let content_width = (f32::from(self.viewer.zoom_width) + Spacing::PAGE_GUTTER * 2.0)
+        let groups = viewer_spread_groups(page_count, self.viewer.viewer_spread_mode);
+        let group = groups
+            .into_iter()
+            .find(|group| group.contains(&page))
+            .unwrap_or_else(|| vec![page]);
+
+        let group_width = viewer_group_width(self, &group);
+        let group_height = viewer_group_height(self, &group);
+        let content_width = (group_width + Spacing::PAGE_GUTTER * 2.0)
             .max(self.viewer.viewer_viewport_width)
             .max(1.0);
-        let x =
-            ((content_width - f32::from(self.viewer.zoom_width)) / 2.0).max(Spacing::PAGE_GUTTER);
+        let mut x = ((content_width - group_width) / 2.0).max(Spacing::PAGE_GUTTER);
+        let y = Spacing::PAGE_GUTTER;
 
-        vec![(
-            page,
-            Rectangle::new(
-                Point::new(x, Spacing::PAGE_GUTTER),
-                Size::new(f32::from(self.viewer.zoom_width), height),
-            ),
-        )]
+        let mut rects = Vec::with_capacity(group.len());
+        for &group_page in &group {
+            let height = self.page_height(group_page);
+            rects.push((
+                group_page,
+                Rectangle::new(
+                    Point::new(x, y + (group_height - height) / 2.0),
+                    Size::new(f32::from(self.viewer.zoom_width), height),
+                ),
+            ));
+            x += f32::from(self.viewer.zoom_width) + Spacing::PAGE_GAP;
+        }
+        rects
     }
 
     /// Stacks spread groups top-to-bottom for vertical continuous scrolling.
@@ -2198,15 +2172,21 @@ impl PDFolioApp {
             );
         };
         if self.viewer.viewer_scroll_mode == ViewerScrollMode::Page {
+            let page_count = doc.page_count();
             let page = self
                 .viewer
                 .page_scroll_page
-                .min(doc.page_count().saturating_sub(1));
+                .min(page_count.saturating_sub(1));
+            let groups = viewer_spread_groups(page_count, self.viewer.viewer_spread_mode);
+            let group = groups
+                .into_iter()
+                .find(|group| group.contains(&page))
+                .unwrap_or_else(|| vec![page]);
             return Size::new(
-                (f32::from(self.viewer.zoom_width) + Spacing::PAGE_GUTTER * 2.0)
+                (viewer_group_width(self, &group) + Spacing::PAGE_GUTTER * 2.0)
                     .max(viewport_width)
                     .max(1.0),
-                (self.page_height(page) + Spacing::PAGE_GUTTER * 2.0)
+                (viewer_group_height(self, &group) + Spacing::PAGE_GUTTER * 2.0)
                     .max(self.viewer.viewer_viewport_height)
                     .max(1.0),
             );
@@ -2345,10 +2325,6 @@ const VIEWER_THUMBNAIL_WINDOW: u16 = 12;
 const FIND_TEXT_LAYER_MARGIN: u16 = 4;
 /// Pages requested per progressive find text-layer batch.
 const FIND_TEXT_LAYER_BATCH: usize = 8;
-/// Accumulated wheel pixels required before a page-mode turn fires.
-const PAGE_MODE_WHEEL_THRESHOLD_PX: f32 = 48.0;
-/// Idle gap (no wheel events) that ends a page-mode gesture and re-arms turns.
-const PAGE_MODE_GESTURE_IDLE_MS: u128 = 160;
 
 /// Inclusive character range for the word containing `char_index`.
 pub(crate) fn word_char_range(layer: &PageTextLayer, char_index: usize) -> (usize, usize) {

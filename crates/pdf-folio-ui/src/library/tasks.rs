@@ -46,7 +46,10 @@ use pdf_folio_core::{
     NewLibraryEntry, SearchIndex,
 };
 
-use crate::library::filters::entry_matches_query;
+use crate::library::filters::{
+    entry_matches_search_query, parse_library_search_query, score_entry_match, LibrarySearchQuery,
+    SearchField,
+};
 use crate::library::metadata::{entry_author, entry_title, file_size};
 use crate::library::thumbnails::cache_thumbnail_variants;
 use crate::messages::Message;
@@ -1967,6 +1970,10 @@ pub(crate) fn attribute_pending_metadata_task(db: Arc<Db>) -> Task<Message> {
 }
 
 /// Full-library search returning matching entries and page hit maps for the query.
+///
+/// Always searches the entire live library (or trash when `trash_view_active`).
+/// Combines Tantivy full-text hits with structured metadata matching (field
+/// operators, AND tokens, exclusions) and ranks metadata-only hits by score.
 pub(crate) async fn search_library_task(
     db: Arc<Db>,
     query: String,
@@ -1974,42 +1981,129 @@ pub(crate) async fn search_library_task(
     trash_view_active: bool,
 ) -> anyhow::Result<(Vec<LibraryEntry>, HashMap<EntryId, u16>)> {
     tokio::task::spawn_blocking(move || {
+        let parsed = parse_library_search_query(&query);
+        if parsed.is_empty() {
+            return Ok((Vec::new(), HashMap::new()));
+        }
+
         let entries = if trash_view_active {
             db.get_trashed_entries()?
         } else {
             db.get_entries_sorted(sort_mode)?
         };
-        let normalized = query.trim().to_lowercase();
-        let search_index = SearchIndex::open_default()?;
-        let hits = if trash_view_active {
-            Vec::new()
-        } else {
-            search_index.search(&query, 200).unwrap_or_default()
-        };
-        let mut hit_pages = HashMap::new();
-        let mut ordered_entries = Vec::new();
 
-        for hit in hits {
-            let id = EntryId::new(hit.id);
-            if hit_pages.contains_key(&id) {
+        let mut hit_pages = HashMap::new();
+        let mut fts_order: Vec<EntryId> = Vec::new();
+        let mut fts_scores: HashMap<EntryId, f32> = HashMap::new();
+
+        if !trash_view_active && parsed.wants_full_text() {
+            let fts_query = parsed.full_text_query();
+            if !fts_query.trim().is_empty() {
+                if let Ok(search_index) = SearchIndex::open_default() {
+                    let hits = search_index.search(&fts_query, 500).unwrap_or_default();
+                    for hit in hits {
+                        let id = EntryId::new(hit.id);
+                        fts_scores
+                            .entry(id.clone())
+                            .and_modify(|score| *score = (*score).max(hit.score))
+                            .or_insert(hit.score);
+                        if hit_pages.contains_key(&id) {
+                            continue;
+                        }
+                        hit_pages
+                            .insert(id.clone(), hit.page.min(u64::from(u16::MAX)) as u16);
+                        fts_order.push(id);
+                    }
+                }
+            }
+        }
+
+        let entry_by_id = entries
+            .iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect::<HashMap<_, _>>();
+
+        let mut ordered_entries = Vec::new();
+        let mut seen = HashSet::new();
+
+        // Full-text hits first (Tantivy rank), but only if they also satisfy
+        // metadata operators/exclusions when those are present.
+        for id in fts_order {
+            let Some(entry) = entry_by_id.get(&id) else {
+                continue;
+            };
+            if !entry_satisfies_search_constraints(entry, &parsed, true) {
+                hit_pages.remove(&id);
                 continue;
             }
-            hit_pages.insert(id.clone(), hit.page.min(u64::from(u16::MAX)) as u16);
-            if let Some(entry) = entries.iter().find(|entry| entry.id == id) {
+            if seen.insert(id.clone()) {
+                ordered_entries.push((*entry).clone());
+            }
+        }
+
+        // Metadata matches not already covered by FTS, ranked by field score.
+        let mut metadata_hits = entries
+            .iter()
+            .filter(|entry| !seen.contains(&entry.id))
+            .filter_map(|entry| {
+                let score = score_entry_match(entry, &parsed)?;
+                Some((score, entry))
+            })
+            .collect::<Vec<_>>();
+        metadata_hits.sort_by(|left, right| {
+            right
+                .0
+                .cmp(&left.0)
+                .then_with(|| left.1.manual_order.cmp(&right.1.manual_order))
+        });
+        for (_score, entry) in metadata_hits {
+            if seen.insert(entry.id.clone()) {
                 ordered_entries.push(entry.clone());
             }
         }
 
-        for entry in entries {
-            if hit_pages.contains_key(&entry.id) || !entry_matches_query(&entry, &normalized) {
-                continue;
-            }
-            ordered_entries.push(entry);
-        }
+        // Text-only queries: keep FTS hits only (already added). If FTS failed
+        // open, ordered_entries may be empty — acceptable.
+        let _ = fts_scores;
 
         Ok((ordered_entries, hit_pages))
     })
     .await?
+}
+
+/// Whether an entry may appear in search results for `query`.
+///
+/// When `from_full_text` is true, unscoped and `text:` terms are treated as
+/// already satisfied by the Tantivy hit. Field operators (`title:`, `tag:`, …)
+/// and exclusions still run against metadata so scoped queries stay accurate.
+fn entry_satisfies_search_constraints(
+    entry: &LibraryEntry,
+    query: &LibrarySearchQuery,
+    from_full_text: bool,
+) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    if from_full_text && query.is_text_only() {
+        return true;
+    }
+    if from_full_text {
+        let metadata_only = LibrarySearchQuery {
+            raw: query.raw.clone(),
+            required: query
+                .required
+                .iter()
+                .filter(|term| !matches!(term.field, SearchField::Any | SearchField::Text))
+                .cloned()
+                .collect(),
+            excluded: query.excluded.clone(),
+        };
+        if metadata_only.required.is_empty() && metadata_only.excluded.is_empty() {
+            return true;
+        }
+        return entry_matches_search_query(entry, &metadata_only);
+    }
+    entry_matches_search_query(entry, query)
 }
 
 /// Scan a directory for PDFs, import new files, and update the search index.

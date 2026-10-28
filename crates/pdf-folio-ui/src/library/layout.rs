@@ -83,17 +83,24 @@ impl PDFolioApp {
 
     /// Entries shown in the main pane after search, tag, folder, and smart filters.
     ///
-    /// Starts from active search results or the live/trash entry list, then
-    /// applies tag, folder-scope, reading-state, recently-opened, and missing
-    /// filters. Manual sort within a folder uses per-folder order when
-    /// selected. Called by view composition, drag hit-testing, thumbnail
-    /// windowing, and selection pruning.
+    /// When a search query is active, returns the search result list as-is
+    /// (already whole-library, ranked) without re-applying folder/tag/smart
+    /// filters. Otherwise starts from the live/trash entry list and applies
+    /// tag, folder-scope, reading-state, recently-opened, and missing filters.
+    /// Manual sort within a folder uses per-folder order when selected.
+    /// Called by view composition, drag hit-testing, thumbnail windowing, and
+    /// selection pruning.
     pub(crate) fn visible_library_entries(&self) -> Vec<LibraryEntry> {
-        let source = self
-            .library
-            .search_results
-            .as_ref()
-            .unwrap_or_else(|| self.active_library_entries());
+        // Active search owns the main pane: no folder/tag/reading scope on top.
+        if !self.library.search_query.trim().is_empty() {
+            return self
+                .library
+                .search_results
+                .clone()
+                .unwrap_or_default();
+        }
+
+        let source = self.active_library_entries();
         let filter_by_selected_folder = self.library.active_tag_filter.is_none();
         let mut entries = source
             .iter()

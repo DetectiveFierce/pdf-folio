@@ -12,7 +12,7 @@
 //! Related: [`super::layout`] for geometry, [`super::rendering`] for zoom
 //! presets and [`ZoomRenderPolicy`], [`super::update`] for message wiring.
 
-use crate::viewer::layout::selected_render_key;
+use crate::viewer::layout::{selected_render_key, viewer_spread_groups};
 use crate::*;
 
 impl PDFolioApp {
@@ -157,16 +157,32 @@ impl PDFolioApp {
         ])
     }
 
-    /// Advances or rewinds one page in page-scroll mode (`direction` ±1).
+    /// Advances or rewinds one page/spread in page-scroll mode (`direction` ±1).
+    ///
+    /// When spreads are active, steps by whole spread groups so the viewport
+    /// always shows one complete spread rather than half of a pair.
     pub(crate) fn scroll_page_mode_by(&mut self, direction: i16) -> Task<Message> {
         let Some(doc) = &self.viewer.doc else {
             return Task::none();
         };
-        let current = i32::from(self.current_page());
-        let page_count = i32::from(doc.page_count());
-        let next = (current + i32::from(direction)).clamp(0, page_count.saturating_sub(1));
+        let page_count = doc.page_count();
+        if page_count == 0 {
+            return Task::none();
+        }
+        let groups = viewer_spread_groups(page_count, self.viewer.viewer_spread_mode);
+        let current = self.current_page().min(page_count.saturating_sub(1));
+        let group_index = groups
+            .iter()
+            .position(|group| group.contains(&current))
+            .unwrap_or(0);
+        let next_index = (group_index as i32 + i32::from(direction))
+            .clamp(0, groups.len().saturating_sub(1) as i32) as usize;
+        let next_page = groups
+            .get(next_index)
+            .and_then(|group| group.first().copied())
+            .unwrap_or(current);
         self.viewer.last_scroll_offset = self.viewer.scroll_offset;
-        self.viewer.page_scroll_page = next as u16;
+        self.viewer.page_scroll_page = next_page;
         self.viewer.scroll_offset = 0.0;
         self.viewer.horizontal_offset = 0.0;
         Task::batch([
@@ -194,9 +210,6 @@ impl PDFolioApp {
         self.viewer.viewer_scroll_mode = mode;
         if mode == ViewerScrollMode::Page {
             self.viewer.page_scroll_page = current_page;
-            self.viewer.page_mode_wheel_accum = 0.0;
-            self.viewer.page_mode_wheel_last_event_at = None;
-            self.viewer.page_mode_wheel_gesture_consumed = false;
         }
         self.viewer.horizontal_offset = 0.0;
         self.viewer.scroll_offset = 0.0;
@@ -257,6 +270,7 @@ impl PDFolioApp {
             self.viewer.zoom_input = zoom_percent_label(new_width);
         }
         self.viewer.zoom_menu_open = false;
+        self.viewer.page_view_menu_open = false;
         self.viewer.visibility_menu_open = false;
         self.viewer.zoom_generation = self.viewer.zoom_generation.wrapping_add(1);
         let generation = self.viewer.zoom_generation;

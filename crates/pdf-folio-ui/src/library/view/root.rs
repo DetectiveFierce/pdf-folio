@@ -25,8 +25,14 @@ static LIBRARY_VIEW_PROBE_LOGS: AtomicUsize = AtomicUsize::new(0);
 pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
     let probe_started_at = std::env::var_os("PDF_FOLIO_STARTUP_PROBE").map(|_| Instant::now());
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let searching = !app.library.search_query.trim().is_empty();
     let entries = app.visible_library_entries();
-    let child_folders = app.child_folders();
+    // Whole-library search hides folder cards so the pane is pure result list.
+    let child_folders = if searching {
+        Vec::new()
+    } else {
+        app.child_folders()
+    };
     let render_items = library_render_items(app, &entries);
     let folder_section_height = folder_cards_section_height(app, child_folders.len());
     let entry_scroll_offset = (app.library.library_scroll_offset - folder_section_height).max(0.0);
@@ -59,7 +65,9 @@ pub(crate) fn view_library(app: &PDFolioApp) -> Element<'_, Message> {
 
     if entries.is_empty() && child_folders.is_empty() {
         content = content.push(empty_state(
-            if app.library.trash_view_active {
+            if searching {
+                "No PDFs match your search. Try different words or field filters like tag:work."
+            } else if app.library.trash_view_active {
                 "Trash Can is empty."
             } else if app.library.selected_folder.is_some() {
                 "This folder is empty."

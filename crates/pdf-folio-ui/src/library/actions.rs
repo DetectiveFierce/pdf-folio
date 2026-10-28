@@ -667,8 +667,14 @@ impl PDFolioApp {
     /// Navigate into a folder (sets `selected_folder`) and clear entry selection.
     pub(crate) fn open_folder_from_tree(&mut self, folder_id: Option<FolderId>) {
         self.library.trash_view_active = false;
+        self.library.search_query.clear();
+        self.library.search_results = None;
+        self.library.search_hit_pages.clear();
         self.library.selected_folder = folder_id.clone();
+        self.library.active_tag_filter = None;
+        self.library.active_reading_filter = None;
         self.library.active_recently_opened_filter = false;
+        self.library.missing_filter_active = false;
         self.library.previous_tag_pill_view = None;
         self.select_folder_in_tree(folder_id);
         self.library.library_drag = None;

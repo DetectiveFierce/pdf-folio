@@ -31,6 +31,7 @@
 //! | Document open/render | `DocumentOpened`, `DocumentTitleLoaded`, `PageRendered`, `LibraryDocumentOpened`, `DocumentError` |
 //! | Viewer navigation | `Viewport*`, `Jump*`, `PreviousPage` / `NextPage` |
 //! | Viewer zoom | `ZoomIn` / `ZoomOut` / `ZoomSet`, `ZoomPresetSelected`, `ZoomRenderSettled` |
+//! | Viewer page view | `TogglePageViewMenu`, `ViewerScrollModeSelected`, `ViewerSpreadModeSelected` |
 //! | Viewer text / find | `ViewerText*`, `OpenViewerFind`, `ViewerFind*`, `CopyViewerTextSelection` |
 //! | Viewer annotations | `StartAnnotationCompose`, `Annotation*`, `AnnotationsLoaded` |
 //! | Outline / sidebar | `ToggleOutlineNode`, `ToggleSidebar`, `ToggleVisibilityMenu`, `ToggleHideSidebar`, `ToggleHideComments`, `ViewerSidebarTabSelected` |
@@ -393,6 +394,10 @@ pub enum Message {
     CloseZoomMenu,
     /// Apply a named zoom preset.
     ZoomPresetSelected(ZoomPreset),
+    /// Open or close the page-view (scroll / spread) menu.
+    TogglePageViewMenu,
+    /// Close the page-view (scroll / spread) menu.
+    ClosePageViewMenu,
     /// Set viewer scrolling behavior.
     ViewerScrollModeSelected(ViewerScrollMode),
     /// Set viewer spread behavior.

@@ -111,6 +111,8 @@ pub struct ViewerRuntime {
     pub zoom_input: String,
     /// Whether the zoom preset dropdown is open.
     pub zoom_menu_open: bool,
+    /// Whether the page-view (scroll / spread) dropdown is open.
+    pub page_view_menu_open: bool,
     /// Width used to keep showing an old tile while debounced zoom settles.
     pub zoom_preview_width_px: Option<u16>,
     /// Monotonic generation to ignore stale zoom-settled messages.
@@ -165,15 +167,6 @@ pub struct ViewerRuntime {
     /// from a previous document cannot mutate the new document's find/selection
     /// state when they complete.
     pub document_generation: u64,
-    /// Residual signed wheel delta for page-mode turns (positive = next page).
-    ///
-    /// Accumulates trackpad/momentum micro-events until a page-turn threshold is
-    /// reached so one gesture does not skip multiple pages.
-    pub page_mode_wheel_accum: f32,
-    /// When the most recent page-mode wheel event was observed (gesture idle detect).
-    pub page_mode_wheel_last_event_at: Option<Instant>,
-    /// True after a page turn until wheel input goes idle (one turn per gesture).
-    pub page_mode_wheel_gesture_consumed: bool,
     /// Text annotations loaded for the open library entry (document order).
     pub annotations: Vec<Annotation>,
     /// Currently selected annotation for highlight + anchored card focus.

@@ -10,7 +10,7 @@
 //! | Region | Contents |
 //! | --- | --- |
 //! | **Left** | Library back, Open PDF, resolved document title |
-//! | **Center** | Page control pill + zoom − / % / + |
+//! | **Center** | Page control pill + page-view menu + zoom − / % / + |
 //! | **Right** | Selection tools (when active), find, visibility (eye-off), theme |
 //!
 //! The document title is [`ViewerRuntime::document_title`](crate::viewer::document::ViewerRuntime):
@@ -18,17 +18,17 @@
 //!
 //! ## Menus
 //!
-//! Zoom presets and the visibility menu (Hide Sidebar? / Hide Comments?) are
-//! stacked by [`crate::components::shared::root_surface`] with outside-click
-//! capture. The visibility panel’s right edge aligns with the eye-off button.
-//! Menu open/close re-applies scroll offsets so chrome does not jump reading
-//! position.
+//! Zoom presets, the page-view (scroll / spread) menu, and the visibility menu
+//! (Hide Sidebar? / Hide Comments?) are stacked by
+//! [`crate::components::shared::root_surface`] with outside-click capture. The
+//! visibility panel’s right edge aligns with the eye-off button. Menu open/close
+//! re-applies scroll offsets so chrome does not jump reading position.
 //!
 //! ## Ownership
 //!
-//! Composes widgets from [`super::page_controls`] and [`super::zoom`]; emits
-//! navigation, zoom, find, and chrome messages. Domain viewer view embeds
-//! this bar above the canvas stack.
+//! Composes widgets from [`super::page_controls`], [`super::page_view`], and
+//! [`super::zoom`]; emits navigation, zoom, find, and chrome messages. Domain
+//! viewer view embeds this bar above the canvas stack.
 //!
 //! Related: find bar in [`super::find_bar`]; annotations in [`super::annotations`];
 //! context menus on the canvas for overlapping actions (zoom, find, TOC).
@@ -37,6 +37,7 @@ use crate::components::shared::sidebar::chevron_button;
 use crate::components::viewer::page_controls::{
     transparent_toolbar_icon_style, viewer_page_control,
 };
+use crate::components::viewer::page_view::{page_view_control, page_view_menu};
 use crate::components::viewer::zoom::{zoom_control, zoom_menu};
 use crate::style::menu_style_for_class;
 use crate::*;
@@ -46,11 +47,11 @@ use std::time::Duration;
 
 /// Compose the viewer top toolbar for the current document session.
 ///
-/// Three-column layout: identity chrome on the left, page + zoom dead-center,
-/// and selection / find / visibility / theme flush to the right. Zoom lives in
-/// the center cluster so it does not shift when selection tools appear.
-/// Equal `Length::Fill` side panes keep the center fixed; extra space is
-/// between groups, not inside button padding.
+/// Three-column layout: identity chrome on the left, page + page-view + zoom
+/// dead-center, and selection / find / visibility / theme flush to the right.
+/// Page view and zoom live in the center cluster so they do not shift when
+/// selection tools appear. Equal `Length::Fill` side panes keep the center
+/// fixed; extra space is between groups, not inside button padding.
 pub(crate) fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
@@ -86,9 +87,10 @@ pub(crate) fn view_viewer_toolbar(app: &PDFolioApp) -> Element<'_, Message> {
     .spacing(gap)
     .align_y(Alignment::Center);
 
-    // Center: page navigator + zoom (stable; not affected by selection chrome).
+    // Center: page navigator + page-view + zoom (stable; not affected by selection chrome).
     let center = row![
         viewer_page_control(app, current_page, page_count, tokens),
+        page_view_control(app, tokens),
         icon_button("-", tokens).on_press(Message::ZoomOut),
         zoom_control(app, tokens),
         icon_button("+", tokens).on_press(Message::ZoomIn),
@@ -304,6 +306,31 @@ pub(crate) fn view_zoom_menu_dropdown(
 ) -> Element<'_, Message> {
     pin(zoom_menu(app, tokens))
         .x(viewer_zoom_menu_x(app))
+        .y(app.layout().toolbar_height)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// Full-window transparent layer that closes the page-view menu on outside click.
+pub(crate) fn page_view_menu_capture_layer<'a>(app: &PDFolioApp) -> Element<'a, Message> {
+    pin(
+        mouse_area(container("").width(Length::Fill).height(Length::Fill))
+            .on_press(Message::ClosePageViewMenu),
+    )
+    .y(app.layout().toolbar_height)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+/// Positioned page-view (scroll / spread) dropdown under the center-cluster button.
+pub(crate) fn view_page_view_menu_dropdown(
+    app: &PDFolioApp,
+    tokens: ThemeTokens,
+) -> Element<'_, Message> {
+    pin(page_view_menu(app, tokens))
+        .x(viewer_page_view_menu_x(app))
         .y(app.layout().toolbar_height)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -549,7 +576,7 @@ fn viewer_toolbar_status_label<'a>(
     .into()
 }
 
-/// Approximate width of the fixed center cluster (page control + zoom).
+/// Approximate width of the fixed center cluster (page control + page-view + zoom).
 fn viewer_toolbar_center_width(app: &PDFolioApp) -> f32 {
     let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
     let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
@@ -557,7 +584,12 @@ fn viewer_toolbar_center_width(app: &PDFolioApp) -> f32 {
     let zoom_step = app
         .layout()
         .metric("ViewerToolbarChrome", "zoom_step_button_width", 30.0);
+    let page_view_btn = app
+        .layout()
+        .metric("ViewerPageViewControl", "button_size", 28.0);
     app.layout().viewer_page_control_width
+        + gap
+        + page_view_btn
         + gap
         + zoom_step
         + gap
@@ -605,19 +637,46 @@ fn viewer_zoom_menu_x(app: &PDFolioApp) -> f32 {
     let zoom_step = app
         .layout()
         .metric("ViewerToolbarChrome", "zoom_step_button_width", 30.0);
+    let page_view_btn = app
+        .layout()
+        .metric("ViewerPageViewControl", "button_size", 28.0);
     let center_width = viewer_toolbar_center_width(app);
     // Center cluster is horizontally centered in the bar.
     let center_left =
         (app.viewer.viewport_width - center_width) * 0.5;
-    // Zoom control sits after page control, gap, and the “−” step button.
+    // Zoom control sits after page control, page-view button, and the “−” step.
     let zoom_control_left = center_left
         + app.layout().viewer_page_control_width
+        + gap
+        + page_view_btn
         + gap
         + zoom_step
         + gap;
     (zoom_control_left + app.layout().viewer_zoom_control_width
         - app.layout().viewer_zoom_menu_width)
         .max(padding_x)
+}
+
+/// X pin for the page-view dropdown, centered under the page-view toolbar button.
+fn viewer_page_view_menu_x(app: &PDFolioApp) -> f32 {
+    let tokens = app.appearance.theme.tokens(&app.appearance.style_book);
+    let toolbar_layout = tokens.class_styles[Class::ViewerToolbar.index()].layout;
+    let gap = toolbar_layout.spacing.unwrap_or(Spacing::MD);
+    let padding_x = toolbar_layout.padding_x(Spacing::MD);
+    let button_size = app
+        .layout()
+        .metric("ViewerPageViewControl", "button_size", 28.0);
+    let menu_width = app
+        .layout()
+        .metric("ViewerPageViewMenu", "menu_width", 200.0);
+    let center_width = viewer_toolbar_center_width(app);
+    let center_left = (app.viewer.viewport_width - center_width) * 0.5;
+    let button_left = center_left + app.layout().viewer_page_control_width + gap;
+    let button_center = button_left + button_size * 0.5;
+    // Center the panel on the button; clamp so it stays in-window.
+    let preferred = button_center - menu_width * 0.5;
+    let max_x = (app.viewer.viewport_width - menu_width - padding_x).max(padding_x);
+    preferred.clamp(padding_x, max_x)
 }
 
 /// Floating chevron shown when the outline sidebar is closed (“Show Contents”).

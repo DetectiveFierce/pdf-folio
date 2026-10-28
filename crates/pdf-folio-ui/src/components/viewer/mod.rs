@@ -8,7 +8,7 @@
 //! ## Notable modules
 //!
 //! - [`canvas`] — page paint, selection overlay, spinner, wheel handling
-//! - [`toolbar`] / [`zoom`] / [`page_controls`] — top chrome and menus
+//! - [`toolbar`] / [`zoom`] / [`page_controls`] / [`page_view`] — top chrome and menus
 //! - [`sidebar`] / [`outline`] / [`annotations`] — contents, thumbnails, document-anchored notes
 //! - [`find_bar`] — in-document text search strip
 
@@ -22,6 +22,8 @@ pub(crate) mod find_bar;
 pub(crate) mod outline;
 /// Prev/next page chevrons, page number edit, and jump-to-page dialog.
 pub(crate) mod page_controls;
+/// Page scroll/spread mode dropdown and toolbar disclosure control.
+pub(crate) mod page_view;
 /// Viewer Contents/Thumbnails sidebar shell and tab bodies.
 pub(crate) mod sidebar;
 /// Top viewer toolbar, zoom dropdown host, and floating sidebar toggle.

@@ -210,10 +210,14 @@ impl SearchIndex {
     /// Full-text search over title, author, and body; returns up to `limit` hits by score.
     ///
     /// Empty or whitespace-only queries return an empty vec without touching Tantivy.
+    /// Tries several query strategies (raw, boosted phrase, AND of terms, prefix
+    /// wildcards) and merges hits by best score so partial and multi-word inputs
+    /// remain useful without requiring Tantivy syntax from the user.
     ///
     /// # Errors
     ///
-    /// Returns an error when the query cannot be parsed or the searcher fails.
+    /// Returns an error when the searcher cannot be opened. Individual strategy
+    /// parse failures are skipped so a bad clause does not abort the search.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
         let query = query.trim();
         if query.is_empty() {
@@ -227,30 +231,64 @@ impl SearchIndex {
             .try_into()?;
         reader.reload()?;
         let searcher = reader.searcher();
-        let parser = QueryParser::for_index(
+        let mut parser = QueryParser::for_index(
             &self.index,
             vec![self.fields.title, self.fields.author, self.fields.body],
         );
-        let query = parser.parse_query(query)?;
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
-        let mut hits = Vec::with_capacity(top_docs.len());
+        parser.set_field_boost(self.fields.title, 3.0);
+        parser.set_field_boost(self.fields.author, 2.0);
+        parser.set_field_boost(self.fields.body, 1.0);
 
-        for (score, address) in top_docs {
-            let doc = searcher.doc::<TantivyDocument>(address)?;
-            let Some(id) = doc
-                .get_first(self.fields.id)
-                .and_then(|value| value.as_str())
-                .map(ToOwned::to_owned)
+        let mut best_by_key: std::collections::HashMap<(String, u64), SearchHit> =
+            std::collections::HashMap::new();
+        // Over-fetch per strategy so merges still fill `limit` after dedupe.
+        let per_strategy_limit = limit.saturating_mul(3).max(limit).min(1_000);
+
+        for strategy in full_text_query_strategies(query) {
+            let Ok(parsed) = parser.parse_query(&strategy) else {
+                continue;
+            };
+            let Ok(top_docs) =
+                searcher.search(&parsed, &TopDocs::with_limit(per_strategy_limit).order_by_score())
             else {
                 continue;
             };
-            let page = doc
-                .get_first(self.fields.page)
-                .and_then(|value| value.as_u64())
-                .unwrap_or_default();
-            hits.push(SearchHit { id, page, score });
+
+            for (score, address) in top_docs {
+                let Ok(doc) = searcher.doc::<TantivyDocument>(address) else {
+                    continue;
+                };
+                let Some(id) = doc
+                    .get_first(self.fields.id)
+                    .and_then(|value| value.as_str())
+                    .map(ToOwned::to_owned)
+                else {
+                    continue;
+                };
+                let page = doc
+                    .get_first(self.fields.page)
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or_default();
+                let key = (id.clone(), page);
+                match best_by_key.get(&key) {
+                    Some(existing) if existing.score >= score => {}
+                    _ => {
+                        best_by_key.insert(key, SearchHit { id, page, score });
+                    }
+                }
+            }
         }
 
+        let mut hits = best_by_key.into_values().collect::<Vec<_>>();
+        hits.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.id.cmp(&right.id))
+                .then_with(|| left.page.cmp(&right.page))
+        });
+        hits.truncate(limit);
         Ok(hits)
     }
 
@@ -305,6 +343,120 @@ impl SearchFields {
             page: schema.get_field("page")?,
         })
     }
+}
+
+/// Build alternate Tantivy query strings for a user-typed library search.
+///
+/// Strategies cover raw input, a boosted title phrase, AND-combined escaped
+/// terms, and prefix wildcards so partial tokens still hit analyzed text.
+fn full_text_query_strategies(query: &str) -> Vec<String> {
+    let mut strategies = Vec::new();
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return strategies;
+    }
+
+    push_unique_strategy(&mut strategies, trimmed.to_owned());
+
+    // Prefer exact phrase hits in title/author/body when the user typed multiple words.
+    let tokens = tokenize_user_query(trimmed);
+    if tokens.len() >= 2 {
+        let phrase = tokens
+            .iter()
+            .map(|token| escape_tantivy_term(token))
+            .collect::<Vec<_>>()
+            .join(" ");
+        push_unique_strategy(&mut strategies, format!("\"{phrase}\""));
+        push_unique_strategy(
+            &mut strategies,
+            tokens
+                .iter()
+                .map(|token| escape_tantivy_term(token))
+                .collect::<Vec<_>>()
+                .join(" AND "),
+        );
+    }
+
+    if !tokens.is_empty() {
+        let wildcard = tokens
+            .iter()
+            .map(|token| {
+                let escaped = escape_tantivy_term(token);
+                if escaped.chars().any(|ch| ch.is_alphanumeric()) {
+                    format!("{escaped}*")
+                } else {
+                    escaped
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        push_unique_strategy(&mut strategies, wildcard);
+
+        // OR of prefixes catches documents that only match one of several tokens strongly.
+        if tokens.len() >= 2 {
+            let any_prefix = tokens
+                .iter()
+                .map(|token| format!("{}*", escape_tantivy_term(token)))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            push_unique_strategy(&mut strategies, format!("({any_prefix})"));
+        }
+    }
+
+    strategies
+}
+
+fn push_unique_strategy(strategies: &mut Vec<String>, strategy: String) {
+    if strategy.trim().is_empty() {
+        return;
+    }
+    if !strategies.iter().any(|existing| existing == &strategy) {
+        strategies.push(strategy);
+    }
+}
+
+fn tokenize_user_query(query: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for ch in query.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            ch if ch.is_whitespace() && !in_quotes => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            ch => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+        .into_iter()
+        .map(|token| token.trim().trim_matches('"').to_owned())
+        .filter(|token| !token.is_empty())
+        // Drop simple field operators meant for the UI metadata matcher.
+        .filter(|token| !token.contains(':') || token.starts_with('"'))
+        .collect()
+}
+
+fn escape_tantivy_term(term: &str) -> String {
+    let mut escaped = String::with_capacity(term.len());
+    for ch in term.chars() {
+        match ch {
+            '+' | '-' | '&' | '|' | '!' | '(' | ')' | '{' | '}' | '[' | ']' | '^' | '"' | '~'
+            | '*' | '?' | ':' | '\\' | '/' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 /// True when `path` looks like an existing Tantivy index (meta file or lock present).

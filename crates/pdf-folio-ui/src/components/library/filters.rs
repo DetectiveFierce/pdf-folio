@@ -5,91 +5,21 @@
 //! search tasks call these without holding iced or `Db` state.
 //!
 //! Title/author strings come from [`super::metadata`]; reading buckets pair
-//! with [`super::state::LibraryReadingFilter`]. Search-hit field labels feed
-//! badges on filtered result rows.
+//! with [`super::state::LibraryReadingFilter`]. Structured query parsing and
+//! ranking live in [`super::search`]; this module re-exports the matching API
+//! and keeps folder/reading helpers.
 
 use pdf_folio_core::{FolderId, LibraryEntry};
 
-use super::metadata::{entry_author, entry_title};
 use super::state::LibraryReadingFilter;
 
-/// Whether an entry matches a free-text library query.
-pub fn entry_matches_query(entry: &LibraryEntry, normalized_query: &str) -> bool {
-    entry_search_fields_match(
-        &entry_title(entry),
-        &entry_author(entry),
-        &entry.path.to_string_lossy(),
-        entry.tags.iter().map(String::as_str),
-        entry.folders.iter().map(|folder| folder.name.as_str()),
-        normalized_query,
-    )
-}
-
-/// Label describing which field matched a search hit.
-pub fn search_match_source_label(entry: &LibraryEntry, normalized_query: &str) -> Option<String> {
-    search_match_source_label_for_fields(
-        &entry_title(entry),
-        &entry_author(entry),
-        &entry.path.to_string_lossy(),
-        entry.tags.iter().map(String::as_str),
-        entry.folders.iter().map(|folder| folder.name.as_str()),
-        normalized_query,
-    )
-}
-
-/// Which field (title/author/tag/folder/path) matched, for search hit badges.
-pub fn search_match_source_label_for_fields<'a>(
-    title: &str,
-    author: &str,
-    path: &str,
-    tags: impl IntoIterator<Item = &'a str>,
-    folder_names: impl IntoIterator<Item = &'a str>,
-    normalized_query: &str,
-) -> Option<String> {
-    if normalized_query.is_empty() {
-        return None;
-    }
-
-    if title.to_lowercase().contains(normalized_query) {
-        Some(String::from("Match in title"))
-    } else if author.to_lowercase().contains(normalized_query) {
-        Some(String::from("Match in author"))
-    } else if tags
-        .into_iter()
-        .any(|tag| tag.to_lowercase().contains(normalized_query))
-    {
-        Some(String::from("Match in tag"))
-    } else if folder_names
-        .into_iter()
-        .any(|folder| folder.to_lowercase().contains(normalized_query))
-    {
-        Some(String::from("Match in folder"))
-    } else if path.to_lowercase().contains(normalized_query) {
-        Some(String::from("Match in path"))
-    } else {
-        None
-    }
-}
-
-/// Whether any of the provided fields contains the normalized query substring.
-pub fn entry_search_fields_match<'a>(
-    title: &str,
-    author: &str,
-    path: &str,
-    tags: impl IntoIterator<Item = &'a str>,
-    folder_names: impl IntoIterator<Item = &'a str>,
-    normalized_query: &str,
-) -> bool {
-    title.to_lowercase().contains(normalized_query)
-        || author.to_lowercase().contains(normalized_query)
-        || path.to_lowercase().contains(normalized_query)
-        || tags
-            .into_iter()
-            .any(|tag| tag.to_lowercase().contains(normalized_query))
-        || folder_names
-            .into_iter()
-            .any(|folder| folder.to_lowercase().contains(normalized_query))
-}
+#[allow(unused_imports)] // Re-exported for domain/tests callers via `library::filters`.
+pub use super::search::{
+    entry_matches_query, entry_matches_search_query, entry_search_fields_match,
+    parse_library_search_query, score_entry_match, search_match_source_label,
+    search_match_source_label_for_fields, search_match_source_label_for_query, LibrarySearchQuery,
+    SearchField, SearchTerm,
+};
 
 /// Map an entry to a [`LibraryReadingFilter`] bucket from saved progress.
 pub fn library_entry_reading_state(entry: &LibraryEntry) -> LibraryReadingFilter {

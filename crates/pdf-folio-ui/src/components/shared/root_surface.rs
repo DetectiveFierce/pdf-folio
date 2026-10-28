@@ -7,11 +7,12 @@
 //!
 //! ## Scroll-stable overlay stack
 //!
-//! Floating chrome (zoom menu, visibility menu, context menu, command palette)
-//! always occupies a fixed three-layer stack: base content, capture layer, menu
-//! panel. When nothing is open the upper slots are zero-size placeholders.
-//! Switching between a bare base and a stack remounts the viewer scrollable and
-//! jumps reading position to the origin — keep the stack shape stable.
+//! Floating chrome (zoom menu, page-view menu, visibility menu, context menu,
+//! command palette) always occupies a fixed three-layer stack: base content,
+//! capture layer, menu panel. When nothing is open the upper slots are
+//! zero-size placeholders. Switching between a bare base and a stack remounts
+//! the viewer scrollable and jumps reading position to the origin — keep the
+//! stack shape stable.
 //!
 //! ## Ownership
 //!
@@ -35,8 +36,8 @@ use crate::components::shared::loading::{
 };
 use crate::components::shared::menus::view_library_switcher;
 use crate::components::viewer::toolbar::{
-    view_visibility_menu_dropdown, view_zoom_menu_dropdown, visibility_menu_capture_layer,
-    zoom_menu_capture_layer,
+    page_view_menu_capture_layer, view_page_view_menu_dropdown, view_visibility_menu_dropdown,
+    view_zoom_menu_dropdown, visibility_menu_capture_layer, zoom_menu_capture_layer,
 };
 use crate::library::view::{
     floating_folder_drag_preview, floating_library_drag_preview, view_confirmation_dialog,
@@ -94,6 +95,11 @@ pub(crate) fn view(app: &PDFolioApp) -> Element<'_, Message> {
             (
                 zoom_menu_capture_layer(app),
                 view_zoom_menu_dropdown(app, tokens),
+            )
+        } else if app.viewer.page_view_menu_open {
+            (
+                page_view_menu_capture_layer(app),
+                view_page_view_menu_dropdown(app, tokens),
             )
         } else if app.viewer.visibility_menu_open {
             (
