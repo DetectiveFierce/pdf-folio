@@ -37,6 +37,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
 const CONTENT = join(ROOT, "content");
 const THEME = join(ROOT, "theme");
+const UI = process.env.MIND_PALACE_UI || join(ROOT, "../../design-system");
 const OUT = join(ROOT, "site");
 const NAV_PATH = join(ROOT, "nav.json");
 const RELATED_PATH = join(ROOT, "related.json");
@@ -179,6 +180,14 @@ function createRenderer() {
     return `<h${depth} id="${id}"><a class="anchor" href="#${id}" aria-hidden="true">#</a>${inner}</h${depth}>\n`;
   };
 
+  let listing = 0;
+  const baseCode = renderer.code.bind(renderer);
+  renderer.code = function (token) {
+    listing++;
+    const caption = token.lang?.split(/\s+caption=/)[1];
+    const label = caption || (listing === 1 && /library::update|fn update\(/.test(token.text) ? "The single routing point." : "Source excerpt.");
+    return `<figure class="code-listing">${baseCode(token)}<figcaption><span>Listing ${listing}.</span> ${escapeHtml(label)}</figcaption></figure>`;
+  };
   // Keep default for everything else; allow raw HTML
   return { renderer, headings };
 }
@@ -351,14 +360,14 @@ function buildSidebar(nav, pageMap, currentOutRel) {
     const groupId = group.label
       ? "g-" + slugify(group.label)
       : "g-root";
-    const collapsed = group.collapsed === true;
+    const collapsed = group.chapter !== "1" && !(group.items || []).some(item => navSubtreeContainsOutRel(item, pageMap, currentOutRel));
 
     parts.push(`<div class="nav-group${collapsed ? " is-collapsed" : ""}" data-group="${groupId}">`);
     if (group.label) {
       parts.push(
         `<button type="button" class="nav-group-toggle" aria-expanded="${collapsed ? "false" : "true"}">` +
-          `<span class="nav-chevron" aria-hidden="true"></span>` +
-          `<span class="nav-group-label">${escapeHtml(group.label)}</span>` +
+          `<span class="chapter-number" aria-hidden="true">${escapeHtml(group.chapter || "")}</span>` +
+          `<span class="nav-group-label">${escapeHtml(group.label === "Reference" ? "Glossary" : group.label === "API Reference" ? "API reference" : group.label)}</span>` +
           `</button>`
       );
     }
@@ -382,10 +391,10 @@ function buildSidebar(nav, pageMap, currentOutRel) {
         `<div class="nav-item${isActive ? " is-active" : ""}${hasChildren ? " has-children" : ""}${subtreeActive && !isActive ? " has-active-desc" : ""}">`
       );
       parts.push(
-        `<a class="nav-link top${isActive ? " active" : ""}" href="${href}">${escapeHtml(item.title)}</a>`
+        `<a class="nav-link top${isActive ? " active" : ""}" href="${href}">${item.number ? `<span class="nav-number">${escapeHtml(item.number)}</span> ` : ""}${escapeHtml(item.title)}</a>`
       );
 
-      if (hasChildren) {
+      if (hasChildren && group.id === "api") {
         parts.push(
           renderNavChildTree(
             item.children,
@@ -784,6 +793,20 @@ function build() {
     process.exit(1);
   }
 
+  const chapterNumbers = { Architecture: "1", Crates: "2", Subsystems: "3", "API Reference": "4", Operations: "5", Reference: "6" };
+  for (const group of nav.groups) {
+    group.chapter = chapterNumbers[group.label] || "";
+    let ordinal = 0;
+    for (const item of group.items || []) {
+      const page = pageMap.get(item.path);
+      if (!page) continue;
+      ordinal++;
+      page.chapter = group.label === "Reference" ? "Glossary" : group.label || "Maintainer guide";
+      page.sectionNumber = group.chapter ? `${group.chapter}.${ordinal}` : "";
+      item.number = page.sectionNumber;
+    }
+  }
+
   const relatedMap = loadRelatedMap();
 
   // Render markdown for each page
@@ -838,6 +861,15 @@ function build() {
     cpSync(assetsSrc, assetsDst, { recursive: true });
   }
 
+  // Build output owns a generated bundle, never a second source of the design system.
+  // Docs are also distributed without the gateway, so package the shared stylesheet
+  // and fonts together. MIND_PALACE_UI can point to an installed central package.
+  ensureDir(join(assetsDst, "ui"));
+  for (const name of ["mind-palace.css", "tokens.css", "fonts.css", "components.css"]) {
+    cpSync(join(UI, name), join(assetsDst, "ui", name));
+  }
+  cpSync(join(UI, "fonts"), join(assetsDst, "ui", "fonts"), { recursive: true });
+
   // Emit pages
   for (let i = 0; i < allOrdered.length; i++) {
     const page = allOrdered[i];
@@ -849,6 +881,10 @@ function build() {
 
     const html = renderTemplate(layout, {
       title: page.title,
+      display_title: page.title === "Architecture Overview" ? "Architecture overview" : page.title,
+      section_number: page.sectionNumber,
+      chapter: page.chapter,
+      chapter_label: page.sectionNumber ? `Chapter ${page.sectionNumber}` : "Maintainer guide",
       description: page.description || page.lede || page.title,
       eyebrow: page.eyebrow,
       lede: page.lede,

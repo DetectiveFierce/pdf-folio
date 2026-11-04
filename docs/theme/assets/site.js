@@ -287,6 +287,8 @@
       const el = document.getElementById(id);
       if (el) observer.observe(el);
     });
+    const first = byId.keys().next().value;
+    if (first) setActive(first);
   }
 
   // ── full-site search ────────────────────────────────────────────────────
@@ -430,8 +432,10 @@
 
     let activeIdx = -1;
     let currentHits = [];
+    let returnFocus = null;
 
-    const open = async () => {
+    const open = (trigger = document.activeElement) => {
+      returnFocus = trigger;
       modal.hidden = false;
       document.body.style.overflow = "hidden";
       input.value = "";
@@ -447,9 +451,21 @@
     const close = () => {
       modal.hidden = true;
       document.body.style.overflow = "";
+      if (returnFocus instanceof HTMLElement) returnFocus.focus();
     };
 
-    triggers.forEach((el) => el?.addEventListener("click", open));
+    $("#searchClose")?.addEventListener("click", close);
+    modal.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); close(); return; }
+      if (event.key !== "Tab") return;
+      const focusable = $$("input,button,a[href],[tabindex='0']", modal).filter(node => !node.hidden && !node.disabled);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    });
+
+    triggers.forEach((el) => el?.addEventListener("click", () => open(el)));
 
     modal.addEventListener("click", (e) => {
       if (e.target === modal) close();
@@ -548,9 +564,6 @@
         if (activeIdx >= 0 && items[activeIdx]) {
           window.location.href = items[activeIdx].href;
         }
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        close();
       }
     });
 
