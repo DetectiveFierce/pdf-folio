@@ -90,7 +90,7 @@ API module pages still get their own See also from `extract-rustdoc.mjs` (parent
 The builder is intentionally small: parse frontmatter, run Markdown through `marked`, apply a single HTML layout, emit a JSON search index, copy assets. No React, no MDX, no plugin ecosystem. Theme CSS reuses the espresso palette from the legacy guide.
 
 The redesigned theme uses the central Mind Palace UI package. Builds resolve it from
-`../../design-system` relative to `docs/`; set `MIND_PALACE_UI` to another installed
+`../../../packages/design-system` relative to `docs/` in the Mind Palace monorepo; set `MIND_PALACE_UI` to another installed
 package directory when building an independent checkout. The generator packages its
 stylesheet, tokens, components and self-hosted fonts into ignored `site/assets/ui/`
 build output. It never maintains a second source copy. The `<html data-theme="folio">`
